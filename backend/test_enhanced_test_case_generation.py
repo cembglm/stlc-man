@@ -445,7 +445,7 @@ class DataValidator:
                             print(f"         Test Steps: {len(tc_steps)} steps")
                             
                             # Check for enhanced fields
-                            has_enhanced = all(field in tc for field in ['Prerequisites', 'TestSteps', 'ExpectedResults', 'TestData'])
+                            has_enhanced = all(field in tc for field in ['Comments'])
                             print(f"         Enhanced Structure: {'✅' if has_enhanced else '❌'}")
                     else:
                         error = result.get('error', 'Unknown error')

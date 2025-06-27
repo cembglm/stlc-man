@@ -90,19 +90,14 @@ You MUST respond with a valid JSON object following this exact structure:
 3. **Titles should be specific and descriptive** of the functionality being tested
 4. **Descriptions must explain the purpose and scope** of each test scenario
 5. **Objectives should be clear, measurable, and testable**
-6. **Prerequisites must be realistic and achievable** 
-7. **Test steps should be detailed, sequential, and actionable**
-8. **Expected results should be specific and verifiable**
-9. **Comments should include relevant notes** about edge cases or special considerations
-10. **Include both positive and negative test cases** where appropriate
-11. **Ensure ISTQB compliance** and follow industry best practices
-12. **Focus on practical, executable scenarios** that provide real testing value
+6. **Comments should include relevant notes** about edge cases or special considerations
+7. **Include both positive and negative test cases** where appropriate
+8. **Ensure ISTQB compliance** and follow industry best practices
+9. **Focus on practical, executable scenarios** that provide real testing value
 
 ## IMPORTANT GUIDELINES
 - Generate comprehensive scenarios that cover different testing aspects
 - Ensure each scenario tests unique functionality or conditions
-- Make prerequisites realistic and achievable in a testing environment
-- Write clear, actionable test steps that any tester can follow
 - Include proper validation steps in your test scenarios
 - Consider edge cases and error conditions
 - Ensure JSON output is valid and properly formatted
@@ -470,15 +465,6 @@ Respond ONLY with a valid JSON object with this EXACT structure (no other text):
       "Description": "Detailed description of what this test scenario covers and why it's important",
       "Objective": "What this test aims to verify or validate",
       "Category": "{test_category}",
-      "Priority": "High",
-      "Prerequisites": ["Precondition 1", "Precondition 2"],
-      "TestSteps": [
-        "Step 1: Clear action to perform",
-        "Step 2: Another specific action",
-        "Step 3: Final verification step"
-      ],
-      "ExpectedResults": "What should happen when test steps are executed correctly",
-      "TestData": "Sample data or data requirements for this test",
       "Comments": "Additional notes, assumptions, or considerations"
     }}
   ],

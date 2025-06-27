@@ -367,22 +367,11 @@ You MUST respond with a valid JSON object in this exact structure:
             "Title": "<Clear and descriptive test case title>",
             "Description": "<Detailed test case description explaining what is being tested and why it's important>",
             "Objective": "<Specific objective of this test case>",
-            "Category": "<Test category: Positive, Negative, Boundary, Security, Performance, etc.>",
-            "Priority": "<High, Medium, Low>",
-            "Prerequisites": ["<Precondition 1>", "<Precondition 2>"],
-            "TestSteps": [
-                "Step 1: <Clear action to perform>",
-                "Step 2: <Another specific action>",
-                "Step 3: <Final verification step>"
-            ],
-            "ExpectedResults": "<What should happen when test steps are executed correctly>",
-            "TestData": "<Sample data or data requirements for this test>",
             "Comments": "<Additional notes, assumptions, or considerations>"
         }
     ],
     "Summary": {
         "TotalTestCases": 1,
-        "Categories": {"<Category>": 1},
         "Coverage": "<Brief description of test case coverage>"
     }
 }
@@ -408,23 +397,11 @@ You MUST respond with a valid JSON object in this exact structure:
             "Title": "Verify Login with Valid Credentials",
             "Description": "Test that a user can successfully log in with valid username and password, ensuring proper authentication and session management.",
             "Objective": "Validate user authentication mechanism with correct credentials",
-            "Category": "Positive",
-            "Priority": "High",
-            "Prerequisites": ["User account exists in system", "Application is accessible"],
-            "TestSteps": [
-                "Step 1: Navigate to login page",
-                "Step 2: Enter valid username and password",
-                "Step 3: Click login button",
-                "Step 4: Verify successful login and redirection"
-            ],
-            "ExpectedResults": "User should be successfully authenticated and redirected to dashboard",
-            "TestData": "Username: testuser@example.com, Password: ValidPass123",
             "Comments": "Ensure session timeout is properly configured"
         }
     ],
     "Summary": {
         "TotalTestCases": 1,
-        "Categories": {"Positive": 1},
         "Coverage": "Authentication functionality validation"
     }
 }

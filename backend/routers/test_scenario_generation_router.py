@@ -227,15 +227,6 @@ Generate comprehensive test scenarios based on the above prompt and file content
       "Description": "Detailed description of what this test scenario covers",
       "Objective": "What this test aims to verify or validate",
       "Category": "Functional/Non-Functional/Security/Performance/etc.",
-      "Priority": "High/Medium/Low",
-      "Prerequisites": ["List of preconditions required before executing this test"],
-      "TestSteps": [
-        "Step 1: Clear action to perform",
-        "Step 2: Another specific action",
-        "Step 3: Final verification step"
-      ],
-      "ExpectedResults": "What should happen when test steps are executed correctly",
-      "TestData": "Sample data or data requirements for this test",
       "Comments": "Additional notes, assumptions, or considerations"
     }}
   ],
@@ -761,22 +752,11 @@ async def generate_test_cases_for_scenarios(request: Request):
       "Title": "<Clear and descriptive test case title>",
       "Description": "<Detailed test case description explaining what is being tested and why it's important>",
       "Objective": "<Specific objective of this test case>",
-      "Category": "<Test category: Positive, Negative, Boundary, Security, Performance, etc.>",
-      "Priority": "<High, Medium, Low>",
-      "Prerequisites": ["<Precondition 1>", "<Precondition 2>"],
-      "TestSteps": [
-        "Step 1: <Clear action to perform>",
-        "Step 2: <Another specific action>",
-        "Step 3: <Final verification step>"
-      ],
-      "ExpectedResults": "<What should happen when test steps are executed correctly>",
-      "TestData": "<Sample data or data requirements for this test>",
       "Comments": "<Additional notes, assumptions, or considerations>"
     }
   ],
   "Summary": {
     "TotalTestCases": 1,
-    "Categories": {"<Category>": 1},
     "Coverage": "<Brief description of test case coverage>"
   }
 }"""
@@ -804,24 +784,11 @@ Respond ONLY with a valid JSON object with this EXACT structure (no other text):
             instructions = """
 
 ## ENHANCED INSTRUCTIONS FOR TEST CASE GENERATION (Token-Optimized):
-Generate 7-8 comprehensive test cases specifically for the above test scenario. Each test case should cover different aspects:
-
-1. **Positive Testing:** Happy path scenarios with valid inputs
-2. **Negative Testing:** Error handling and invalid input scenarios  
-3. **Boundary Testing:** Edge cases and boundary value testing
-4. **Data Validation:** Input validation and data integrity tests
-5. **Performance Testing:** Load and performance considerations (if applicable)
-6. **Security Testing:** Security-related test cases (if applicable)
-7. **Integration Testing:** Component integration tests (if applicable)
-8. **Edge Cases:** Unusual or exceptional scenarios
+Generate 7-8 comprehensive test cases specifically for the above test scenario. 
+Each test case should cover different aspects.
 
 ## ENHANCED REQUIREMENTS FOR TEST CASES:
 - Each test case must have unique TestCaseID within the scenario scope
-- Include detailed TestSteps with clear, actionable instructions
-- Specify Prerequisites that are realistic and achievable
-- Define ExpectedResults that are specific and verifiable
-- Add TestData with sample data or data requirements
-- Include Priority levels (High, Medium, Low) based on business impact
 - Categorize properly (Positive, Negative, Boundary, Security, Performance, etc.)
 - Add meaningful Comments with assumptions or special considerations
 
@@ -829,12 +796,11 @@ Generate 7-8 comprehensive test cases specifically for the above test scenario. 
 - Focus specifically on the scenario described above
 - Ensure each test case is unique and adds value
 - Make test cases directly related to the scenario objectives
-- Write executable and practical test procedures
+- Write practical test procedures
 - Include comprehensive validation steps
 - Consider both functional and non-functional aspects
-- Ensure proper test data coverage
 
-Generate between 7-8 detailed test cases that thoroughly validate this specific scenario with enhanced structure. Start your response immediately with the JSON object."""
+Generate between 7-8 detailed test cases that thoroughly validate this specific scenario with simplified structure. Start your response immediately with the JSON object."""
 
             # Combine all parts with token awareness (similar to Test Scenario Generation)
             scenario_prompt = scenario_info + json_structure + instructions
@@ -996,11 +962,6 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                             "Description": tc.get("Description", f"Test case for validating {scenario_title}"),
                             "Objective": tc.get("Objective", f"Verify functionality of {scenario_title}"),
                             "Category": tc.get("Category", "Positive"),
-                            "Priority": tc.get("Priority", "Medium"),
-                            "Prerequisites": tc.get("Prerequisites", ["System is accessible and configured"]) if isinstance(tc.get("Prerequisites"), list) else [tc.get("Prerequisites", "System is accessible and configured")],
-                            "TestSteps": tc.get("TestSteps", ["Execute test actions", "Verify results"]) if isinstance(tc.get("TestSteps"), list) else [tc.get("TestSteps", "Execute test actions")],
-                            "ExpectedResults": tc.get("ExpectedResults", "System behaves according to requirements"),
-                            "TestData": tc.get("TestData", "Sample test data as needed"),
                             "Comments": tc.get("Comments", "Review and enhance as needed")
                         }
                         enhanced_test_cases.append(enhanced_tc)
@@ -1078,21 +1039,7 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                             "Title": title,
                             "Description": f"Comprehensive test case for validating {scenario_title}. This test case was auto-generated from the scenario requirements.",
                             "Objective": f"Verify the functionality and behavior of {scenario_title}",
-                            "Category": ["Positive", "Negative", "Boundary", "Security", "Performance"][idx % 5],
-                            "Priority": "Medium",
-                            "Prerequisites": [
-                                "System is accessible and functional",
-                                "Test environment is properly configured",
-                                "Required test data is available"
-                            ],
-                            "TestSteps": [
-                                "Step 1: Prepare test environment and verify prerequisites",
-                                "Step 2: Execute the main test scenario actions",
-                                "Step 3: Validate expected results and outcomes",
-                                "Step 4: Verify system state after test execution"
-                            ],
-                            "ExpectedResults": f"The system should behave according to the requirements specified in {scenario_title}",
-                            "TestData": "Sample test data as required by the test scenario",
+                            "Category": "Positive",
                             "Comments": "Auto-generated test case. Please review and enhance based on specific requirements."
                         }
                         fallback_test_cases.append(test_case)
@@ -1125,11 +1072,6 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                         "Description": f"Basic test case generated for {scenario_title}",
                         "Objective": f"Verify basic functionality of {scenario_title}",
                         "Category": "Positive",
-                        "Priority": "Medium",
-                        "Prerequisites": ["System is accessible"],
-                        "TestSteps": ["Execute basic test scenario", "Verify results"],
-                        "ExpectedResults": "System behaves as expected",
-                        "TestData": "Basic test data",
                         "Comments": "Emergency fallback test case"
                     }
                     
@@ -1137,7 +1079,6 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                         "TestCases": [fallback_test_case],
                         "Summary": {
                             "TotalTestCases": 1,
-                            "Categories": {"Positive": 1},
                             "Coverage": "Emergency fallback test case"
                         }
                     }

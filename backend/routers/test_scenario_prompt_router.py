@@ -129,9 +129,6 @@ Each test case should include:
 - Description
 - Objective
 - Category
-- Pre-conditions
-- Test Steps
-- Expected Results
 
 Focus on creating test cases that are:
 - Clear and unambiguous

@@ -21,19 +21,13 @@ For each test scenario provided, generate multiple test cases that thoroughly va
 - Detailed description of what is being tested
 - Specific objective of the test
 - Test category (Positive, Negative, Boundary, etc.)
-- Priority level (High, Medium, Low)
-- Prerequisites needed before execution
-- Step-by-step test execution steps
-- Expected results
-- Test data requirements
 - Additional comments or notes
 
 Ensure test cases are:
 1. Comprehensive and cover different testing aspects
-2. Executable with clear, unambiguous steps
-3. Focused on the specific scenario objectives
-4. Include both happy path and error scenarios
-5. Consider edge cases and boundary conditions
+2. Focused on the specific scenario objectives
+3. Include both happy path and error scenarios
+4. Consider edge cases and boundary conditions
 
 JSON Output Structure:
 
@@ -46,11 +40,6 @@ JSON Output Structure:
             "Description": "<Detailed test case description>",
             "Objective": "<Objective of the test case>",
             "Category": "<Test Category>",
-            "Priority": "<Priority Level>",
-            "Prerequisites": ["<List of prerequisites>"],
-            "TestSteps": ["<Step 1>", "<Step 2>", "<Step N>"],
-            "ExpectedResults": "<Expected outcome>",
-            "TestData": "<Required test data>",
             "Comments": "<Additional notes>"
         }
     ]

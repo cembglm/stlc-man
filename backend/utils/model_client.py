@@ -83,7 +83,7 @@ class LLMClient:
         model_mapping = {
         "codegeex4:9b": "codegeex4-all-9b",
         "codellama:7b": "codellama-7b-instruct",
-        "deepseek-coder: 6.7B": "deepseek-coder-6.7b-instruct",
+        "deepseek-coder:6.7b": "deepseek-coder-6.7b-instruct",
         "gemma2:2b": "gemma-2-2b-it",
         "gemma3:4b": "gemma-3-4b-it",
         "llama3.2:3b": "llama-3.2-3b-instruct",
@@ -133,7 +133,7 @@ class LLMClient:
             response = requests.post(
                 f"{self.api_url}/chat/completions", 
                 json=payload, 
-                timeout=60  # 60 second timeout
+                timeout=300  # 300 second timeout (5 minutes) for complex test case generation
             )
             response.raise_for_status()
             
@@ -150,7 +150,7 @@ class LLMClient:
             return result
         except requests.Timeout as e:
             self.logger.error(f"Timeout error when calling LLM API with model {actual_model}: {str(e)}")
-            raise TimeoutError(f"LLM API request timed out after 60 seconds")
+            raise TimeoutError(f"LLM API request timed out after 300 seconds (5 minutes)")
         except requests.RequestException as e:
             self.logger.error(f"LLM API Error with model {actual_model}: {str(e)}")
             if hasattr(e, 'response') and e.response is not None:

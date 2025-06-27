@@ -219,65 +219,73 @@ class TestCaseOptimizationService:
     def get_test_cases_by_process_title(self, process_title: str) -> List[Dict[str, Any]]:
         """
         Belirli bir process_title için tüm test case'leri getir.
-        Önce test_case_generation sonuçlarını kontrol et, sonra test_scenario_generation'a bak.
+        Session_history collection'ından test_case_generation sonuçlarını kontrol et.
         """
         try:
             all_test_cases = []
             
-            # First, try to get test cases from test_case_generation (actual generated test cases)
-            documents = self.collection.find(
-                {"processes.test_case_generation.output.data.test_case_results.metadata.selected_process_title": process_title},
-                {"processes.test_case_generation": 1}
-            )
+            # Search in session_history for test_case_generation results
+            # Use the CORRECT path: processes.test_case_generation.output.test_case_results
+            documents = list(self.collection.find(
+                {"processes.test_case_generation.selected_process_title": process_title},
+                {"processes.test_case_generation": 1, "session_id": 1}
+            ))
             
-            for doc in documents:
+            logger.info(f"Found {len(documents)} documents with test_case_generation for {process_title}")
+            
+            for doc_idx, doc in enumerate(documents):
+                session_id = doc.get("session_id", f"unknown_{doc_idx}")
                 test_case_gen_data = doc.get("processes", {}).get("test_case_generation", {})
-                output_data = test_case_gen_data.get("output", {}).get("data", {})
+                output_data = test_case_gen_data.get("output", {})
                 test_case_results = output_data.get("test_case_results", [])
                 
+                logger.info(f"Document {doc_idx+1} (Session: {session_id}): Found {len(test_case_results)} test_case_results")
+                
                 # Iterate through each scenario's test cases
-                for result in test_case_results:
-                    metadata = result.get("metadata", {})
-                    if metadata.get("selected_process_title") == process_title:
-                        if result.get("status") == "success" and "test_cases" in result:
-                            scenario_id = result.get("scenario_id", "Unknown")
-                            test_cases = result.get("test_cases", [])
-                            selected_category = metadata.get("selected_category", "Unknown")
-                            selected_test_type = metadata.get("selected_test_type", "Unknown")
+                for result_idx, result in enumerate(test_case_results):
+                    # Since we searched by process_title, all results should match
+                    if result.get("status") == "success" and "test_cases" in result:
+                        scenario_id = result.get("scenario_id", f"Unknown_{doc_idx}_{result_idx}")
+                        test_cases = result.get("test_cases", [])
+                        metadata = result.get("metadata", {})
+                        selected_category = metadata.get("selected_category", "Unknown")
+                        selected_test_type = metadata.get("selected_test_type", "Unknown")
+                        
+                        logger.info(f"  Result {result_idx+1}: {len(test_cases)} test cases for scenario {scenario_id}")
+                        
+                        # ADD ALL TEST CASES from this scenario, not just one!
+                        for tc_idx, test_case in enumerate(test_cases):
+                            test_case_id = test_case.get("TestCaseID", f"TC_{scenario_id}_{tc_idx}")
+                            title = test_case.get("Title", "No Title")
+                            description = test_case.get("Description", "No Description")
+                            objective = test_case.get("Objective", "No Objective")
+                            category = test_case.get("Category", "No Category")
                             
-                            for idx, test_case in enumerate(test_cases):
-                                test_case_id = test_case.get("TestCaseID", f"TC_{scenario_id}_{idx}")
-                                title = test_case.get("Title", "No Title")
-                                description = test_case.get("Description", "No Description")
-                                objective = test_case.get("Objective", "No Objective")
-                                category = test_case.get("Category", "No Category")
-                                
-                                all_test_cases.append({
-                                    "ScenarioID": scenario_id,
-                                    "TestCaseID": test_case_id,
-                                    "Title": title,
-                                    "Description": description,
-                                    "Objective": objective,
-                                    "Category": category,
-                                    "Priority": test_case.get("Priority", "Medium"),
-                                    "Prerequisites": test_case.get("Prerequisites", []),
-                                    "TestSteps": test_case.get("TestSteps", []),
-                                    "ExpectedResults": test_case.get("ExpectedResults", ""),
-                                    "TestData": test_case.get("TestData", ""),
-                                    "Comments": test_case.get("Comments", ""),
-                                    "SelectedCategory": selected_category,
-                                    "SelectedTestType": selected_test_type,
-                                    "unique_key": f"{test_case_id}_{selected_category}_{selected_test_type}"
-                                })
+                            all_test_cases.append({
+                                "ScenarioID": scenario_id,
+                                "TestCaseID": test_case_id,
+                                "Title": title,
+                                "Description": description,
+                                "Objective": objective,
+                                "Category": category,
+                                "Comments": test_case.get("Comments", ""),
+                                "SelectedCategory": selected_category,
+                                "SelectedTestType": selected_test_type,
+                                "SessionID": session_id,
+                                "unique_key": f"{test_case_id}_{selected_category}_{selected_test_type}_{doc_idx}_{tc_idx}"
+                            })
             
             # If no test cases found from test_case_generation, fallback to test_scenario_generation (scenarios only)
             if not all_test_cases:
-                documents = self.collection.find(
+                scenario_documents = list(self.collection.find(
                     {"processes.test_scenario_generation.process_title": process_title},
-                    {"processes.test_scenario_generation": 1}
-                )
+                    {"processes.test_scenario_generation": 1, "session_id": 1}
+                ))
                 
-                for doc in documents:
+                logger.info(f"Found {len(scenario_documents)} documents with test_scenario_generation for {process_title}")
+                
+                for doc_idx, doc in enumerate(scenario_documents):
+                    session_id = doc.get("session_id", f"unknown_{doc_idx}")
                     test_generation_data = doc.get("processes", {}).get("test_scenario_generation", {})
                     test_scenarios = test_generation_data.get("output", {}).get("test_scenarios", {})
                     selected_category = test_generation_data.get("selected_category", "Unknown")
@@ -290,8 +298,10 @@ class TestCaseOptimizationService:
                     elif isinstance(test_scenarios, list):
                         scenarios_list = test_scenarios
                     
+                    logger.info(f"Scenario Document {doc_idx+1}: Found {len(scenarios_list)} scenarios")
+                    
                     for idx, scenario in enumerate(scenarios_list):
-                        scenario_id = scenario.get("ScenarioID", f"Scenario_{idx}")
+                        scenario_id = scenario.get("ScenarioID", f"Scenario_{doc_idx}_{idx}")
                         title = scenario.get("Title", "No Title")
                         description = scenario.get("Description", "No Description")
                         objective = scenario.get("Objective", "No Objective")
@@ -308,10 +318,11 @@ class TestCaseOptimizationService:
                             "Comments": comments,
                             "SelectedCategory": selected_category,
                             "SelectedTestType": selected_test_type,
-                            "unique_key": f"{scenario_id}_{selected_category}_{selected_test_type}"
+                            "SessionID": session_id,
+                            "unique_key": f"{scenario_id}_{selected_category}_{selected_test_type}_{doc_idx}"
                         })
             
-            logger.info(f"Found {len(all_test_cases)} test cases for process_title: {process_title}")
+            logger.info(f"Total found {len(all_test_cases)} test cases for process_title: {process_title}")
             return all_test_cases
         except Exception as e:
             logger.error(f"Error fetching test cases for process_title {process_title}: {e}")

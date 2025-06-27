@@ -34,15 +34,6 @@ test_data = {
       "Description": "Detailed description of the test case",
       "Objective": "What this test case aims to verify",
       "Category": "Functional/Non-Functional/Security/etc.",
-      "Priority": "High/Medium/Low",
-      "Prerequisites": ["List of preconditions"],
-      "TestSteps": [
-        "Step 1: Action to perform",
-        "Step 2: Another action",
-        "Step 3: Verification step"
-      ],
-      "ExpectedResults": "What should happen when steps are executed",
-      "TestData": "Sample data requirements",
       "Comments": "Additional notes"
     }
   ]

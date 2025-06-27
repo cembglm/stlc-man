@@ -219,7 +219,7 @@ async def test_large_token_test_case_generation():
                                     print(f"         Test Steps: {len(tc.get('TestSteps', []))} steps")
                                     
                                     # Check enhanced structure
-                                    required_fields = ['ScenarioID', 'TestCaseID', 'Title', 'Description', 'Objective', 'Category', 'Priority', 'Prerequisites', 'TestSteps', 'ExpectedResults', 'TestData', 'Comments']
+                                    required_fields = ['ScenarioID', 'TestCaseID', 'Title', 'Description', 'Objective', 'Category', 'Comments']
                                     has_all_fields = all(field in tc for field in required_fields)
                                     print(f"         Enhanced Structure: {'✅' if has_all_fields else '❌'}")
                             else:

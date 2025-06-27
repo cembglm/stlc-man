@@ -4,6 +4,48 @@ import { useSelector } from 'react-redux';
 import { Gantt, ViewMode } from 'gantt-task-react';
 import "gantt-task-react/dist/index.css";
 
+// Helper function to safely render children in ReactMarkdown components
+const safeRenderChildren = (children) => {
+  if (children === null || children === undefined) {
+    return '';
+  }
+  
+  // If it's a string or number, return as is
+  if (typeof children === 'string' || typeof children === 'number' || typeof children === 'boolean') {
+    return children;
+  }
+  
+  // If it's a React element, return its text content or a placeholder
+  if (React.isValidElement(children)) {
+    return '[React Element]';
+  }
+  
+  // If it's an array, process each item
+  if (Array.isArray(children)) {
+    return children.map(child => safeRenderChildren(child)).join('');
+  }
+  
+  // If it's a DOM node, return its text content
+  if (children && typeof children === 'object' && children.nodeType) {
+    return children.textContent || '[DOM Node]';
+  }
+  
+  // For other objects, try to convert to JSON, but handle circular references
+  if (typeof children === 'object') {
+    try {
+      return JSON.stringify(children);
+    } catch (error) {
+      // If JSON.stringify fails (circular reference), return a safe representation
+      if (error.message.includes('circular')) {
+        return '[Circular Object]';
+      }
+      return '[Complex Object]';
+    }
+  }
+  
+  return String(children);
+};
+
 // Test Case Optimization Results Component
 function TestCaseOptimizationResults({ sessionId }) {
   const [optimizationResults, setOptimizationResults] = React.useState(null);
@@ -253,13 +295,13 @@ function TestCaseOptimizationResults({ sessionId }) {
                           const testCase1 = log.test_case_1 || log.Case1 || log.TestCase1 || log.case1;
                           return testCase1 ? (
                             <div className="space-y-1">
-                              {Object.entries(testCase1).map(([key, value]) => (
-                                value && (
+                              {Object.entries(testCase1).map(([key, value]) => 
+                                value ? (
                                   <div key={key}>
-                                    <strong>{key}:</strong> {String(value)}
+                                    <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                                   </div>
-                                )
-                              ))}
+                                ) : null
+                              )}
                             </div>
                           ) : (
                             <p className="text-gray-500 text-xs">No test case data available</p>
@@ -274,13 +316,13 @@ function TestCaseOptimizationResults({ sessionId }) {
                           const testCase2 = log.test_case_2 || log.Case2 || log.TestCase2 || log.case2;
                           return testCase2 ? (
                             <div className="space-y-1">
-                              {Object.entries(testCase2).map(([key, value]) => (
-                                value && (
+                              {Object.entries(testCase2).map(([key, value]) => 
+                                value ? (
                                   <div key={key}>
-                                    <strong>{key}:</strong> {String(value)}
+                                    <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                                   </div>
-                                )
-                              ))}
+                                ) : null
+                              )}
                             </div>
                           ) : (
                             <p className="text-gray-500 text-xs">No test case data available</p>
@@ -524,10 +566,10 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
             <ReactMarkdown 
               className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
               components={{
-                p: ({children}) => <p className="break-words">{children}</p>,
-                li: ({children}) => <li className="break-words">{children}</li>,
-                td: ({children}) => <td className="break-words max-w-xs">{children}</td>,
-                th: ({children}) => <th className="break-words">{children}</th>
+                p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
+                td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
+                th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
               }}
             >
               {review}
@@ -613,65 +655,12 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                         </div>
                       )}
                       
-                      {scenario.Prerequisites && scenario.Prerequisites.length > 0 && (
-                        <div className="w-full overflow-safe">
-                          <strong className="text-sm text-gray-700">Prerequisites:</strong>
-                          <ul className="text-sm text-gray-600 mt-1 ml-4 list-disc w-full overflow-safe">
-                            {scenario.Prerequisites.map((prereq, i) => (
-                              <li key={i} className="test-scenario-text">{prereq}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      
-                      {scenario.TestSteps && scenario.TestSteps.length > 0 && (
-                        <div className="w-full overflow-safe">
-                          <strong className="text-sm text-gray-700">Test Steps:</strong>
-                          <ol className="text-sm text-gray-600 mt-1 ml-4 list-decimal w-full overflow-safe">
-                            {scenario.TestSteps.map((step, i) => (
-                              <li key={i} className="test-scenario-text mb-1">{step}</li>
-                            ))}
-                          </ol>
-                        </div>
-                      )}
-                      
-                      {scenario.ExpectedResults && (
-                        <div className="w-full overflow-safe">
-                          <strong className="text-sm text-gray-700">Expected Results:</strong>
-                          <p className="text-sm text-gray-600 mt-1 test-scenario-text leading-relaxed">
-                            {scenario.ExpectedResults}
-                          </p>
-                        </div>
-                      )}
-                      
-                      {scenario.TestData && (
-                        <div className="w-full overflow-safe">
-                          <strong className="text-sm text-gray-700">Test Data:</strong>
-                          <p className="text-sm text-gray-600 mt-1 test-scenario-text leading-relaxed">
-                            {scenario.TestData}
-                          </p>
-                        </div>
-                      )}
-                      
                       {scenario.Comments && (
                         <div className="w-full overflow-safe">
                           <strong className="text-sm text-gray-700">Comments:</strong>
                           <p className="text-sm text-gray-600 mt-1 test-scenario-text leading-relaxed">
                             {scenario.Comments}
                           </p>
-                        </div>
-                      )}
-                      
-                      {scenario.Priority && (
-                        <div>
-                          <strong className="text-sm text-gray-700">Priority:</strong>
-                          <span className={`ml-2 px-2 py-1 text-xs rounded-full ${
-                            scenario.Priority.toLowerCase() === 'high' ? 'bg-red-100 text-red-800' :
-                            scenario.Priority.toLowerCase() === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-green-100 text-green-800'
-                          }`}>
-                            {scenario.Priority}
-                          </span>
                         </div>
                       )}
                     </div>
@@ -698,11 +687,11 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
         <div className="prose prose-sm max-w-full text-gray-600 break-words w-full overflow-hidden">
           <ReactMarkdown 
             className="whitespace-pre-wrap break-words overflow-wrap-anywhere w-full max-w-full"            components={{
-              p: ({children}) => <p className="break-words w-full max-w-full overflow-wrap-anywhere word-break-break-word">{children}</p>,
-              li: ({children}) => <li className="break-words w-full max-w-full overflow-wrap-anywhere word-break-break-word">{children}</li>,
-              td: ({children}) => <td className="break-words max-w-xs overflow-wrap-anywhere word-break-break-word">{children}</td>,
-              th: ({children}) => <th className="break-words overflow-wrap-anywhere word-break-break-word">{children}</th>,
-              strong: ({children}) => <strong className="break-words overflow-wrap-anywhere word-break-break-word">{children}</strong>
+              p: ({children}) => <p className="break-words w-full max-w-full overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</p>,
+              li: ({children}) => <li className="break-words w-full max-w-full overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</li>,
+              td: ({children}) => <td className="break-words max-w-xs overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</td>,
+              th: ({children}) => <th className="break-words overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</th>,
+              strong: ({children}) => <strong className="break-words overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</strong>
             }}
           >
             {content}
@@ -715,11 +704,11 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
         <div className="prose prose-sm max-w-full text-gray-600 break-words w-full overflow-hidden">
           <ReactMarkdown            className="whitespace-pre-wrap break-words overflow-wrap-anywhere w-full max-w-full"
             components={{
-              p: ({children}) => <p className="break-words w-full max-w-full overflow-wrap-anywhere word-break-break-word">{children}</p>,
-              li: ({children}) => <li className="break-words w-full max-w-full overflow-wrap-anywhere word-break-break-word">{children}</li>,
-              td: ({children}) => <td className="break-words max-w-xs overflow-wrap-anywhere word-break-break-word">{children}</td>,
-              th: ({children}) => <th className="break-words overflow-wrap-anywhere word-break-break-word">{children}</th>,
-              strong: ({children}) => <strong className="break-words overflow-wrap-anywhere word-break-break-word">{children}</strong>
+              p: ({children}) => <p className="break-words w-full max-w-full overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</p>,
+              li: ({children}) => <li className="break-words w-full max-w-full overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</li>,
+              td: ({children}) => <td className="break-words max-w-xs overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</td>,
+              th: ({children}) => <th className="break-words overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</th>,
+              strong: ({children}) => <strong className="break-words overflow-wrap-anywhere word-break-break-word">{safeRenderChildren(children)}</strong>
             }}
           >
             {content}
@@ -856,7 +845,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                                     {testCase.TestCaseID || `TC_${tcIndex + 1}`}: {testCase.Title || 'Untitled Test Case'}
                                   </h6>
                                   <p className="text-sm text-gray-600 mt-1">
-                                    {testCase.Category || 'General'} • {testCase.Priority || 'Medium'} Priority
+                                    {testCase.Category || 'General'}
                                   </p>
                                 </div>
                                 <div className="text-sm text-gray-500">
@@ -883,47 +872,10 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                                     </p>
                                   </div>
                                   
-                                  {testCase.Prerequisites && testCase.Prerequisites.length > 0 && (
-                                    <div>
-                                      <h6 className="font-medium text-gray-900 mb-1">Prerequisites</h6>
-                                      <ul className="text-sm text-gray-700 list-disc list-inside space-y-1">
-                                        {testCase.Prerequisites.map((prereq, idx) => (
-                                          <li key={idx}>{prereq}</li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
-                                  
-                                  {testCase.TestData && (
-                                    <div>
-                                      <h6 className="font-medium text-gray-900 mb-1">Test Data</h6>
-                                      <p className="text-sm text-gray-700 bg-gray-100 p-2 rounded">
-                                        {testCase.TestData}
-                                      </p>
-                                    </div>
-                                  )}
                                 </div>
                                 
                                 {/* Right Column */}
                                 <div className="space-y-3">
-                                  {testCase.TestSteps && testCase.TestSteps.length > 0 && (
-                                    <div>
-                                      <h6 className="font-medium text-gray-900 mb-1">Test Steps</h6>
-                                      <ol className="text-sm text-gray-700 list-decimal list-inside space-y-1">
-                                        {testCase.TestSteps.map((step, idx) => (
-                                          <li key={idx} className="leading-5">{step}</li>
-                                        ))}
-                                      </ol>
-                                    </div>
-                                  )}
-                                  
-                                  <div>
-                                    <h6 className="font-medium text-gray-900 mb-1">Expected Results</h6>
-                                    <p className="text-sm text-gray-700 bg-green-50 p-2 rounded">
-                                      {testCase.ExpectedResults || 'No expected results specified'}
-                                    </p>
-                                  </div>
-                                  
                                   {testCase.Comments && (
                                     <div>
                                       <h6 className="font-medium text-gray-900 mb-1">Comments</h6>
@@ -1130,13 +1082,13 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                                   const testCase1 = log.test_case_1 || log.Case1 || log.TestCase1 || log.case1;
                                   return testCase1 ? (
                                     <div className="space-y-1">
-                                      {Object.entries(testCase1).map(([key, value]) => (
-                                        value && (
+                                      {Object.entries(testCase1).map(([key, value]) => 
+                                        value ? (
                                           <div key={key}>
-                                            <strong>{key}:</strong> {String(value)}
+                                            <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                                           </div>
-                                        )
-                                      ))}
+                                        ) : null
+                                      )}
                                     </div>
                                   ) : (
                                     <p className="text-gray-500 text-xs">No test case data available</p>
@@ -1151,13 +1103,13 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                                   const testCase2 = log.test_case_2 || log.Case2 || log.TestCase2 || log.case2;
                                   return testCase2 ? (
                                     <div className="space-y-1">
-                                      {Object.entries(testCase2).map(([key, value]) => (
-                                        value && (
+                                      {Object.entries(testCase2).map(([key, value]) => 
+                                        value ? (
                                           <div key={key}>
-                                            <strong>{key}:</strong> {String(value)}
+                                            <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                                           </div>
-                                        )
-                                      ))}
+                                        ) : null
+                                      )}
                                     </div>
                                   ) : (
                                     <p className="text-gray-500 text-xs">No test case data available</p>
@@ -1359,13 +1311,13 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                                       const testCase1 = log.test_case_1 || log.Case1 || log.TestCase1 || log.case1;
                                       return testCase1 ? (
                                         <div className="space-y-1">
-                                          {Object.entries(testCase1).map(([key, value]) => (
-                                            value && (
+                                          {Object.entries(testCase1).map(([key, value]) => 
+                                            value ? (
                                               <div key={key}>
-                                                <strong>{key}:</strong> {String(value)}
+                                                <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                                               </div>
-                                            )
-                                          ))}
+                                            ) : null
+                                          )}
                                         </div>
                                       ) : (
                                         <p className="text-gray-500 text-xs">No test case data available</p>
@@ -1380,13 +1332,13 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                                       const testCase2 = log.test_case_2 || log.Case2 || log.TestCase2 || log.case2;
                                       return testCase2 ? (
                                         <div className="space-y-1">
-                                          {Object.entries(testCase2).map(([key, value]) => (
-                                            value && (
+                                          {Object.entries(testCase2).map(([key, value]) => 
+                                            value ? (
                                               <div key={key}>
-                                                <strong>{key}:</strong> {String(value)}
+                                                <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                                               </div>
-                                            )
-                                          ))}
+                                            ) : null
+                                          )}
                                         </div>
                                       ) : (
                                         <p className="text-gray-500 text-xs">No test case data available</p>
@@ -1603,10 +1555,10 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   <ReactMarkdown 
                     className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
                     components={{
-                      p: ({children}) => <p className="break-words">{children}</p>,
-                      li: ({children}) => <li className="break-words">{children}</li>,
-                      td: ({children}) => <td className="break-words max-w-xs">{children}</td>,
-                      th: ({children}) => <th className="break-words">{children}</th>
+                      p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                      li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
+                      td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
+                      th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
                     }}
                   >
                     {analysisContent}
@@ -1642,10 +1594,10 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                 <ReactMarkdown 
                   className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
                   components={{
-                    p: ({children}) => <p className="break-words">{children}</p>,
-                    li: ({children}) => <li className="break-words">{children}</li>,
-                    td: ({children}) => <td className="break-words max-w-xs">{children}</td>,
-                    th: ({children}) => <th className="break-words">{children}</th>
+                    p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                    li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
+                    td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
+                    th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
                   }}
                 >
                   {getSampleOutput().content}
@@ -1717,10 +1669,10 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               <ReactMarkdown 
                 className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
                 components={{
-                  p: ({children}) => <p className="break-words">{children}</p>,
-                  li: ({children}) => <li className="break-words">{children}</li>,
-                  td: ({children}) => <td className="break-words max-w-xs">{children}</td>,
-                  th: ({children}) => <th className="break-words">{children}</th>
+                  p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                  li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
+                  td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
+                  th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
                 }}
               >
                 {filesSection}
@@ -1799,10 +1751,10 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                 <ReactMarkdown 
                   className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
                   components={{
-                    p: ({children}) => <p className="break-words">{children}</p>,
-                    li: ({children}) => <li className="break-words">{children}</li>,
-                    td: ({children}) => <td className="break-words max-w-xs">{children}</td>,
-                    th: ({children}) => <th className="break-words">{children}</th>
+                    p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                    li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
+                    td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
+                    th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
                   }}
                 >
                   {getSampleOutput().content}
@@ -1863,10 +1815,10 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               <ReactMarkdown 
                 className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
                 components={{
-                  p: ({children}) => <p className="break-words">{children}</p>,
-                  li: ({children}) => <li className="break-words">{children}</li>,
-                  td: ({children}) => <td className="break-words max-w-xs">{children}</td>,
-                  th: ({children}) => <th className="break-words">{children}</th>
+                  p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                  li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
+                  td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
+                  th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
                 }}
               >
                 {filesSection}
@@ -1948,9 +1900,10 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               <ReactMarkdown
                 className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
                 components={{
-                  p: ({children}) => <p className="break-words">{children}</p>,
-                  li: ({children}) => <li className="break-words">{children}</li>,
-                  td: ({children}) => <td className="break-words max-w-xs">{children}</td>,                  th: ({children}) => <th className="break-words">{children}</th>,
+                  p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                  li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
+                  td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
+                  th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>,
                   code: ({ node, inline, className, children, ...props }) => {
                     const match = /language-(\w+)/.exec(className || '');
                     const isJson = match && match[1] === 'json';
@@ -1960,7 +1913,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                         <div className="bg-gray-100 rounded p-4 my-4 overflow-x-auto">
                           <pre className="whitespace-pre-wrap break-words text-xs font-mono max-w-full">
                             <code {...props}>
-                              {children}
+                              {safeRenderChildren(children)}
                             </code>
                           </pre>
                         </div>
@@ -1969,7 +1922,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                     
                     return (
                       <code className={className} {...props}>
-                        {children}
+                        {safeRenderChildren(children)}
                       </code>
                     );
                   }
