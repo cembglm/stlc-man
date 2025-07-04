@@ -319,6 +319,7 @@ def save_session_data(session_data: dict, process_type: str = "code_review"):
         used_prompt = session_data.get("used_prompt")
         used_model = session_data.get("used_model")
         process_title = session_data.get("process_title", "")  # Get process_title if available
+        process_name = session_data.get("process_name", "")  # Get process_name if available (for test_case_optimization)
         selected_category = session_data.get("selected_category", "")  # Get selected_category if available
         selected_test_type = session_data.get("selected_test_type", "")  # Get selected_test_type if available
 
@@ -327,10 +328,16 @@ def save_session_data(session_data: dict, process_type: str = "code_review"):
             return None
 
         # Process title validation only for specific processes
-        processes_with_title = ["test_scenario_generation", "test_case_optimization"]  # Only these processes should have process_title
+        processes_with_title = ["test_scenario_generation"]  # Only these processes should have process_title
+        processes_with_name = ["test_case_optimization"]  # Only these processes should have process_name
+        
         if process_type in processes_with_title:
             if not process_title or process_title.strip() == "":
                 logger.warning(f"Process title is required for {process_type} but is empty or missing.")
+                
+        if process_type in processes_with_name:
+            if not process_name or process_name.strip() == "":
+                logger.warning(f"Process name is required for {process_type} but is empty or missing.")
 
         # Güncellenecek alan: processes.{process_type}
         process_data = {
@@ -344,6 +351,10 @@ def save_session_data(session_data: dict, process_type: str = "code_review"):
         # Add process_title only for specific processes
         if process_type in processes_with_title and process_title and process_title.strip():
             process_data["process_title"] = process_title
+            
+        # Add process_name only for specific processes
+        if process_type in processes_with_name and process_name and process_name.strip():
+            process_data["process_name"] = process_name
         
         # Add category and test type for test scenario generation
         if process_type == "test_scenario_generation":

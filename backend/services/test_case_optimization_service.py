@@ -22,7 +22,7 @@ class TestCaseList(BaseModel):
     comparison_logs: List[dict] = []
     duplicates: List[dict] = []
 
-async def _query_llm_similarity(case1: TestCase, case2: TestCase, custom_prompt: str = None) -> bool:
+async def _query_llm_similarity(case1: TestCase, case2: TestCase, custom_prompt: str = None, selected_model: str = "llama3.2:3b") -> bool:
     """
     İki TestCase nesnesini LLM'e JSON formatında göndererek benzerlik (is_same) sonucunu döndürür.
     """
@@ -92,7 +92,9 @@ Important:
 
     try:
         # LM Studio API'sine LLMClient ile istek gönder
-        llm_client = LLMClient(model_name="llama-3.2-3b-instruct")
+        llm_client = LLMClient(model_name=selected_model)
+        # Set the original key to support model mapping
+        llm_client.original_key = selected_model
         
         # LLMClient'ı kullanarak yanıt al
         response = await llm_client.generate_response(
@@ -124,7 +126,7 @@ Important:
         logger.error(f"Error calling LM Studio API via LLMClient: {e}")
         return False
 
-async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None) -> TestCaseList:
+async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, selected_model: str = "llama3.2:3b") -> TestCaseList:
     """
     Bu fonksiyon, test_cases listesindeki benzer (duplicate) test case'leri 
     LLM tabanlı karşılaştırma ile ayıklar, unique bir liste döndürür.
@@ -138,7 +140,7 @@ async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None) 
         is_duplicate = False
         for unique_case in unique_cases:
             try:
-                comparison_result = await _query_llm_similarity(case, unique_case, custom_prompt)
+                comparison_result = await _query_llm_similarity(case, unique_case, custom_prompt, selected_model)
             except Exception as e:
                 logger.warning(f"LLM comparison failed: {e}")
                 comparison_result = False
@@ -175,6 +177,59 @@ class TestCaseOptimizationService:
     def __init__(self):
         self.db = get_db()  # Use synchronous database connection
         self.collection = self.db["session_history"]  # Updated to use session_history collection
+
+    def get_process_titles_with_counts(self) -> List[Dict[str, Any]]:
+        """
+        Process title'ları, test case sayılarını ve kaynak dosya bilgilerini getir.
+        """
+        try:
+            process_titles = self.get_available_process_titles()
+            process_data = []
+            
+            for title in process_titles:
+                test_cases = self.get_test_cases_by_process_title(title)
+                file_names = self.get_source_files_for_process_title(title)
+                process_data.append({
+                    "process_title": title,
+                    "test_case_count": len(test_cases),
+                    "source_files": file_names,
+                    "enabled": True
+                })
+            
+            return process_data
+        except Exception as e:
+            logger.error(f"Error fetching process titles with counts: {e}")
+            return []
+
+    def get_source_files_for_process_title(self, process_title: str) -> List[str]:
+        """
+        Belirli bir process_title için kaynak dosya isimlerini getir.
+        MongoDB'de processes.test_scenario_generation.output.metadata.file_names'den alır.
+        """
+        try:
+            source_files = set()
+            
+            # test_scenario_generation'dan file_names bilgisini getir
+            pipeline = [
+                {"$match": {"processes.test_scenario_generation.process_title": process_title}},
+                {"$project": {"file_names": "$processes.test_scenario_generation.output.metadata.file_names"}},
+                {"$match": {"file_names": {"$exists": True, "$ne": None}}}
+            ]
+            
+            cursor = self.collection.aggregate(pipeline)
+            for doc in cursor:
+                file_names = doc.get("file_names", [])
+                if isinstance(file_names, list):
+                    source_files.update(file_names)
+                elif isinstance(file_names, str):
+                    source_files.add(file_names)
+            
+            logger.info(f"Found {len(source_files)} source files for process title: {process_title}")
+            return sorted(list(source_files))
+            
+        except Exception as e:
+            logger.error(f"Error fetching source files for process title {process_title}: {e}")
+            return []
 
     def get_available_process_titles(self) -> List[str]:
         """
@@ -214,6 +269,24 @@ class TestCaseOptimizationService:
             return sorted(list(process_titles))
         except Exception as e:
             logger.error(f"Error fetching process titles: {e}")
+            return []
+
+    def get_test_cases_by_process_titles(self, process_titles: List[str]) -> List[Dict[str, Any]]:
+        """
+        Birden fazla process_title için tüm test case'leri getir.
+        Session_history collection'ından test_case_generation sonuçlarını kontrol et.
+        """
+        try:
+            all_test_cases = []
+            
+            for process_title in process_titles:
+                process_test_cases = self.get_test_cases_by_process_title(process_title)
+                all_test_cases.extend(process_test_cases)
+            
+            logger.info(f"Total found {len(all_test_cases)} test cases across {len(process_titles)} processes")
+            return all_test_cases
+        except Exception as e:
+            logger.error(f"Error fetching test cases for multiple processes: {e}")
             return []
 
     def get_test_cases_by_process_title(self, process_title: str) -> List[Dict[str, Any]]:
@@ -272,6 +345,7 @@ class TestCaseOptimizationService:
                                 "SelectedCategory": selected_category,
                                 "SelectedTestType": selected_test_type,
                                 "SessionID": session_id,
+                                "ProcessTitle": process_title,  # Add process title for identification
                                 "unique_key": f"{test_case_id}_{selected_category}_{selected_test_type}_{doc_idx}_{tc_idx}"
                             })
             
@@ -319,6 +393,7 @@ class TestCaseOptimizationService:
                             "SelectedCategory": selected_category,
                             "SelectedTestType": selected_test_type,
                             "SessionID": session_id,
+                            "ProcessTitle": process_title,  # Add process title for identification
                             "unique_key": f"{scenario_id}_{selected_category}_{selected_test_type}_{doc_idx}"
                         })
             
@@ -328,7 +403,7 @@ class TestCaseOptimizationService:
             logger.error(f"Error fetching test cases for process_title {process_title}: {e}")
             return []
 
-    async def run_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None) -> Dict[str, Any]:
+    async def run_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None, selected_model: str = "llama3.2:3b") -> Dict[str, Any]:
         """
         Seçilen test case'ler üzerinde smart selection işlemini çalıştır.
         """
@@ -357,7 +432,7 @@ class TestCaseOptimizationService:
 
             # Smart selection işlemini çalıştır
             test_case_list = TestCaseList(test_cases=valid_data)
-            unique_test_cases = await smart_select(test_case_list, custom_prompt)
+            unique_test_cases = await smart_select(test_case_list, custom_prompt, selected_model)
 
             results = {
                 "unique_test_cases": [case.model_dump() for case in unique_test_cases.test_cases],
@@ -375,10 +450,11 @@ class TestCaseOptimizationService:
             logger.error(f"Error running smart selection: {e}")
             return {
                 "success": False,
-                "message": f"Error running smart selection: {str(e)}",                "data": {}
+                "message": f"Error running smart selection: {str(e)}",
+                "data": {}
             }
 
-    def save_optimization_results(self, process_title: str, results: Dict[str, Any]) -> bool:
+    def save_optimization_results(self, process_title: str, results: Dict[str, Any], selected_model: str = None) -> bool:
         """
         Optimization sonuçlarını MongoDB'ye kaydet.
         """
@@ -389,6 +465,7 @@ class TestCaseOptimizationService:
             document = {
                 "process_title": process_title,
                 "optimization_results": results,
+                "selected_model": selected_model,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat()
             }
