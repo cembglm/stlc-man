@@ -15,6 +15,8 @@ export default function TestCaseOptimizationForm({ onRun, onSetOutput, process, 
   const [showMultiSelect, setShowMultiSelect] = useState(false);
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('llama3.2:3b');
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [processName, setProcessName] = useState('');
 
   // Default prompt for test case optimization
@@ -64,10 +66,21 @@ Important:
     }
   }, [selectedProcesses]);
 
-  // Can run durumunu güncelle
+    // API key gereksinimini kontrol et
   useEffect(() => {
-    setCanRun(selectedTestCases.size > 0 && selectedProcesses.size > 0 && selectedModel && processName.trim() !== '' && !loading && !isRunning);
-  }, [selectedTestCases.size, selectedProcesses.size, selectedModel, processName, loading, isRunning]);
+    const isGeminiModel = selectedModel && selectedModel.toLowerCase().includes('gemini');
+    setShowApiKeyInput(isGeminiModel);
+    if (!isGeminiModel) {
+      setApiKey(''); // Gemini olmayan modeller için API key'i temizle
+    }
+  }, [selectedModel]);
+
+  // Can run kontrolü - Gemini modelleri için API key kontrolü ekle
+  useEffect(() => {
+    const isGeminiModel = selectedModel && selectedModel.toLowerCase().includes('gemini');
+    const apiKeyRequired = isGeminiModel && (!apiKey || apiKey.trim() === '');
+    setCanRun(selectedTestCases.size > 0 && selectedProcesses.size > 0 && selectedModel && processName.trim() !== '' && !apiKeyRequired && !loading && !isRunning);
+  }, [selectedTestCases.size, selectedProcesses.size, selectedModel, processName, apiKey, loading, isRunning]);
 
   // processPrompt değiştiğinde parent'ı bildir
   useEffect(() => {
@@ -267,6 +280,7 @@ Important:
         process_name: processName, // Send process name to backend
         custom_prompt: processPrompt, // Send custom prompt to backend
         selected_model: selectedModel, // Send selected model to backend
+        api_key: apiKey, // Send API key for external models
         session_id: sessionId // Send session_id to backend
       });
 
@@ -337,26 +351,56 @@ Important:
       {/* Model Selection */}
       <div className="bg-white p-4 rounded-lg shadow">
         <h3 className="text-lg font-medium text-gray-900 mb-4">LLM Model Selection</h3>
-        <div className="space-y-2">
-          <label htmlFor="model-select" className="block text-sm font-medium text-gray-700">
-            Select LLM Model *
-          </label>
-          <select
-            id="model-select"
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            disabled={loading || disabled}
-          >
-            <option value="">Select a Model</option>
-            {availableModels.map((model, index) => (
-              <option key={index} value={model.key}>
-                {model.name} - {model.description}
-              </option>
-            ))}
-          </select>
-          {!selectedModel && (
-            <p className="text-sm text-red-600">Model selection is required to start optimization</p>
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="model-select" className="block text-sm font-medium text-gray-700">
+              Select LLM Model *
+            </label>
+            <select
+              id="model-select"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              disabled={loading || disabled}
+            >
+              <option value="">Select a Model</option>
+              {availableModels.map((model, index) => (
+                <option key={index} value={model.key}>
+                  {model.type === 'api' ? '🌐 ' : '💻 '}{model.name} - {model.description}
+                  {model.type === 'api' ? ` (${model.provider} API)` : ' (Local)'}
+                </option>
+              ))}
+            </select>
+            {!selectedModel && (
+              <p className="text-sm text-red-600">Model selection is required to start optimization</p>
+            )}
+          </div>
+
+          {/* API Key Input for External Models */}
+          {showApiKeyInput && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+              <div className="flex items-center mb-2">
+                <span className="text-yellow-800 text-sm font-medium">🔑 API Key Required</span>
+              </div>
+              <label htmlFor="api-key" className="block text-sm font-medium text-gray-700 mb-2">
+                Enter {selectedModel.includes('gemini') ? 'Google Gemini' : 'API'} Key *
+              </label>
+              <input
+                type="password"
+                id="api-key"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter your API key here..."
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                disabled={loading || disabled}
+              />
+              {showApiKeyInput && (!apiKey || apiKey.trim() === '') && (
+                <p className="text-sm text-red-600 mt-1">API key is required for this model</p>
+              )}
+              <p className="text-sm text-gray-500 mt-2">
+                Your API key is used only for this session and is not stored.
+              </p>
+            </div>
           )}
         </div>
       </div>

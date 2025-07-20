@@ -22,7 +22,7 @@ class TestCaseList(BaseModel):
     comparison_logs: List[dict] = []
     duplicates: List[dict] = []
 
-async def _query_llm_similarity(case1: TestCase, case2: TestCase, custom_prompt: str = None, selected_model: str = "llama3.2:3b") -> bool:
+async def _query_llm_similarity(case1: TestCase, case2: TestCase, custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None) -> bool:
     """
     İki TestCase nesnesini LLM'e JSON formatında göndererek benzerlik (is_same) sonucunu döndürür.
     """
@@ -92,7 +92,7 @@ Important:
 
     try:
         # LM Studio API'sine LLMClient ile istek gönder
-        llm_client = LLMClient(model_name=selected_model)
+        llm_client = LLMClient(model_name=selected_model, api_key=api_key)
         # Set the original key to support model mapping
         llm_client.original_key = selected_model
         
@@ -126,7 +126,7 @@ Important:
         logger.error(f"Error calling LM Studio API via LLMClient: {e}")
         return False
 
-async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, selected_model: str = "llama3.2:3b") -> TestCaseList:
+async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None) -> TestCaseList:
     """
     Bu fonksiyon, test_cases listesindeki benzer (duplicate) test case'leri 
     LLM tabanlı karşılaştırma ile ayıklar, unique bir liste döndürür.
@@ -140,7 +140,7 @@ async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, 
         is_duplicate = False
         for unique_case in unique_cases:
             try:
-                comparison_result = await _query_llm_similarity(case, unique_case, custom_prompt, selected_model)
+                comparison_result = await _query_llm_similarity(case, unique_case, custom_prompt, selected_model, api_key)
             except Exception as e:
                 logger.warning(f"LLM comparison failed: {e}")
                 comparison_result = False
@@ -403,7 +403,7 @@ class TestCaseOptimizationService:
             logger.error(f"Error fetching test cases for process_title {process_title}: {e}")
             return []
 
-    async def run_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None, selected_model: str = "llama3.2:3b") -> Dict[str, Any]:
+    async def run_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None) -> Dict[str, Any]:
         """
         Seçilen test case'ler üzerinde smart selection işlemini çalıştır.
         """
@@ -432,7 +432,7 @@ class TestCaseOptimizationService:
 
             # Smart selection işlemini çalıştır
             test_case_list = TestCaseList(test_cases=valid_data)
-            unique_test_cases = await smart_select(test_case_list, custom_prompt, selected_model)
+            unique_test_cases = await smart_select(test_case_list, custom_prompt, selected_model, api_key)
 
             results = {
                 "unique_test_cases": [case.model_dump() for case in unique_test_cases.test_cases],

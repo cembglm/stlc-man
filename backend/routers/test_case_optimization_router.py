@@ -24,18 +24,28 @@ async def get_available_models():
         
         # Model mapping'i statik olarak döndür
         available_models = [
-            {"key": "codegeex4:9b", "name": "CodeGeeX4 (9B)", "description": "Code generation optimized model"},
-            {"key": "codellama:7b", "name": "Code Llama (7B)", "description": "Meta's code-focused model"},
-            {"key": "deepseek-coder:6.7b", "name": "DeepSeek Coder (6.7B)", "description": "DeepSeek's coding model"},
-            {"key": "gemma2:2b", "name": "Gemma 2 (2B)", "description": "Google's lightweight model"},
-            {"key": "gemma3:4b", "name": "Gemma 3 (4B)", "description": "Google's enhanced model"},
-            {"key": "llama3.2:3b", "name": "Llama 3.2 (3B)", "description": "Meta's latest efficient model"},
-            {"key": "qwen2.5:7b", "name": "Qwen 2.5 (7B)", "description": "Alibaba's advanced model"},
-            {"key": "qwen2.5:7b-1m", "name": "Qwen 2.5 (7B-1M)", "description": "Large context version"},
-            {"key": "qwen2.5-coder:3b", "name": "Qwen 2.5 Coder (3B)", "description": "Coding-focused Qwen model"},
-            {"key": "stable-code:3b", "name": "Stable Code (3B)", "description": "Stability AI's code model"},
-            {"key": "starcoder2:7b", "name": "StarCoder 2 (7B)", "description": "BigCode's enhanced model"}
+            # Local LM Studio Models
+            {"key": "codegeex4:9b", "name": "CodeGeeX4 (9B)", "description": "Code generation optimized model", "type": "local"},
+            {"key": "codellama:7b", "name": "Code Llama (7B)", "description": "Meta's code-focused model", "type": "local"},
+            {"key": "deepseek-coder:6.7b", "name": "DeepSeek Coder (6.7B)", "description": "DeepSeek's coding model", "type": "local"},
+            {"key": "gemma2:2b", "name": "Gemma 2 (2B)", "description": "Google's lightweight model", "type": "local"},
+            {"key": "gemma3:4b", "name": "Gemma 3 (4B)", "description": "Google's enhanced model", "type": "local"},
+            {"key": "google/gemma-3-12b", "name": "Gemma 3 (12B)", "description": "Google's large Gemma model", "type": "local"},
+            {"key": "llama3.2:3b", "name": "Llama 3.2 (3B)", "description": "Meta's latest efficient model", "type": "local"},
+            {"key": "qwen2.5:7b", "name": "Qwen 2.5 (7B)", "description": "Alibaba's advanced model", "type": "local"},
+            {"key": "qwen2.5:7b-1m", "name": "Qwen 2.5 (7B-1M)", "description": "Large context version", "type": "local"},
+            {"key": "qwen2.5-coder:3b", "name": "Qwen 2.5 Coder (3B)", "description": "Coding-focused Qwen model", "type": "local"},
+            {"key": "qwen/qwen3-14b", "name": "Qwen 3 (14B)", "description": "Alibaba's latest large model", "type": "local"},
+            {"key": "stable-code:3b", "name": "Stable Code (3B)", "description": "Stability AI's code model", "type": "local"},
+            {"key": "starcoder2:7b", "name": "StarCoder 2 (7B)", "description": "BigCode's enhanced model", "type": "local"},
+            # External API Models
+            {"key": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "description": "Google's latest fast model", "type": "api", "provider": "Google"},
+            {"key": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "description": "Google's latest pro model", "type": "api", "provider": "Google"},
+            {"key": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "description": "Google's pro model", "type": "api", "provider": "Google"},
+            {"key": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "description": "Google's fast model", "type": "api", "provider": "Google"}
         ]
+        
+        # Force reload - Added new models: google/gemma-3-12b, qwen/qwen3-14b
         
         return JSONResponse(
             status_code=200,
@@ -152,6 +162,7 @@ async def run_smart_selection(request: Request):
         process_name = data.get("process_name", "")  # Get process name for saving optimization
         custom_prompt = data.get("custom_prompt", "")  # Get custom prompt from request
         selected_model = data.get("selected_model", "")  # Get selected model - don't use default
+        api_key = data.get("api_key", "")  # Get API key for external models
         session_id = data.get("session_id") or str(uuid.uuid4())  # Generate session_id if not provided
         
         if not selected_test_cases:
@@ -168,6 +179,11 @@ async def run_smart_selection(request: Request):
         # Model seçimi zorunlu
         if not selected_model:
             raise HTTPException(status_code=400, detail="Model selection required")
+        
+        # Gemini modelleri için API key kontrolü
+        is_gemini_model = any(gemini in selected_model.lower() for gemini in ["gemini"])
+        if is_gemini_model and not api_key:
+            raise HTTPException(status_code=400, detail="API key is required for Gemini models")
             
         # Process name zorunlu
         if not process_name or process_name.strip() == "":
@@ -176,7 +192,7 @@ async def run_smart_selection(request: Request):
         service = TestCaseOptimizationService()
         
         # Smart selection işlemini çalıştır (model parametresi ile)
-        result = await service.run_smart_selection(selected_test_cases, custom_prompt, selected_model)
+        result = await service.run_smart_selection(selected_test_cases, custom_prompt, selected_model, api_key)
         
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["message"])
