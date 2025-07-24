@@ -163,6 +163,7 @@ async def run_smart_selection(request: Request):
         custom_prompt = data.get("custom_prompt", "")  # Get custom prompt from request
         selected_model = data.get("selected_model", "")  # Get selected model - don't use default
         api_key = data.get("api_key", "")  # Get API key for external models
+        optimization_type = data.get("optimization_type", "individual")  # New field for optimization type
         session_id = data.get("session_id") or str(uuid.uuid4())  # Generate session_id if not provided
         
         if not selected_test_cases:
@@ -191,8 +192,14 @@ async def run_smart_selection(request: Request):
         
         service = TestCaseOptimizationService()
         
-        # Smart selection işlemini çalıştır (model parametresi ile)
-        result = await service.run_smart_selection(selected_test_cases, custom_prompt, selected_model, api_key)
+        # Generate a unique process ID for tracking
+        process_id = str(uuid.uuid4())
+        
+        # Choose optimization method based on type
+        if optimization_type == "bulk":
+            result = await service.run_bulk_smart_selection(selected_test_cases, custom_prompt, selected_model, api_key, process_id)
+        else:
+            result = await service.run_smart_selection(selected_test_cases, custom_prompt, selected_model, api_key, process_id)
         
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["message"])
@@ -218,7 +225,45 @@ async def run_smart_selection(request: Request):
                 "used_model": selected_model,  # Use the actual selected model
                 "process_name": process_name,  # Save process name for test_case_optimization
                 "process_titles": target_processes,  # Save multiple process titles
-                "process_count": len(target_processes)
+                "process_count": len(target_processes),
+                "optimization_type": optimization_type  # Save optimization type
+            }
+            
+            save_session_result = save_session_data(session_data, "test_case_optimization")
+            if save_session_result:
+                logger.info(f"Session data saved successfully for session_id: {session_id}")
+            else:
+                logger.warning(f"Failed to save session data for session_id: {session_id}")
+                
+        except Exception as session_error:
+            logger.error(f"Error saving session data: {session_error}")
+            # Don't fail the main request if session saving fails
+        
+        # Add session_id to response
+        result["session_id"] = session_id
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in run_smart_selection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+        # Session history'ye kaydet
+        try:
+            session_data = {
+                "session_id": session_id,
+                "output": result["data"],
+                "edited_prompt": bool(custom_prompt),  # True if custom prompt was used
+                "used_prompt": custom_prompt or "Default optimization prompt",
+                "used_model": selected_model,  # Use the actual selected model
+                "process_name": process_name,  # Save process name for test_case_optimization
+                "process_titles": target_processes,  # Save multiple process titles
+                "process_count": len(target_processes),
+                "optimization_type": optimization_type  # Save optimization type
             }
             
             save_session_result = save_session_data(session_data, "test_case_optimization")
@@ -400,4 +445,68 @@ async def get_optimization_results_by_process_name(process_name: str):
         
     except Exception as e:
         logger.error(f"Error in get_optimization_results_by_process_name: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/stop-process/{process_id}")
+async def stop_process(process_id: str):
+    """
+    Çalışan bir test case optimization process'ini durdur.
+    """
+    try:
+        service = TestCaseOptimizationService()
+        result = service.stop_process(process_id)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=404, detail=result["message"])
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in stop_process: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/process-status/{process_id}")
+async def get_process_status(process_id: str):
+    """
+    Bir process'in durumunu getir.
+    """
+    try:
+        service = TestCaseOptimizationService()
+        result = service.get_process_status(process_id)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=404, detail=result["message"])
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_process_status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/running-processes")
+async def list_running_processes():
+    """
+    Tüm çalışan process'leri listele.
+    """
+    try:
+        service = TestCaseOptimizationService()
+        result = service.list_running_processes()
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in list_running_processes: {e}")
         raise HTTPException(status_code=500, detail=str(e))

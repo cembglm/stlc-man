@@ -47,16 +47,20 @@ const safeRenderChildren = (children) => {
 };
 
 // Test Case Optimization Results Component
-function TestCaseOptimizationResults({ sessionId }) {
+function TestCaseOptimizationResults({ sessionId, liveResults }) {
   const [optimizationResults, setOptimizationResults] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState(null);
 
   React.useEffect(() => {
-    if (sessionId) {
+    if (liveResults) {
+      setOptimizationResults(liveResults);
+      setLoading(false);
+      setError(null);
+    } else if (sessionId) {
       fetchOptimizationResults();
     }
-  }, [sessionId]);
+  }, [sessionId, liveResults]);
   const fetchOptimizationResults = async () => {
     try {
       setLoading(true);
@@ -493,7 +497,7 @@ function getGanttViewModeAndColumnWidth(tasks) {
   }
 }
 
-export default function OutputPanel({ output, outputs, activeTab, processes, outputFormats, hideFooter, hideHeader }) {
+export default function OutputPanel({ output, outputs, activeTab, processes, outputFormats, hideFooter, hideHeader, testCaseOptimizationResults }) {
   const { status: codeReviewStatus, reviews, error: codeReviewError } = useSelector(state => state.codeReview || {});
   const { status: reqStatus, result: reqResult, error: reqError } = useSelector(state => state.requirementAnalysis || {});
   const { status: testPlanningStatus, plans, error: testPlanningError } = useSelector(state => state.testPlanning || {});
@@ -1185,7 +1189,210 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
   const renderContent = () => {
     // Test Case Optimization için özel gösterim
     if (activeTab === 'test-case-optimization') {
-      if (outputs && outputs[activeTab] && outputs[activeTab].type === 'test-case-optimization') {
+      // Use testCaseOptimizationResults if available, otherwise check outputs
+      if (testCaseOptimizationResults) {
+        return (
+          <div className="space-y-4">
+            <section>
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-lg font-medium">Test Case Optimization Results</h3>
+                <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                  Success
+                </span>
+              </div>
+              
+              {/* Optimization Summary */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 mb-4">
+                <h4 className="font-medium text-blue-800 mb-2">Optimization Summary</h4>
+                <div className="grid grid-cols-3 gap-4 text-sm text-blue-700">
+                  <div>
+                    <p className="font-medium">Original Test Cases</p>
+                    <p className="text-lg">
+                      {(testCaseOptimizationResults.unique_test_cases?.length || 0) + 
+                       (testCaseOptimizationResults.similar_test_cases?.length || 0)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-medium">Unique Test Cases</p>
+                    <p className="text-lg text-green-600">{testCaseOptimizationResults.unique_test_cases?.length || 0}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium">Duplicates Removed</p>
+                    <p className="text-lg text-red-600">{testCaseOptimizationResults.similar_test_cases?.length || 0}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Unique Test Cases */}
+              <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-4">
+                <h4 className="font-medium text-green-800 mb-2">
+                  ✅ Unique Test Cases ({testCaseOptimizationResults.unique_test_cases?.length || 0})
+                </h4>
+                <details className="cursor-pointer">
+                  <summary className="text-sm text-green-700 hover:text-green-900">Click to view details</summary>
+                  <div className="mt-2 space-y-2">
+                    {testCaseOptimizationResults.unique_test_cases?.map((testCase, index) => (
+                      <div key={index} className="bg-white p-3 rounded border border-green-200">
+                        <h5 className="font-medium text-gray-900">{testCase.TestCaseID}: {testCase.Title}</h5>
+                        <p className="text-sm text-gray-600 mt-1">{testCase.Description}</p>
+                        <p className="text-xs text-gray-500 mt-1"><strong>Objective:</strong> {testCase.Objective}</p>
+                      </div>
+                    )) || <p className="text-sm text-gray-500">No unique test cases found.</p>}
+                  </div>
+                </details>
+              </div>
+
+              {/* Similar Test Cases */}
+              {testCaseOptimizationResults.similar_test_cases?.length > 0 && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-4">
+                  <h4 className="font-medium text-yellow-800 mb-2">
+                    🔄 Similar Test Cases Found ({testCaseOptimizationResults.similar_test_cases.length})
+                  </h4>
+                  <details className="cursor-pointer">
+                    <summary className="text-sm text-yellow-700 hover:text-yellow-900">Click to view duplicates</summary>
+                    <div className="mt-2 space-y-3">
+                      {testCaseOptimizationResults.similar_test_cases.map((duplicate, index) => (
+                        <div key={index} className="bg-white p-4 rounded border border-yellow-200">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-red-50 p-3 rounded border border-red-200">
+                              <h5 className="font-medium text-red-700 mb-2">🗑️ Duplicate (Removed)</h5>
+                              <p className="font-medium text-gray-900">{duplicate.DuplicateCase?.TestCaseID}: {duplicate.DuplicateCase?.Title}</p>
+                              <p className="text-sm text-gray-600 mt-1"><strong>Description:</strong> {duplicate.DuplicateCase?.Description}</p>
+                              <p className="text-xs text-gray-500 mt-1"><strong>Objective:</strong> {duplicate.DuplicateCase?.Objective}</p>
+                            </div>
+                            <div className="bg-green-50 p-3 rounded border border-green-200">
+                              <h5 className="font-medium text-green-700 mb-2">✅ Kept (Original)</h5>
+                              <p className="font-medium text-gray-900">{duplicate.MatchedWith?.TestCaseID}: {duplicate.MatchedWith?.Title}</p>
+                              <p className="text-sm text-gray-600 mt-1"><strong>Description:</strong> {duplicate.MatchedWith?.Description}</p>
+                              <p className="text-xs text-gray-500 mt-1"><strong>Objective:</strong> {duplicate.MatchedWith?.Objective}</p>
+                            </div>
+                          </div>
+                          <div className="mt-3 pt-3 border-t border-yellow-200">
+                            <p className="text-xs text-gray-600">
+                              <strong>Reason:</strong> These test cases were found to be contextually similar based on their titles, descriptions, and objectives.
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
+
+              {/* Comparison Logs */}
+              <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
+                <h4 className="font-medium text-gray-800 mb-2">
+                  📊 Comparison Logs ({testCaseOptimizationResults.comparison_logs?.length || 0} comparisons)
+                </h4>
+                {testCaseOptimizationResults.comparison_logs?.length > 0 ? (
+                  <details className="cursor-pointer">
+                    <summary className="text-sm text-gray-700 hover:text-gray-900">Click to view detailed comparison logs</summary>
+                    <div className="mt-2 max-h-96 overflow-y-auto">
+                      <div className="space-y-3">
+                        {testCaseOptimizationResults.comparison_logs.map((log, index) => (
+                          <div key={index} className="bg-white p-3 rounded border border-gray-200">
+                            <div className="flex justify-between items-start mb-2">
+                              <h6 className="font-medium text-gray-900">Comparison #{index + 1}</h6>
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                log.is_same || log.result?.is_same
+                                  ? 'bg-red-100 text-red-800' 
+                                  : 'bg-green-100 text-green-800'
+                              }`}>
+                                {log.is_same || log.result?.is_same ? 'Similar' : 'Different'}
+                              </span>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                              <div className="bg-blue-50 p-2 rounded">
+                                <h6 className="font-medium text-blue-800 mb-1">Test Case 1</h6>
+                                {(() => {
+                                  // Flexible key lookup for test case 1
+                                  const testCase1 = log.test_case_1 || log.Case1 || log.TestCase1 || log.case1;
+                                  return testCase1 ? (
+                                    <div className="space-y-1">
+                                      {Object.entries(testCase1).map(([key, value]) => 
+                                        value ? (
+                                          <div key={key}>
+                                            <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                          </div>
+                                        ) : null
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="text-gray-500 text-xs">No test case data available</p>
+                                  );
+                                })()}
+                              </div>
+                              
+                              <div className="bg-purple-50 p-2 rounded">
+                                <h6 className="font-medium text-purple-800 mb-1">Test Case 2</h6>
+                                {(() => {
+                                  // Flexible key lookup for test case 2
+                                  const testCase2 = log.test_case_2 || log.Case2 || log.TestCase2 || log.case2;
+                                  return testCase2 ? (
+                                    <div className="space-y-1">
+                                      {Object.entries(testCase2).map(([key, value]) => 
+                                        value ? (
+                                          <div key={key}>
+                                            <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                          </div>
+                                        ) : null
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="text-gray-500 text-xs">No test case data available</p>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                            
+                            {log.prompt_sent && (
+                              <details className="mt-2">
+                                <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                                  View prompt sent to LLM
+                                </summary>
+                                <div className="mt-1 bg-gray-100 p-2 rounded text-xs">
+                                  <pre className="whitespace-pre-wrap">{log.prompt_sent}</pre>
+                                </div>
+                              </details>
+                            )}
+                            
+                            {log.llm_response && (
+                              <details className="mt-2">
+                                <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                                  View LLM response
+                                </summary>
+                                <div className="mt-1 bg-gray-100 p-2 rounded text-xs">
+                                  <pre className="whitespace-pre-wrap">{log.llm_response}</pre>
+                                </div>
+                              </details>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
+                ) : (
+                  <p className="text-sm text-gray-600">
+                    No detailed comparison logs available.
+                  </p>
+                )}
+              </div>
+
+              <section>
+                <h3 className="text-lg font-medium mb-3">Execution Details</h3>
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 shadow-sm">
+                  <div className="text-gray-600">
+                    <p><strong>Status:</strong> Completed</p>
+                    <p><strong>Process:</strong> Test Case Optimization</p>
+                    <p><strong>Last Updated:</strong> {new Date().toLocaleString()}</p>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </div>
+        );
+      } else if (outputs && outputs[activeTab] && outputs[activeTab].type === 'test-case-optimization') {
         const optimizationOutput = outputs[activeTab];
         return (
           <div className="space-y-4">
@@ -1497,7 +1704,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                 <h3 className="text-lg font-medium">Test Case Optimization Output</h3>
                 <div className="text-sm text-gray-500">Process Results</div>
               </div>
-              <TestCaseOptimizationResults sessionId={testCaseOutput.sessionId} />
+              <TestCaseOptimizationResults sessionId={testCaseOutput.sessionId} liveResults={testCaseOptimizationResults} />
             </section>
             
             <section>

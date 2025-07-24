@@ -6,7 +6,7 @@ import PromptEditor from './PromptEditor';
 import OutputPanel from './OutputPanel';
 import TestScenarioGenerationForm from './processes/TestScenarioGenerationForm';
 import TestCaseGenerationForm from './processes/TestCaseGenerationForm';
-import TestCaseOptimizationForm from './processes/TestCaseOptimizationForm';
+import TestCaseOptimization from './processes/TestCaseOptimization';
 import CodeReviewForm from './processes/CodeReviewForm';
 import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
@@ -73,14 +73,52 @@ export default function TabPanel({
     prompt: ''
   });
 
+  // Test Case Optimization results state for sidebar
+  const [testCaseOptimizationResults, setTestCaseOptimizationResults] = useState(null);
+
   // Stable callback for Test Case Optimization form state changes
   const handleTestCaseOptimizationStateChange = useCallback((handler) => {
     setTestCaseOptimizationFormState(prev => ({ ...prev, ...handler }));
   }, []);
 
+  // Stable callback for Test Case Optimization results
+  const handleTestCaseOptimizationResults = useCallback((results) => {
+    setTestCaseOptimizationResults(results);
+  }, []);
+
+  // Stable callback for Test Case Optimization run function updates
+  const handleTestCaseOptimizationRunFunction = useCallback((runFn) => {
+    // canRun is true if we have a valid function (either run or stop)
+    const canRun = !!runFn;
+    setTestCaseOptimizationFormState(prev => ({ 
+      ...prev, 
+      handleRun: runFn,
+      canRun: canRun
+    }));
+    console.log('TabPanel - TestCaseOptimization run function updated:', {
+      hasFunction: !!runFn,
+      canRun: canRun
+    });
+  }, []);
+
   // Stable callback for Test Case Optimization prompt changes
   const handleTestCaseOptimizationPromptChange = useCallback((prompt) => {
     setTestCaseOptimizationFormState(prev => ({ ...prev, prompt }));
+  }, []);
+
+  // Stable callback for Test Case Optimization running state changes
+  const handleTestCaseOptimizationRunningStateChange = useCallback((isRunning) => {
+    console.log('TabPanel - TestCaseOptimization running state changed:', isRunning);
+    setTestCaseOptimizationFormState(prev => ({ 
+      ...prev, 
+      isRunning: isRunning,
+      canRun: prev.handleRun !== null // Always allow if we have a function
+    }));
+  }, []);
+
+  // Stable callback for Test Case Optimization loading state changes
+  const handleTestCaseOptimizationLoadingChange = useCallback((loading) => {
+    setTestCaseOptimizationFormState(prev => ({ ...prev, isRunning: loading }));
   }, []);
 
   // Aktif tab değiştiğinde veya ilk açılışta base prompt'u otomatik yükle
@@ -308,7 +346,7 @@ Important:
     'requirement-analysis': RequirementAnalysisForm,
     'test-scenario-generation': TestScenarioGenerationForm,
     'test-case-generation': TestCaseGenerationForm,
-    'test-case-optimization': TestCaseOptimizationForm,
+    'test-case-optimization': TestCaseOptimization,
     'test-planning': TestPlanningForm,
     'environment-setup': EnvironmentSetupForm,
   };
@@ -457,44 +495,55 @@ Important:
           <h3 className="text-lg font-medium text-gray-900 mb-4">Process Configuration</h3>
           <div className="bg-gray-50 rounded-lg p-4">
             {FormComponent ? (
-              <FormComponent 
-                process={process}
-                onAIModelUpdate={onAIModelUpdate}
-                onOutputFormatUpdate={onOutputFormatUpdate}
-                aiModels={aiModels}
-                outputFormats={outputFormats}
-                disabled={isDisabled}
-                managedFiles={managedFiles}
-                fileProcessMappings={fileProcessMappings}
-                onRun={onRun} // Change from onRunProcess to onRun to match component expectation
-                onSetOutput={onSetOutput} // Pass the new onSetOutput handler
-                sessionId={sessionId} // Pass global sessionId to forms
-                onFormStateChange={processId === 'test-scenario-generation' ? setTestScenarioFormState : undefined}
-                onTestCaseGeneration={processId === 'test-case-generation' ? setTestCaseFormState : undefined}
-                onTestCaseOptimization={processId === 'test-case-optimization' ? handleTestCaseOptimizationStateChange : undefined}
-                onPromptChange={processId === 'test-case-optimization' ? handleTestCaseOptimizationPromptChange : undefined}
-                currentPrompt={processId === 'test-case-optimization' ? (testCaseOptimizationFormState.prompt || '') : undefined}
-                onFinalPromptChange={processId === 'test-case-generation' ? setTestCaseGenerationCombinedPrompt : undefined}
-                onGeneratePrompt={async (processIdFromForm, formData) => {
-                  try {
-                    console.log('[TabPanel] onGeneratePrompt called with:', { processIdFromForm, processId, hasFormData: !!formData });
-                    // Use the processId from the form if provided, otherwise use the current processId
-                    const finalProcessId = processIdFromForm || processId;
-                    const response = await onGeneratePrompt(finalProcessId, formData);
-                    console.log('[TabPanel] onGeneratePrompt response:', response);
-                    
-                    // For test-scenario-generation, App.jsx already handles the state update
-                    // For other processes, we need to call onPromptUpdate
-                    if (finalProcessId !== 'test-scenario-generation' && response?.prompt) {
-                      onPromptUpdate(finalProcessId, response.prompt);
+              processId === 'test-case-optimization' ? (
+                <TestCaseOptimization 
+                  onPromptChange={handleTestCaseOptimizationPromptChange}
+                  onRunFunction={handleTestCaseOptimizationRunFunction}
+                  onLoadingChange={handleTestCaseOptimizationLoadingChange}
+                  onRunningStateChange={handleTestCaseOptimizationRunningStateChange}
+                  onOptimizationResults={handleTestCaseOptimizationResults}
+                />
+              ) : (
+                <FormComponent 
+                  process={process}
+                  onAIModelUpdate={onAIModelUpdate}
+                  onOutputFormatUpdate={onOutputFormatUpdate}
+                  aiModels={aiModels}
+                  outputFormats={outputFormats}
+                  disabled={isDisabled}
+                  managedFiles={managedFiles}
+                  fileProcessMappings={fileProcessMappings}
+                  onRun={onRun} // Change from onRunProcess to onRun to match component expectation
+                  onSetOutput={onSetOutput} // Pass the new onSetOutput handler
+                  sessionId={sessionId} // Pass global sessionId to forms
+                  onFormStateChange={processId === 'test-scenario-generation' ? setTestScenarioFormState : undefined}
+                  onTestCaseGeneration={processId === 'test-case-generation' ? setTestCaseFormState : undefined}
+                  onTestCaseOptimization={processId === 'test-case-optimization' ? handleTestCaseOptimizationStateChange : undefined}
+                  onPromptChange={processId === 'test-case-optimization' ? handleTestCaseOptimizationPromptChange : undefined}
+                  currentPrompt={processId === 'test-case-optimization' ? (testCaseOptimizationFormState.prompt || '') : undefined}
+                  onOptimizationResults={processId === 'test-case-optimization' ? handleTestCaseOptimizationResults : undefined}
+                  onFinalPromptChange={processId === 'test-case-generation' ? setTestCaseGenerationCombinedPrompt : undefined}
+                  onGeneratePrompt={async (processIdFromForm, formData) => {
+                    try {
+                      console.log('[TabPanel] onGeneratePrompt called with:', { processIdFromForm, processId, hasFormData: !!formData });
+                      // Use the processId from the form if provided, otherwise use the current processId
+                      const finalProcessId = processIdFromForm || processId;
+                      const response = await onGeneratePrompt(finalProcessId, formData);
+                      console.log('[TabPanel] onGeneratePrompt response:', response);
+                      
+                      // For test-scenario-generation, App.jsx already handles the state update
+                      // For other processes, we need to call onPromptUpdate
+                      if (finalProcessId !== 'test-scenario-generation' && response?.prompt) {
+                        onPromptUpdate(finalProcessId, response.prompt);
+                      }
+                      return response;
+                    } catch (error) {
+                      console.error('Error generating prompt:', error);
+                      throw error;
                     }
-                    return response;
-                  } catch (error) {
-                    console.error('Error generating prompt:', error);
-                    throw error;
-                  }
-                }}
-              />
+                  }}
+                />
+              )
             ) : (
               <p className="text-gray-600">No specific configuration options available for {process?.name}</p>
             )}
@@ -793,6 +842,13 @@ Important:
                     
                     // Special handling for Test Case Optimization
                     if (activeTab === 'test-case-optimization') {
+                      console.log('TabPanel - Run Process clicked for test-case-optimization:', {
+                        canRun: testCaseOptimizationFormState.canRun,
+                        isRunning: testCaseOptimizationFormState.isRunning,
+                        handleRun: typeof testCaseOptimizationFormState.handleRun,
+                        formState: testCaseOptimizationFormState
+                      });
+                      
                       if (testCaseOptimizationFormState.handleRun && typeof testCaseOptimizationFormState.handleRun === 'function') {
                         testCaseOptimizationFormState.handleRun();
                       }
@@ -822,7 +878,7 @@ Important:
                   (activeTab === 'pipeline' && selectedProcesses.size === 0) ||
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
-                  (activeTab === 'test-case-optimization' && (!testCaseOptimizationFormState.canRun || testCaseOptimizationFormState.isRunning)) ||
+                  (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
                   (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && pipelineStatus[activeTab] === 'running')
                 }
                 className={clsx(
@@ -830,7 +886,7 @@ Important:
                   (activeTab === 'pipeline' && selectedProcesses.size === 0) || 
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
-                  (activeTab === 'test-case-optimization' && (!testCaseOptimizationFormState.canRun || testCaseOptimizationFormState.isRunning)) ||
+                  (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
                   (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && pipelineStatus[activeTab] === 'running')
                     ? "bg-gray-300 cursor-not-allowed" 
                     : "bg-indigo-600 hover:bg-indigo-700"
@@ -879,7 +935,7 @@ Important:
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 0 1 4 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
-                      Optimizing Test Cases...
+                      Stop Process
                     </>
                   ) : (
                     'Run Process'
@@ -935,6 +991,7 @@ Important:
                 outputFormats={outputFormats}
                 hideFooter={true}
                 hideHeader={true}
+                testCaseOptimizationResults={testCaseOptimizationResults}
               />
             )}
           </div>

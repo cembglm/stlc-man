@@ -10,6 +10,9 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+# Global dictionary to track running processes
+running_processes = {}
+
 class TestCase(BaseModel):
     ScenarioID: str
     TestCaseID: str
@@ -86,8 +89,10 @@ Where:
 - is_same = false otherwise
 
 Important:
-- Do not provide any additional text outside the JSON object.
-- Do not explain your reasoning, only provide the final JSON response.
+- Return ONLY the raw JSON object, no markdown formatting
+- Do not use ```json``` or ``` code blocks  
+- Do not provide any additional text outside the JSON object
+- Do not explain your reasoning, only provide the final JSON response
 """
 
     try:
@@ -107,26 +112,36 @@ Important:
             logger.error("Empty response from LLM")
             return False
         
+        # Clean LLM response from markdown code blocks for individual comparison too
+        cleaned_response = response.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]  # Remove ```json
+        if cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response[3:]   # Remove ```
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]  # Remove ending ```
+        cleaned_response = cleaned_response.strip()
+        
         try:
             # JSON parsing ile response'u parse et
-            parsed_content = json.loads(response)
+            parsed_content = json.loads(cleaned_response)
             return parsed_content.get("is_same", False)
         except json.JSONDecodeError:
             # Eğer JSON değilse, text içinde "true" veya "false" ara
-            response_lower = response.lower()
+            response_lower = cleaned_response.lower()
             if '"is_same": true' in response_lower or '"is_same":true' in response_lower:
                 return True
             elif '"is_same": false' in response_lower or '"is_same":false' in response_lower:
                 return False
             else:
-                logger.error(f"LM Studio response is not valid JSON and doesn't contain expected format: {response}")
+                logger.error(f"LM Studio response is not valid JSON and doesn't contain expected format: {cleaned_response}")
                 return False
             
     except Exception as e:
         logger.error(f"Error calling LM Studio API via LLMClient: {e}")
         return False
 
-async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None) -> TestCaseList:
+async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None, process_id: str = None) -> TestCaseList:
     """
     Bu fonksiyon, test_cases listesindeki benzer (duplicate) test case'leri 
     LLM tabanlı karşılaştırma ile ayıklar, unique bir liste döndürür.
@@ -137,8 +152,18 @@ async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, 
     duplicates = []
 
     for case in test_case_list.test_cases:
+        # Check if process should be stopped
+        if process_id and process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+            logger.info(f"Smart select process {process_id} was stopped by user (during case processing)")
+            break
+            
         is_duplicate = False
         for unique_case in unique_cases:
+            # Check again before each comparison
+            if process_id and process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Smart select process {process_id} was stopped during comparison")
+                break
+                
             try:
                 comparison_result = await _query_llm_similarity(case, unique_case, custom_prompt, selected_model, api_key)
             except Exception as e:
@@ -173,10 +198,241 @@ async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, 
         duplicates=duplicates
     )
 
+async def bulk_smart_select(test_case_list: TestCaseList, custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None) -> TestCaseList:
+    """
+    Tüm test case'leri tek bir LLM çağrısında toplu olarak karşılaştırarak optimization yapar.
+    Bu yöntem daha hızlı ve kaynak-verimli olmasına rağmen, büyük test case grupları için
+    token limitlerini aşabilir.
+    """
+    try:
+        # Create test cases array for bulk processing
+        test_cases_data = []
+        for idx, case in enumerate(test_case_list.test_cases):
+            case_json = case.model_dump()
+            # Remove IDs for comparison
+            case_json.pop("ScenarioID", None)
+            case_json.pop("TestCaseID", None)
+            case_json["Index"] = idx  # Add index for tracking
+            test_cases_data.append(case_json)
+
+        # Create bulk comparison prompt
+        if custom_prompt:
+            prompt_text = f"""{custom_prompt}
+
+Below are the test cases to analyze in JSON array format:
+
+{json.dumps(test_cases_data, indent=2, ensure_ascii=False)}
+
+Please analyze all test cases and return a JSON response with unique test cases and duplicates."""
+        else:
+            prompt_text = f"""
+You are an expert test case analyst. Your task is to analyze ALL provided test cases in a single operation and identify duplicate/similar test cases efficiently.
+
+ANALYSIS CRITERIA:
+1. Test cases are considered DUPLICATES if they have:
+   - Same or substantially similar Title (case-insensitive)
+   - AND very similar Description and/or Objective
+   - AND serve essentially the same testing purpose
+2. Priority order for comparison: Description > Objective > Title
+3. Consider contextual similarity, not just exact text matches
+
+OPTIMIZATION APPROACH:
+- Analyze the complete set of test cases holistically
+- Group similar test cases and select the best representative for each group
+- Preserve unique test cases that serve distinct testing purposes
+- Ensure comprehensive coverage while eliminating redundancy
+
+Below are the test cases in JSON array format:
+
+{json.dumps(test_cases_data, indent=2, ensure_ascii=False)}
+
+Return your response **only** in valid JSON with the following format:
+
+{{
+  "unique_indices": [0, 2, 5, ...],
+  "duplicate_groups": [
+    {{
+      "representative_index": 0,
+      "duplicate_indices": [3, 7, 12]
+    }},
+    {{
+      "representative_index": 2,
+      "duplicate_indices": [8, 15]
+    }}
+  ]
+}}
+
+Where:
+- unique_indices: Array of indices representing unique test cases (including representatives from duplicate groups)
+- duplicate_groups: Array of groups where each group has a representative and its duplicates
+- representative_index: The index of the test case chosen as the representative for a duplicate group
+- duplicate_indices: Array of indices that are duplicates of the representative
+
+IMPORTANT:
+- Return ONLY the raw JSON object, no markdown formatting
+- Do not use ```json``` or ``` code blocks
+- Do not provide any additional text outside the JSON object
+- Each test case should appear in either unique_indices or as part of a duplicate group, but not both
+- Representatives should also be included in unique_indices
+- Ensure all test case indices are accounted for in the response
+"""
+
+        # Make single LLM call
+        llm_client = LLMClient(model_name=selected_model, api_key=api_key)
+        llm_client.original_key = selected_model
+        
+        response = await llm_client.generate_response(
+            prompt=prompt_text.strip(),
+            temperature=0.1,
+            max_tokens=6000  # Increased for bulk response to handle larger datasets
+        )
+        
+        if not response:
+            logger.error("Empty response from LLM in bulk processing")
+            # Don't fallback - raise specific error for bulk optimization
+            raise ValueError("Bulk optimization failed: LLM returned empty response")
+        
+        # Clean LLM response from markdown code blocks
+        cleaned_response = response.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]  # Remove ```json
+        if cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response[3:]   # Remove ```
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]  # Remove ending ```
+        cleaned_response = cleaned_response.strip()
+        
+        logger.info(f"Original LLM response length: {len(response)}")
+        logger.info(f"Cleaned response length: {len(cleaned_response)}")
+        logger.info(f"Original response: {response}")
+        logger.info(f"Cleaned response: {cleaned_response}")
+        
+        try:
+            # Parse the cleaned bulk response
+            parsed_content = json.loads(cleaned_response)
+            unique_indices = parsed_content.get("unique_indices", [])
+            duplicate_groups = parsed_content.get("duplicate_groups", [])
+            
+            logger.info(f"JSON parsing successful!")
+            logger.info(f"Found unique_indices: {unique_indices}")
+            logger.info(f"Found duplicate_groups: {duplicate_groups}")
+            logger.info(f"Total unique test cases: {len(unique_indices)}")
+            logger.info(f"Total duplicate groups: {len(duplicate_groups)}")
+            
+            # Build unique cases list
+            unique_cases = []
+            for idx in unique_indices:
+                if 0 <= idx < len(test_case_list.test_cases):
+                    unique_cases.append(test_case_list.test_cases[idx])
+            
+            # Build duplicates list
+            duplicates = []
+            for group in duplicate_groups:
+                rep_idx = group.get("representative_index")
+                dup_indices = group.get("duplicate_indices", [])
+                
+                if 0 <= rep_idx < len(test_case_list.test_cases):
+                    representative = test_case_list.test_cases[rep_idx]
+                    for dup_idx in dup_indices:
+                        if 0 <= dup_idx < len(test_case_list.test_cases):
+                            duplicate_case = test_case_list.test_cases[dup_idx]
+                            duplicates.append({
+                                "DuplicateCase": duplicate_case.model_dump(),
+                                "MatchedWith": representative.model_dump()
+                            })
+            
+            # Create comparison log for bulk processing
+            comparison_logs = [{
+                "Step": 1,
+                "ProcessName": f"Bulk_Optimization_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "Timestamp": datetime.now().isoformat(),
+                "ProcessingType": "Bulk",
+                "TotalTestCases": len(test_case_list.test_cases),
+                "UniqueFound": len(unique_cases),
+                "DuplicatesFound": len(duplicates),
+                "OptimizationMethod": "Single LLM Call for All Test Cases",
+                "Efficiency": f"{len(unique_cases)}/{len(test_case_list.test_cases)} test cases kept ({(len(unique_cases)/len(test_case_list.test_cases)*100):.1f}%)",
+                "DuplicateGroups": len(duplicate_groups),
+                "LLMResponse": parsed_content,
+                "CustomPrompt": bool(custom_prompt),
+                "ModelUsed": selected_model
+            }]
+            
+            return TestCaseList(
+                test_cases=unique_cases,
+                comparison_logs=comparison_logs,
+                duplicates=duplicates
+            )
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse bulk LLM response: {e}")
+            logger.error(f"Original response was: {response}")
+            logger.error(f"Cleaned response was: {cleaned_response}")
+            # Don't fallback - raise specific error for bulk optimization
+            raise ValueError(f"Bulk optimization failed: LLM response is not valid JSON after cleaning. Cleaned response: {cleaned_response[:500]}...")
+            
+    except Exception as e:
+        logger.error(f"Error in bulk smart selection: {e}")
+        # Don't fallback - raise specific error for bulk optimization
+        raise RuntimeError(f"Bulk optimization failed: {str(e)}")
+
 class TestCaseOptimizationService:
     def __init__(self):
         self.db = get_db()  # Use synchronous database connection
         self.collection = self.db["session_history"]  # Updated to use session_history collection
+
+    def stop_process(self, process_id: str) -> Dict[str, Any]:
+        """
+        Çalışan bir process'i durdur.
+        """
+        logger.info(f"Stop process request received for process_id: {process_id}")
+        logger.info(f"Current running processes: {list(running_processes.keys())}")
+        
+        if process_id not in running_processes:
+            logger.warning(f"Process {process_id} not found in running_processes")
+            return {
+                "success": False,
+                "message": f"Process {process_id} not found or already completed"
+            }
+        
+        # Log current process status before stopping
+        current_status = running_processes[process_id]["status"]
+        logger.info(f"Process {process_id} current status: {current_status}")
+        
+        # Mark process as stopped
+        running_processes[process_id]["status"] = "stopped"
+        running_processes[process_id]["end_time"] = datetime.now()
+        
+        logger.info(f"Process {process_id} marked as stopped successfully")
+        
+        return {
+            "success": True,
+            "message": f"Process {process_id} stopped successfully"
+        }
+
+    def get_process_status(self, process_id: str) -> Dict[str, Any]:
+        """
+        Bir process'in durumunu getir.
+        """
+        if process_id not in running_processes:
+            return {
+                "success": False,
+                "message": f"Process {process_id} not found"
+            }
+        
+        return {
+            "success": True,
+            "data": running_processes[process_id]
+        }
+
+    def list_running_processes(self) -> Dict[str, Any]:
+        """
+        Tüm çalışan process'leri listele.
+        """
+        return {
+            "success": True,
+            "data": running_processes
+        }
 
     def get_process_titles_with_counts(self) -> List[Dict[str, Any]]:
         """
@@ -403,11 +659,143 @@ class TestCaseOptimizationService:
             logger.error(f"Error fetching test cases for process_title {process_title}: {e}")
             return []
 
-    async def run_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None) -> Dict[str, Any]:
+    async def run_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None, process_id: str = None) -> Dict[str, Any]:
         """
         Seçilen test case'ler üzerinde smart selection işlemini çalıştır.
         """
+        # Generate process ID if not provided
+        if not process_id:
+            process_id = str(uuid.uuid4())
+            
+        # Track this process
+        running_processes[process_id] = {
+            "status": "running",
+            "start_time": datetime.now(),
+            "process_type": "smart_selection"
+        }
+        
         try:
+            # Pydantic modeline dönüştür
+            valid_data = []
+            for item in selected_test_cases:
+                # Check if process should be stopped
+                if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                    logger.info(f"Process {process_id} was stopped by user")
+                    return {
+                        "success": False,
+                        "message": "Process stopped by user",
+                        "data": {},
+                        "process_id": process_id
+                    }
+                    
+                try:
+                    test_case = TestCase(
+                        ScenarioID=item.get("ScenarioID", ""),
+                        TestCaseID=item.get("TestCaseID", ""),
+                        Title=item.get("Title", ""),
+                        Description=item.get("Description"),
+                        Objective=item.get("Objective")
+                    )
+                    valid_data.append(test_case)
+                except Exception as e:
+                    logger.warning(f"Skipping invalid test case: {item}. Error: {e}")
+
+            if not valid_data:
+                # Remove from tracking
+                running_processes.pop(process_id, None)
+                return {
+                    "success": False,
+                    "message": "No valid test cases to process",
+                    "data": {},
+                    "process_id": process_id
+                }
+
+            # Check again before starting the main processing
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Process {process_id} was stopped by user")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+
+            # Smart selection işlemini çalıştır
+            test_case_list = TestCaseList(test_cases=valid_data)
+            unique_test_cases = await smart_select(test_case_list, custom_prompt, selected_model, api_key, process_id)
+
+            # Check if process was stopped during execution
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Process {process_id} was stopped during execution")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+
+            results = {
+                "unique_test_cases": [case.model_dump() for case in unique_test_cases.test_cases],
+                "similar_test_cases": unique_test_cases.duplicates,
+                "comparison_logs": unique_test_cases.comparison_logs,
+            }
+
+            # Mark process as completed
+            running_processes[process_id]["status"] = "completed"
+            running_processes[process_id]["end_time"] = datetime.now()
+
+            return {
+                "success": True,
+                "message": f"Successfully processed {len(valid_data)} test cases and found {len(unique_test_cases.test_cases)} unique cases",
+                "data": results,
+                "process_id": process_id
+            }
+
+        except Exception as e:
+            # Remove from tracking on error
+            running_processes.pop(process_id, None)
+            logger.error(f"Error running smart selection: {e}")
+            return {
+                "success": False,
+                "message": f"Error running smart selection: {str(e)}",
+                "data": {},
+                "process_id": process_id
+            }
+        finally:
+            # Clean up completed or errored processes after some time
+            if process_id in running_processes:
+                status = running_processes[process_id]["status"]
+                if status in ["completed", "stopped", "error"]:
+                    # Keep for a short time for status checking, then remove
+                    pass
+
+    async def run_bulk_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None, process_id: str = None) -> Dict[str, Any]:
+        """
+        Seçilen test case'ler üzerinde bulk smart selection işlemini çalıştır.
+        Tüm test case'leri tek bir LLM çağrısında karşılaştırır.
+        """
+        # Generate process ID if not provided
+        if not process_id:
+            process_id = str(uuid.uuid4())
+            
+        # Track this process
+        running_processes[process_id] = {
+            "status": "running",
+            "start_time": datetime.now(),
+            "process_type": "bulk_smart_selection"
+        }
+        
+        try:
+            # Check if process should be stopped
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Bulk process {process_id} was stopped by user")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+                
             # Pydantic modeline dönüştür
             valid_data = []
             for item in selected_test_cases:
@@ -424,35 +812,97 @@ class TestCaseOptimizationService:
                     logger.warning(f"Skipping invalid test case: {item}. Error: {e}")
 
             if not valid_data:
+                # Remove from tracking
+                running_processes.pop(process_id, None)
                 return {
                     "success": False,
                     "message": "No valid test cases to process",
-                    "data": {}
+                    "data": {},
+                    "process_id": process_id
                 }
 
-            # Smart selection işlemini çalıştır
+            # Check again before processing
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Bulk process {process_id} was stopped before processing")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+
+            # Bulk smart selection işlemini çalıştır
             test_case_list = TestCaseList(test_cases=valid_data)
-            unique_test_cases = await smart_select(test_case_list, custom_prompt, selected_model, api_key)
+            unique_test_cases = await bulk_smart_select(test_case_list, custom_prompt, selected_model, api_key)
+
+            # Check if process was stopped during execution
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Bulk process {process_id} was stopped during execution")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
 
             results = {
                 "unique_test_cases": [case.model_dump() for case in unique_test_cases.test_cases],
                 "similar_test_cases": unique_test_cases.duplicates,
                 "comparison_logs": unique_test_cases.comparison_logs,
+                "optimization_type": "bulk"
             }
+
+            # Mark process as completed
+            running_processes[process_id]["status"] = "completed"
+            running_processes[process_id]["end_time"] = datetime.now()
 
             return {
                 "success": True,
-                "message": "Smart selection completed successfully",
-                "data": results
+                "message": "Bulk smart selection completed successfully",
+                "data": results,
+                "process_id": process_id
             }
 
-        except Exception as e:
-            logger.error(f"Error running smart selection: {e}")
+        except ValueError as ve:
+            # Handle specific bulk optimization errors (JSON parsing, empty response, etc.)
+            running_processes.pop(process_id, None)
+            logger.error(f"Bulk optimization validation error: {ve}")
             return {
                 "success": False,
-                "message": f"Error running smart selection: {str(e)}",
-                "data": {}
+                "message": f"Bulk Optimization Error: {str(ve)}",
+                "data": {},
+                "process_id": process_id,
+                "error_type": "bulk_validation_error"
             }
+        except RuntimeError as re:
+            # Handle bulk optimization runtime errors
+            running_processes.pop(process_id, None)
+            logger.error(f"Bulk optimization runtime error: {re}")
+            return {
+                "success": False,
+                "message": f"Bulk Optimization Runtime Error: {str(re)}",
+                "data": {},
+                "process_id": process_id,
+                "error_type": "bulk_runtime_error"
+            }
+        except Exception as e:
+            # Remove from tracking on error
+            running_processes.pop(process_id, None)
+            logger.error(f"Error running bulk smart selection: {e}")
+            return {
+                "success": False,
+                "message": f"Unexpected error in bulk optimization: {str(e)}",
+                "data": {},
+                "process_id": process_id,
+                "error_type": "unexpected_error"
+            }
+        finally:
+            # Clean up completed or errored processes after some time
+            if process_id in running_processes:
+                status = running_processes[process_id]["status"]
+                if status in ["completed", "stopped", "error"]:
+                    # Keep for a short time for status checking, then remove
+                    pass
 
     def save_optimization_results(self, process_title: str, results: Dict[str, Any], selected_model: str = None) -> bool:
         """

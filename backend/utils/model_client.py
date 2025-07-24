@@ -336,6 +336,8 @@ class LLMClient:
             if response and hasattr(response, 'text'):
                 result = response.text
                 self.logger.info(f"Successfully generated response with Gemini model: {self.model_name}")
+                self.logger.info(f"Gemini response length: {len(result)}")
+                self.logger.info(f"Gemini response preview: {result[:200]}...")
                 return result
             else:
                 self.logger.error(f"Invalid response from Gemini API: {response}")
