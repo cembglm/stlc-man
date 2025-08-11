@@ -510,3 +510,128 @@ async def list_running_processes():
     except Exception as e:
         logger.error(f"Error in list_running_processes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/session-report/{session_id}")
+async def get_session_report(session_id: str):
+    """
+    Optimization session raporu getir.
+    """
+    try:
+        from utils.optimization_monitor import optimization_monitor
+        
+        report = optimization_monitor.export_session_report(session_id)
+        
+        if "error" in report:
+            raise HTTPException(status_code=404, detail=report["error"])
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Session report retrieved successfully",
+                "data": report
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_session_report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/error-statistics")
+async def get_error_statistics():
+    """
+    Genel hata istatistiklerini getir.
+    """
+    try:
+        from utils.optimization_monitor import optimization_monitor
+        
+        stats = optimization_monitor.get_error_statistics()
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Error statistics retrieved successfully",
+                "data": stats
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in get_error_statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/configure-retry")
+async def configure_retry(request: Request):
+    """
+    Retry ayarlarını yapılandır.
+    """
+    try:
+        data = await request.json()
+        
+        # Retry config dosyasını güncelle (runtime'da)
+        from config.test_case_optimization_config import RETRY_CONFIG
+        
+        valid_keys = {"max_retries", "base_delay", "max_delay", "exponential_base"}
+        for key, value in data.items():
+            if key in valid_keys:
+                RETRY_CONFIG[key] = value
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Retry configuration updated successfully",
+                "data": RETRY_CONFIG
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in configure_retry: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/monitoring/stats")
+async def get_optimization_stats():
+    """
+    Optimization istatistiklerini getir.
+    """
+    try:
+        from utils.optimization_monitor import optimization_monitor
+        
+        stats = optimization_monitor.get_stats_summary()
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Optimization statistics retrieved successfully",
+                "data": stats
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in get_optimization_stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/monitoring/reset")
+async def reset_optimization_stats():
+    """
+    Optimization istatistiklerini sıfırla.
+    """
+    try:
+        from utils.optimization_monitor import optimization_monitor
+        
+        optimization_monitor.reset_stats()
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Optimization statistics reset successfully"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in reset_optimization_stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

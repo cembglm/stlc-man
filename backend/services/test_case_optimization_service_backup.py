@@ -2,18 +2,63 @@ from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 from core.database import get_db
 from utils.model_client import LLMClient
-from utils.retry_utils import retry_llm_call
-from utils.optimization_monitor import optimization_monitor
 from datetime import datetime
 import json
 import uuid
 import logging
 import asyncio
+import random
 
 logger = logging.getLogger(__name__)
 
 # Global dictionary to track running processes
 running_processes = {}
+
+# Retry configuration
+MAX_RETRIES = 3
+BASE_DELAY = 1.0  # seconds
+MAX_DELAY = 60.0  # seconds
+
+async def retry_with_exponential_backoff(func, *args, max_retries=MAX_RETRIES, **kwargs):
+    """
+    Exponential backoff ile retry mekanizması
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            error_str = str(e)
+            
+            # Son deneme ise hata fırlat
+            if attempt == max_retries:
+                logger.error(f"Max retries ({max_retries}) reached for function {func.__name__}")
+                raise e
+            
+            # Retry yapılabilir hata mı kontrol et
+            is_retryable = (
+                "503" in error_str or 
+                "Service Unavailable" in error_str or
+                "429" in error_str or 
+                "RESOURCE_EXHAUSTED" in error_str or
+                "quota" in error_str.lower() or
+                "timeout" in error_str.lower() or
+                "connection" in error_str.lower() or
+                "network" in error_str.lower()
+            )
+            
+            if not is_retryable:
+                logger.warning(f"Non-retryable error in {func.__name__}: {error_str}")
+                raise e
+            
+            # Exponential backoff hesapla
+            delay = min(BASE_DELAY * (2 ** attempt) + random.uniform(0, 1), MAX_DELAY)
+            logger.warning(f"Attempt {attempt + 1}/{max_retries + 1} failed for {func.__name__}: {error_str}")
+            logger.info(f"Retrying in {delay:.2f} seconds...")
+            
+            await asyncio.sleep(delay)
+    
+    # Bu noktaya gelmemeli
+    raise Exception(f"Unexpected error in retry mechanism for {func.__name__}")
 
 class TestCase(BaseModel):
     ScenarioID: str
@@ -98,14 +143,12 @@ Important:
 """
 
     try:
-        # LM Studio API'sine LLMClient ile istek gönder (sadece bir kez oluştur)
-        logger.debug(f"Creating LLMClient for similarity check: {selected_model}")
+        # LM Studio API'sine LLMClient ile istek gönder
         llm_client = LLMClient(model_name=selected_model, api_key=api_key)
         # Set the original key to support model mapping
         llm_client.original_key = selected_model
         
         # LLMClient'ı kullanarak yanıt al
-        logger.debug(f"Sending request to LLM: {selected_model}")
         response = await llm_client.generate_response(
             prompt=prompt_text.strip(),
             temperature=0.1,  # Consistency için düşük temperature
@@ -115,8 +158,6 @@ Important:
         if not response:
             logger.error("Empty response from LLM")
             return False
-        
-        logger.debug(f"Raw LLM response: {response[:200]}...")  # İlk 200 karakter
         
         # Clean LLM response from markdown code blocks for individual comparison too
         cleaned_response = response.strip()
@@ -140,66 +181,12 @@ Important:
             elif '"is_same": false' in response_lower or '"is_same":false' in response_lower:
                 return False
             else:
-                logger.error(f"LLM response is not valid JSON and doesn't contain expected format: {cleaned_response}")
+                logger.error(f"LM Studio response is not valid JSON and doesn't contain expected format: {cleaned_response}")
                 return False
             
     except Exception as e:
-        logger.error(f"Error calling LLM API via LLMClient: {e}")
-        # Hata durumunda None döndürmek yerine exception fırlat ki retry mekanizması çalışsın
-        raise
-
-async def _query_llm_similarity_with_retry(case1: TestCase, case2: TestCase, custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None) -> bool:
-    """
-    Retry mekanizması ile LLM benzerlik sorgusu - 503 hataları için daha uzun retry
-    """
-    case1_id = getattr(case1, 'TestCaseID', 'Unknown')
-    case2_id = getattr(case2, 'TestCaseID', 'Unknown')
-    
-    try:
-        # Başarılı sonuç alınana kadar denenmeye devam et
-        max_retries = float('inf')  # Sonsuz retry
-        max_delay = 60.0 if "gemini" in selected_model.lower() else 30.0
-        
-        logger.info(f"🔄 Starting LLM comparison with unlimited retries until success for model: {selected_model}")
-        
-        # Retry mekanizması ile LLM çağrısı - başarılı olana kadar devam et  
-        result = await retry_llm_call(
-            _query_llm_similarity,
-            case1, case2, custom_prompt, selected_model, api_key,
-            max_retries=999999,  # Çok yüksek sayı (pratikte sonsuz)
-            base_delay=2.0,  # Biraz daha uzun base delay
-            max_delay=max_delay
-        )
-        
-        # Başarılı karşılaştırmayı kaydet
-        optimization_monitor.log_comparison_attempt(
-            case1_id, case2_id, 
-            success=True, 
-            attempt_number=1,  # retry_llm_call içinde attempt number takip etmiyor, bu yüzden 1
-            model_used=selected_model
-        )
-        
-        logger.info(f"✅ Successfully compared cases {case1_id} vs {case2_id} with model {selected_model}")
-        return result
-        
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"❌ Failed to compare cases {case1_id} vs {case2_id} after all retries: {error_msg}")
-        
-        # Başarısız karşılaştırmayı kaydet (bu duruma artık nadiren gireceğiz)
-        optimization_monitor.log_comparison_attempt(
-            case1_id, case2_id, 
-            success=False, 
-            attempt_number=999999,  # Unlimited retry sonrası başarısız (çok nadir)
-            error_message=error_msg,
-            model_used=selected_model
-        )
-        
-        # 503 hataları için özel mesaj
-        if "503" in error_msg or "unavailable" in error_msg.lower():
-            logger.error(f"🔴 Google Gemini servers appear to be overloaded. Please try again later.")
-        
-        return False  # Hata durumunda False döndür (farklı olarak kabul et)
+        logger.error(f"Error calling LM Studio API via LLMClient: {e}")
+        return False
 
 async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, selected_model: str = "llama3.2:3b", api_key: str = None, process_id: str = None) -> TestCaseList:
     """
@@ -225,10 +212,13 @@ async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, 
                 break
                 
             try:
-                # Retry ve monitoring ile LLM çağrısı
-                comparison_result = await _query_llm_similarity_with_retry(case, unique_case, custom_prompt, selected_model, api_key)
+                # Retry mekanizması ile LLM çağrısı
+                comparison_result = await retry_with_exponential_backoff(
+                    _query_llm_similarity, 
+                    case, unique_case, custom_prompt, selected_model, api_key
+                )
             except Exception as e:
-                logger.warning(f"LLM comparison failed: {e}")
+                logger.warning(f"LLM comparison failed after all retries: {e}")
                 comparison_result = False
 
             comparison_logs.append({
@@ -252,9 +242,6 @@ async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, 
 
         if not is_duplicate:
             unique_cases.append(case)
-
-    # Session summary logla
-    optimization_monitor.log_session_summary("individual")
 
     return TestCaseList(
         test_cases=unique_cases,
@@ -341,44 +328,15 @@ IMPORTANT:
 - Ensure all test case indices are accounted for in the response
 """
 
-        # Make single LLM call with retry
-        async def _bulk_llm_call():
-            llm_client = LLMClient(model_name=selected_model, api_key=api_key)
-            llm_client.original_key = selected_model
-            
-            return await llm_client.generate_response(
-                prompt=prompt_text.strip(),
-                temperature=0.1,
-                max_tokens=6000  # Increased for bulk response to handle larger datasets
-            )
+        # Make single LLM call
+        llm_client = LLMClient(model_name=selected_model, api_key=api_key)
+        llm_client.original_key = selected_model
         
-        # Retry mekanizması ile bulk LLM çağrısı
-        try:
-            response = await retry_llm_call(
-                _bulk_llm_call,
-                max_retries=3,
-                base_delay=2.0,  # Bulk için biraz daha uzun bekleme
-                max_delay=60.0
-            )
-            
-            # Başarılı bulk çağrıyı logla
-            optimization_monitor.log_comparison_attempt(
-                "bulk_processing", f"total_{len(test_case_list.test_cases)}_cases",
-                success=True,
-                attempt_number=1,
-                model_used=selected_model
-            )
-            
-        except Exception as e:
-            # Başarısız bulk çağrıyı logla
-            optimization_monitor.log_comparison_attempt(
-                "bulk_processing", f"total_{len(test_case_list.test_cases)}_cases",
-                success=False,
-                attempt_number=3,
-                error_message=str(e),
-                model_used=selected_model
-            )
-            raise ValueError(f"Bulk optimization failed after retries: {str(e)}")
+        response = await llm_client.generate_response(
+            prompt=prompt_text.strip(),
+            temperature=0.1,
+            max_tokens=6000  # Increased for bulk response to handle larger datasets
+        )
         
         if not response:
             logger.error("Empty response from LLM in bulk processing")
@@ -450,9 +408,6 @@ IMPORTANT:
                 "CustomPrompt": bool(custom_prompt),
                 "ModelUsed": selected_model
             }]
-            
-            # Session summary logla
-            optimization_monitor.log_session_summary("bulk")
             
             return TestCaseList(
                 test_cases=unique_cases,
@@ -919,126 +874,3 @@ class TestCaseOptimizationService:
 
             # Check again before processing
             if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
-                logger.info(f"Bulk process {process_id} was stopped before processing")
-                return {
-                    "success": False,
-                    "message": "Process stopped by user",
-                    "data": {},
-                    "process_id": process_id
-                }
-
-            # Bulk smart selection işlemini çalıştır
-            test_case_list = TestCaseList(test_cases=valid_data)
-            unique_test_cases = await bulk_smart_select(test_case_list, custom_prompt, selected_model, api_key)
-
-            # Check if process was stopped during execution
-            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
-                logger.info(f"Bulk process {process_id} was stopped during execution")
-                return {
-                    "success": False,
-                    "message": "Process stopped by user",
-                    "data": {},
-                    "process_id": process_id
-                }
-
-            results = {
-                "unique_test_cases": [case.model_dump() for case in unique_test_cases.test_cases],
-                "similar_test_cases": unique_test_cases.duplicates,
-                "comparison_logs": unique_test_cases.comparison_logs,
-                "optimization_type": "bulk"
-            }
-
-            # Mark process as completed
-            running_processes[process_id]["status"] = "completed"
-            running_processes[process_id]["end_time"] = datetime.now()
-
-            return {
-                "success": True,
-                "message": "Bulk smart selection completed successfully",
-                "data": results,
-                "process_id": process_id
-            }
-
-        except ValueError as ve:
-            # Handle specific bulk optimization errors (JSON parsing, empty response, etc.)
-            running_processes.pop(process_id, None)
-            logger.error(f"Bulk optimization validation error: {ve}")
-            return {
-                "success": False,
-                "message": f"Bulk Optimization Error: {str(ve)}",
-                "data": {},
-                "process_id": process_id,
-                "error_type": "bulk_validation_error"
-            }
-        except RuntimeError as re:
-            # Handle bulk optimization runtime errors
-            running_processes.pop(process_id, None)
-            logger.error(f"Bulk optimization runtime error: {re}")
-            return {
-                "success": False,
-                "message": f"Bulk Optimization Runtime Error: {str(re)}",
-                "data": {},
-                "process_id": process_id,
-                "error_type": "bulk_runtime_error"
-            }
-        except Exception as e:
-            # Remove from tracking on error
-            running_processes.pop(process_id, None)
-            logger.error(f"Error running bulk smart selection: {e}")
-            return {
-                "success": False,
-                "message": f"Unexpected error in bulk optimization: {str(e)}",
-                "data": {},
-                "process_id": process_id,
-                "error_type": "unexpected_error"
-            }
-        finally:
-            # Clean up completed or errored processes after some time
-            if process_id in running_processes:
-                status = running_processes[process_id]["status"]
-                if status in ["completed", "stopped", "error"]:
-                    # Keep for a short time for status checking, then remove
-                    pass
-
-    def save_optimization_results(self, process_title: str, results: Dict[str, Any], selected_model: str = None) -> bool:
-        """
-        Optimization sonuçlarını MongoDB'ye kaydet.
-        """
-        try:
-            # Optimization sonuçlarını ayrı bir koleksiyonda sakla
-            optimization_collection = self.db["test_case_optimizations"]
-            
-            document = {
-                "process_title": process_title,
-                "optimization_results": results,
-                "selected_model": selected_model,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat()
-            }
-            
-            # Upsert operation - eğer varsa güncelle, yoksa yeni oluştur
-            optimization_collection.update_one(
-                {"process_title": process_title},
-                {"$set": document},
-                upsert=True
-            )
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error saving optimization results: {e}")
-            return False
-
-    def get_optimization_results(self, process_title: str) -> Optional[Dict[str, Any]]:
-        """
-        Belirli bir process_title için kaydedilmiş optimization sonuçlarını getir.
-        """
-        try:
-            optimization_collection = self.db["test_case_optimizations"]
-            result = optimization_collection.find_one({"process_title": process_title})
-            
-            if result:
-                return result.get("optimization_results")
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching optimization results: {e}")
-            return None
