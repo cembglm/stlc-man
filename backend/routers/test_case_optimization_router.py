@@ -32,6 +32,8 @@ async def get_available_models():
             {"key": "gemma3:4b", "name": "Gemma 3 (4B)", "description": "Google's enhanced model", "type": "local"},
             {"key": "google/gemma-3-12b", "name": "Gemma 3 (12B)", "description": "Google's large Gemma model", "type": "local"},
             {"key": "llama3.2:3b", "name": "Llama 3.2 (3B)", "description": "Meta's latest efficient model", "type": "local"},
+            {"key": "meta/llama-3.3-70b", "name": "Llama 3.3 (70B)", "description": "Meta's latest large language model", "type": "local"},
+            {"key": "openai/gpt-oss-20b", "name": "GPT OSS (20B)", "description": "OpenAI's open source large model", "type": "local"},
             {"key": "qwen2.5:7b", "name": "Qwen 2.5 (7B)", "description": "Alibaba's advanced model", "type": "local"},
             {"key": "qwen2.5:7b-1m", "name": "Qwen 2.5 (7B-1M)", "description": "Large context version", "type": "local"},
             {"key": "qwen2.5-coder:3b", "name": "Qwen 2.5 Coder (3B)", "description": "Coding-focused Qwen model", "type": "local"},

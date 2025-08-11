@@ -281,6 +281,8 @@ class LLMClient:
         "google/gemma-3-12b": "gemma-3-12b-it",
         "llama3.2:3b": "llama-3.2-3b-instruct",
         "llama-3.2-3b-instruct": "llama-3.2-3b-instruct",  # Fallback case
+        "meta/llama-3.3-70b": "meta/llama-3.3-70b",
+        "openai/gpt-oss-20b": "openai/gpt-oss-20b",
         "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
         "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",  # Büyük içerikler için özel mapping
         "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
