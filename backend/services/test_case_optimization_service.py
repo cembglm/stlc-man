@@ -385,15 +385,88 @@ IMPORTANT:
             # Don't fallback - raise specific error for bulk optimization
             raise ValueError("Bulk optimization failed: LLM returned empty response")
         
-        # Clean LLM response from markdown code blocks
-        cleaned_response = response.strip()
-        if cleaned_response.startswith("```json"):
-            cleaned_response = cleaned_response[7:]  # Remove ```json
-        if cleaned_response.startswith("```"):
-            cleaned_response = cleaned_response[3:]   # Remove ```
-        if cleaned_response.endswith("```"):
-            cleaned_response = cleaned_response[:-3]  # Remove ending ```
-        cleaned_response = cleaned_response.strip()
+        # Enhanced JSON extraction algorithm - extract JSON from mixed text response
+        def extract_json_from_response(response_text):
+            """Extract JSON object from text response that may contain explanatory text"""
+            response_text = response_text.strip()
+            
+            # Method 1: Try to find JSON with regex pattern
+            import re
+            json_pattern = r'\{[^{}]*"unique_indices"[^{}]*\[[^\]]*\][^{}]*"duplicate_groups"[^{}]*\[[^\]]*\][^{}]*\}'
+            json_matches = re.findall(json_pattern, response_text, re.DOTALL)
+            
+            if json_matches:
+                logger.info(f"Found {len(json_matches)} JSON patterns with regex")
+                # Try each match until we find valid JSON
+                for match in json_matches:
+                    try:
+                        # Clean the match
+                        cleaned_match = match.strip()
+                        test_json = json.loads(cleaned_match)
+                        if "unique_indices" in test_json and "duplicate_groups" in test_json:
+                            logger.info("Successfully validated JSON from regex match")
+                            return cleaned_match
+                    except json.JSONDecodeError:
+                        continue
+            
+            # Method 2: Look for standalone JSON block patterns
+            json_block_patterns = [
+                r'```json\s*(\{.*?\})\s*```',
+                r'```\s*(\{.*?\})\s*```',
+                r'(\{[^{]*"unique_indices"[^}]*\})'
+            ]
+            
+            for pattern in json_block_patterns:
+                matches = re.findall(pattern, response_text, re.DOTALL)
+                for match in matches:
+                    try:
+                        cleaned_match = match.strip()
+                        test_json = json.loads(cleaned_match)
+                        if "unique_indices" in test_json and "duplicate_groups" in test_json:
+                            logger.info(f"Successfully validated JSON from pattern: {pattern[:50]}...")
+                            return cleaned_match
+                    except json.JSONDecodeError:
+                        continue
+            
+            # Method 3: Find JSON object by brace matching
+            brace_count = 0
+            start_idx = -1
+            end_idx = -1
+            
+            for i, char in enumerate(response_text):
+                if char == '{':
+                    if start_idx == -1:
+                        start_idx = i
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0 and start_idx != -1:
+                        end_idx = i
+                        potential_json = response_text[start_idx:end_idx + 1]
+                        try:
+                            test_json = json.loads(potential_json)
+                            if "unique_indices" in test_json and "duplicate_groups" in test_json:
+                                logger.info("Successfully validated JSON from brace matching")
+                                return potential_json
+                        except json.JSONDecodeError:
+                            pass
+                        # Reset for next potential JSON block
+                        start_idx = -1
+            
+            # Method 4: Traditional markdown block cleaning as fallback
+            cleaned_response = response_text.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:]
+            if cleaned_response.startswith("```"):
+                cleaned_response = cleaned_response[3:]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3]
+            cleaned_response = cleaned_response.strip()
+            
+            return cleaned_response
+        
+        # Use enhanced JSON extraction
+        cleaned_response = extract_json_from_response(response)
         
         logger.info(f"Original LLM response length: {len(response)}")
         logger.info(f"Cleaned response length: {len(cleaned_response)}")

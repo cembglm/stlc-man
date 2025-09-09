@@ -22,6 +22,137 @@ const TestCaseOptimization = ({ onPromptChange, onRunFunction, onLoadingChange, 
   const [currentProcessId, setCurrentProcessId] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
 
+  // Available models for test case optimization
+  const modelsList = [
+    // Original models
+    {
+      key: "codegeex4:9b",
+      name: "CodeGeeX4 9B",
+      description: "Multilingual code generation with 9B parameters"
+    },
+    {
+      key: "codellama:7b",
+      name: "CodeLlama 7B",
+      description: "Meta's code generation model with 7B parameters"
+    },
+    {
+      key: "deepseek-coder:6.7b",
+      name: "DeepSeek Coder 6.7B",
+      description: "Specialized for code analysis and generation"
+    },
+    {
+      key: "gemma2:2b",
+      name: "Gemma2 2B",
+      description: "Google's lightweight model for code tasks"
+    },
+    {
+      key: "gemma3:4b",
+      name: "Gemma3 4B",
+      description: "Enhanced Gemma model with 4B parameters"
+    },
+    {
+      key: "google/gemma-3-12b",
+      name: "Google Gemma 3 12B",
+      description: "Large Gemma model for complex tasks"
+    },
+    {
+      key: "llama3.2:3b",
+      name: "Llama 3.2 3B",
+      description: "Fast and efficient 3B parameter model"
+    },
+    {
+      key: "llama-3.2-3b-instruct",
+      name: "Llama 3.2 3B Instruct",
+      description: "Instruction-tuned version of Llama 3.2 3B"
+    },
+    {
+      key: "meta/llama-3.3-70b",
+      name: "Meta Llama 3.3 70B",
+      description: "Large language model with 70B parameters"
+    },
+    {
+      key: "mistralai/codestral-22b-v0.1",
+      name: "Mistral Codestral 22B",
+      description: "Specialized for code generation and analysis"
+    },
+    {
+      key: "openai/gpt-oss-20b",
+      name: "GPT OSS 20B",
+      description: "Open-source GPT model with 20B parameters"
+    },
+    {
+      key: "qwen/qwq-32b",
+      name: "Qwen QwQ 32B",
+      description: "Reasoning-focused model for complex problem solving"
+    },
+    {
+      key: "qwen2.5:7b",
+      name: "Qwen 2.5 7B",
+      description: "Multilingual model for code generation"
+    },
+    {
+      key: "qwen2.5:7b-1m",
+      name: "Qwen 2.5 7B (1M context)",
+      description: "Extended context version for large content"
+    },
+    {
+      key: "qwen2.5-coder:3b",
+      name: "Qwen 2.5 Coder 3B",
+      description: "Lightweight model for code completion"
+    },
+    {
+      key: "qwen/qwen3-14b",
+      name: "Qwen 3 14B",
+      description: "Advanced reasoning and code analysis"
+    },
+    {
+      key: "stable-code:3b",
+      name: "Stable Code 3B",
+      description: "Stable and reliable code generation"
+    },
+    {
+      key: "starcoder2:7b",
+      name: "StarCoder2 7B",
+      description: "Advanced code generation and analysis"
+    },
+    // New models added for Test Case Optimization
+    {
+      key: "codellama:70b-instruct",
+      name: "CodeLlama 70B Instruct",
+      description: "Large instruction-following model for complex code analysis"
+    },
+    {
+      key: "kimi-dev:72b",
+      name: "Kimi Dev 72B",
+      description: "Development-focused model with 72B parameters"
+    },
+    {
+      key: "openai/gpt-oss-120b",
+      name: "GPT OSS 120B",
+      description: "Massive open-source model for complex reasoning"
+    },
+    {
+      key: "deepseek-r1-distill:32b",
+      name: "DeepSeek R1 Distill 32B",
+      description: "Distilled reasoning model for analytical tasks"
+    },
+    {
+      key: "google/gemma-3-27b",
+      name: "Google Gemma 3 27B",
+      description: "Large Gemma model for detailed analysis (may be slow)"
+    },
+    {
+      key: "qwen/qwen3-coder-30b",
+      name: "Qwen 3 Coder 30B",
+      description: "Advanced coding model with 30B parameters (may be slow)"
+    },
+    {
+      key: "deepseek/deepseek-r1-qwen3-8b",
+      name: "DeepSeek R1 Qwen3 8B",
+      description: "Reasoning-optimized model based on Qwen 3"
+    }
+  ];
+
   // Default prompts for each optimization type
   const defaultPrompts = {
     individual: `You are given two test cases, each with a certain set of fields:
@@ -203,12 +334,19 @@ IMPORTANT:
 
   const fetchAvailableModels = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/test-case-optimization/models');
-      if (response.data.success) {
-        setAvailableModels(response.data.data);
+      console.log('TestCaseOptimization - Initializing available models from static list');
+      setAvailableModels(modelsList);
+      
+      // Set default model if none selected
+      if (!selectedModel && modelsList.length > 0) {
+        setSelectedModel(modelsList[0].key);
       }
+      
+      console.log('TestCaseOptimization - Available models loaded:', modelsList.length);
     } catch (err) {
       console.error('Failed to fetch models:', err.message);
+      // Fallback to static list
+      setAvailableModels(modelsList);
     }
   };
 

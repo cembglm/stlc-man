@@ -34,6 +34,16 @@ function useModelInfo(selectedModel) {
       "Effective for small and medium-sized code completion tasks.",
       "Provides low-latency responses."
     ],
+    "mistralai/codestral-22b-v0.1": [
+      "A 22B parameter model specialized for code generation and analysis.",
+      "Excellent performance in complex coding tasks and multi-language support.",
+      "Optimized for software development workflows."
+    ],
+    "qwen/qwq-32b": [
+      "A 32B parameter reasoning-focused model for complex problem solving.",
+      "Excels in analytical thinking and step-by-step reasoning.",
+      "Ideal for complex logic and mathematical computations."
+    ],
     "qwen2.5:7b": [
       "A multilingual 7B parameter model for code generation.",
       "Generates high-accuracy code in multiple programming languages.",
@@ -53,6 +63,42 @@ function useModelInfo(selectedModel) {
       "A 7B parameter model with advanced code generation and analysis capabilities.",
       "Handles complex code structures and projects well.",
       "Excels in code completion and suggestion tasks."
+    ],
+    // New models added for Test Case Optimization
+    "codellama:70b-instruct": [
+      "A 70B parameter CodeLlama model optimized for instruction-following.",
+      "Excellent for complex code analysis and test case optimization.",
+      "High-performance model with detailed reasoning capabilities."
+    ],
+    "kimi-dev:72b": [
+      "A large 72B parameter development-focused model.",
+      "Specialized for software development and testing workflows.",
+      "Advanced reasoning for complex test case analysis."
+    ],
+    "openai/gpt-oss-120b": [
+      "A massive 120B parameter open-source GPT model.",
+      "Exceptional performance in complex reasoning and analysis.",
+      "Ideal for comprehensive test case optimization and planning."
+    ],
+    "deepseek-r1-distill:32b": [
+      "A 32B parameter distilled model from DeepSeek R1.",
+      "Optimized for reasoning and analytical tasks.",
+      "Efficient performance in test case analysis and optimization."
+    ],
+    "google/gemma-3-27b": [
+      "Google's 27B parameter Gemma 3 model.",
+      "Advanced language understanding and generation capabilities.",
+      "Suitable for detailed test case analysis and optimization."
+    ],
+    "qwen/qwen3-coder-30b": [
+      "A 30B parameter Qwen 3 model specialized for coding tasks.",
+      "Excellent for code analysis and test case generation.",
+      "Advanced understanding of software testing methodologies."
+    ],
+    "deepseek/deepseek-r1-qwen3-8b": [
+      "An 8B parameter DeepSeek R1 model based on Qwen 3.",
+      "Optimized for reasoning and code analysis tasks.",
+      "Good balance of performance and efficiency for test optimization."
     ]
   };
 
@@ -72,10 +118,20 @@ export default function TestPlanningForm({ process, onAIModelUpdate, onOutputFor
     "gemma2:2b",
     "gemma3:4b",
     "llama3.2:3b",
+    "mistralai/codestral-22b-v0.1",
+    "qwen/qwq-32b",
     "qwen2.5:7b",
     "qwen2.5-coder:3b",
     "stable-code:3b",
-    "starcoder2:7b"
+    "starcoder2:7b",
+    // New models added for Test Case Optimization
+    "codellama:70b-instruct",
+    "kimi-dev:72b",
+    "openai/gpt-oss-120b",
+    "deepseek-r1-distill:32b",
+    "google/gemma-3-27b",
+    "qwen/qwen3-coder-30b",
+    "deepseek/deepseek-r1-qwen3-8b"
   ];
 
   // Call onAIModelUpdate when component mounts to set initial model

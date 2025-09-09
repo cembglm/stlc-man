@@ -282,13 +282,23 @@ class LLMClient:
         "llama3.2:3b": "llama-3.2-3b-instruct",
         "llama-3.2-3b-instruct": "llama-3.2-3b-instruct",  # Fallback case
         "meta/llama-3.3-70b": "meta/llama-3.3-70b",
+        "mistralai/codestral-22b-v0.1": "mistralai/codestral-22b-v0.1",
         "openai/gpt-oss-20b": "openai/gpt-oss-20b",
+        "qwen/qwq-32b": "qwen/qwq-32b",
         "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
         "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",  # Büyük içerikler için özel mapping
         "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
         "qwen/qwen3-14b": "qwen3-14b-instruct",
         "stable-code:3b": "stable-code-instruct-3b",
-        "starcoder2:7b": "starcoder2-7b"
+        "starcoder2:7b": "starcoder2-7b",
+        # Yeni Test Case Optimization modelleri
+        "codellama:70b-instruct": "CodeLlama-70B-Instruct-GGUF/codellama-70b-instruct.Q4_K_S.gguf",
+        "kimi-dev:72b": "Kimi-Dev-72B-GGUF/Kimi-Dev-72B-Q3_K_S.gguf",
+        "openai/gpt-oss-120b": "openai/gpt-oss-120b",
+        "deepseek-r1-distill:32b": "DeepSeek-R1-Distill-Qwen-32B-GGUF/DeepSeek-R1-Distill-Qwen-32B-Q3_K_L.gguf",
+        "google/gemma-3-27b": "google/gemma-3-27b",
+        "qwen/qwen3-coder-30b": "qwen/qwen3-coder-30b",
+        "deepseek/deepseek-r1-qwen3-8b": "deepseek/deepseek-r1-0528-qwen3-8b"
         }
 
         
