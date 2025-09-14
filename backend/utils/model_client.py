@@ -271,46 +271,97 @@ class LLMClient:
         if not model_key or not isinstance(model_key, str):
             self.logger.warning(f"Invalid model_key: {model_key}, using default model")
             return "llama-3.2-1b-instruct"  # Default model
+        
+        # Merkezi konfigürasyondan model mapping'i al
+        try:
+            from config.models_config import get_model_by_key
+            model_config = get_model_by_key(model_key)
             
+            if model_config:
+                # Modelin identifier'ını al (LM Studio için)
+                model_id = self._get_lm_studio_identifier(model_key, model_config)
+                self.logger.info(f"Selected model from config: {model_key} -> {model_id}")
+                return model_id
+            else:
+                self.logger.warning(f"Model key '{model_key}' not found in central config")
+        except ImportError as e:
+            self.logger.warning(f"Could not import central config: {e}, falling back to local mapping")
+        except Exception as e:
+            self.logger.warning(f"Error accessing central config: {e}, falling back to local mapping")
+        
+        # Fallback: Eski hardcoded mapping (geriye uyumluluk için)
         model_mapping = {
-        "codegeex4:9b": "codegeex4-all-9b",
-        "codellama:7b": "codellama-7b-instruct",
-        "deepseek-coder:6.7b": "deepseek-coder-6.7b-instruct",
-        "gemma2:2b": "gemma-2-2b-it",
-        "gemma3:4b": "gemma-3-4b-it",
-        "google/gemma-3-12b": "gemma-3-12b-it",
-        "llama3.2:3b": "llama-3.2-3b-instruct",
-        "llama-3.2-3b-instruct": "llama-3.2-3b-instruct",  # Fallback case
-        "meta/llama-3.3-70b": "meta/llama-3.3-70b",
-        "mistralai/codestral-22b-v0.1": "mistralai/codestral-22b-v0.1",
-        "openai/gpt-oss-20b": "openai/gpt-oss-20b",
-        "qwen/qwq-32b": "qwen/qwq-32b",
-        "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
-        "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",  # Büyük içerikler için özel mapping
-        "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
-        "qwen/qwen3-14b": "qwen3-14b-instruct",
-        "stable-code:3b": "stable-code-instruct-3b",
-        "starcoder2:7b": "starcoder2-7b",
-        # Yeni Test Case Optimization modelleri
-        "codellama:70b-instruct": "CodeLlama-70B-Instruct-GGUF/codellama-70b-instruct.Q4_K_S.gguf",
-        "kimi-dev:72b": "Kimi-Dev-72B-GGUF/Kimi-Dev-72B-Q3_K_S.gguf",
-        "openai/gpt-oss-120b": "openai/gpt-oss-120b",
-        "deepseek-r1-distill:32b": "DeepSeek-R1-Distill-Qwen-32B-GGUF/DeepSeek-R1-Distill-Qwen-32B-Q3_K_L.gguf",
-        "google/gemma-3-27b": "google/gemma-3-27b",
-        "qwen/qwen3-coder-30b": "qwen/qwen3-coder-30b",
-        "deepseek/deepseek-r1-qwen3-8b": "deepseek/deepseek-r1-0528-qwen3-8b"
+            "codegeex4:9b": "codegeex4-all-9b",
+            "codellama:7b": "codellama-7b-instruct",
+            "deepseek-coder:6.7b": "deepseek-coder-6.7b-instruct",
+            "gemma2:2b": "gemma-2-2b-it",
+            "gemma3:4b": "gemma-3-4b-it",
+            "google/gemma-3-12b": "gemma-3-12b-it",
+            "llama3.2:3b": "llama-3.2-3b-instruct",
+            "llama-3.2-3b-instruct": "llama-3.2-3b-instruct",  # Fallback case
+            "meta/llama-3.3-70b": "meta/llama-3.3-70b",
+            "mistralai/codestral-22b-v0.1": "mistralai/codestral-22b-v0.1",
+            "openai/gpt-oss-20b": "openai/gpt-oss-20b",
+            "qwen/qwq-32b": "qwen/qwq-32b",
+            "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
+            "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",
+            "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
+            "qwen/qwen3-14b": "qwen3-14b-instruct",
+            "stable-code:3b": "stable-code-instruct-3b",
+            "starcoder2:7b": "starcoder2-7b",
+            # Yeni Test Case Optimization modelleri
+            "codellama:70b-instruct": "CodeLlama-70B-Instruct-GGUF/codellama-70b-instruct.Q4_K_S.gguf",
+            "kimi-dev:72b": "Kimi-Dev-72B-GGUF/Kimi-Dev-72B-Q3_K_S.gguf",
+            "openai/gpt-oss-120b": "openai/gpt-oss-120b",
+            "deepseek-r1-distill:32b": "DeepSeek-R1-Distill-Qwen-32B-GGUF/DeepSeek-R1-Distill-Qwen-32B-Q3_K_L.gguf",
+            "google/gemma-3-27b": "google/gemma-3-27b",
+            "qwen/qwen3-coder-30b": "qwen/qwen3-coder-30b",
+            "deepseek/deepseek-r1-qwen3-8b": "deepseek/deepseek-r1-0528-qwen3-8b"
         }
-
         
         model_id = model_mapping.get(model_key, None)
-        self.logger.info(f"Model id: {model_id}")
-        self.logger.info(f"Model mapping: {model_mapping}")
+        self.logger.info(f"Model id from fallback mapping: {model_id}")
         if not model_id:
             self.logger.warning(f"Unknown model_key: {model_key}, using default model")
             return "llama-3.2-1b-instruct"  # Default model
             
-        self.logger.info(f"Selected model: {model_key} -> {model_id}")
+        self.logger.info(f"Selected model (fallback): {model_key} -> {model_id}")
         return model_id
+
+    def _get_lm_studio_identifier(self, model_key, model_config):
+        """Model konfigürasyonuna göre LM Studio identifier'ını döndür"""
+        # API modelleri için direkt model key'i kullan
+        if model_config.get("type") == "api":
+            return model_key
+        
+        # Local modeller için özel mapping'ler
+        special_mappings = {
+            "codegeex4:9b": "codegeex4-all-9b",
+            "codellama:7b": "codellama-7b-instruct",
+            "deepseek-coder:6.7b": "deepseek-coder-6.7b-instruct",
+            "gemma2:2b": "gemma-2-2b-it",
+            "gemma3:4b": "gemma-3-4b-it",
+            "google/gemma-3-12b": "gemma-3-12b-it",
+            "llama3.2:3b": "llama-3.2-3b-instruct",
+            "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
+            "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",
+            "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
+            "qwen/qwen3-14b": "qwen3-14b-instruct",
+            "stable-code:3b": "stable-code-instruct-3b",
+            "starcoder2:7b": "starcoder2-7b",
+            # Büyük modeller için özel GGUF path'leri
+            "codellama:70b-instruct": "CodeLlama-70B-Instruct-GGUF/codellama-70b-instruct.Q4_K_S.gguf",
+            "kimi-dev:72b": "Kimi-Dev-72B-GGUF/Kimi-Dev-72B-Q3_K_S.gguf",
+            "deepseek-r1-distill:32b": "DeepSeek-R1-Distill-Qwen-32B-GGUF/DeepSeek-R1-Distill-Qwen-32B-Q3_K_L.gguf",
+            "deepseek/deepseek-r1-qwen3-8b": "deepseek/deepseek-r1-0528-qwen3-8b"
+        }
+        
+        # Önce özel mapping'lere bak
+        if model_key in special_mappings:
+            return special_mappings[model_key]
+        
+        # Yoksa direkt model key'i kullan
+        return model_key
 
     async def generate_response(self, prompt, temperature=0.7, max_tokens=4096, response_format=None):
         """LLM API çağrısı yapan temel metod - rate limiting ile"""

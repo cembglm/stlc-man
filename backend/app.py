@@ -14,6 +14,7 @@ from stlc.test_planning import router as test_planning_process_router
 from stlc.environment_setup import router as environment_setup_router
 from routers.environment_setup_router import router as environment_setup_prompt_router
 from routers.test_case_optimization_router import router as test_case_optimization_router
+from routers.models_router import router as models_router
 # from routers.test_scenario_analytics_router import router as test_scenario_analytics_router
 
 # Auto-initialization import
@@ -112,6 +113,7 @@ app.include_router(test_planning_process_router, prefix="/api/processes/test-pla
 app.include_router(environment_setup_router, prefix="/api/processes/environment-setup")
 app.include_router(environment_setup_prompt_router)  # environment_setup prompt router
 app.include_router(test_case_optimization_router)  # test case optimization router
+app.include_router(models_router)  # Merkezi model yönetimi router'ı
 # app.include_router(test_scenario_analytics_router, prefix="/api")  # Test scenario analytics
 
 @app.get("/")
