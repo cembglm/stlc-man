@@ -17,12 +17,26 @@ router = APIRouter(
 async def get_available_models():
     """
     Kullanılabilir LLM modellerini getir.
+    Merkezi model konfigürasyonundan model listesini döndürür.
     """
     try:
-        # Model mapping'den mevcut modelleri al
-        from utils.model_client import LLMClient
+        # Merkezi konfigürasyondan modelleri al
+        from config.models_config import get_legacy_model_list
+        available_models = get_legacy_model_list()
         
-        # Model mapping'i statik olarak döndür
+        logger.info(f"Retrieved {len(available_models)} models from central configuration")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Available models retrieved successfully from central configuration",
+                "data": available_models
+            }
+        )
+    except ImportError as e:
+        logger.warning(f"Could not import central config: {e}, falling back to static list")
+        # Fallback: Eski statik liste (geriye uyumluluk için)
         available_models = [
             # Local LM Studio Models
             {"key": "codegeex4:9b", "name": "CodeGeeX4 (9B)", "description": "Code generation optimized model", "type": "local"},
@@ -49,13 +63,11 @@ async def get_available_models():
             {"key": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "description": "Google's fast model", "type": "api", "provider": "Google"}
         ]
         
-        # Force reload - Updated models: qwen/qwq-32b, mistralai/codestral-22b-v0.1 with LM Studio mappings
-        
         return JSONResponse(
             status_code=200,
             content={
                 "success": True,
-                "message": "Available models retrieved successfully",
+                "message": "Available models retrieved successfully (fallback mode)",
                 "data": available_models
             }
         )

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
+import { useModels } from '../../hooks/useModels';
 
 // Model açıklamaları (CodeReviewForm.jsx'den alınmıştır)
 const modelDescriptions = {
@@ -55,22 +56,20 @@ const modelDescriptions = {
   ]
 };
 
-const models = [
-  "codegeex4:9b",
-  "codellama:7b",
-  "deepseek-coder:6.7b",
-  "gemma2:2b",
-  "gemma3:4b",
-  "llama3.2:3b",
-  "qwen2.5:7b",
-  "qwen2.5-coder:3b",
-  "stable-code:3b",
-  "starcoder2:7b"
-];
-
 export default function RequirementAnalysisForm({ process, onAIModelUpdate, aiModels, disabled }) {
   const [model, setModel] = useState(aiModels?.[process?.id] || 'llama3.2: 1B');
   const [modelInfo, setModelInfo] = useState([]);
+
+  // Merkezi model hook'unu kullan
+  const { 
+    models: availableModels, 
+    loading: modelsLoading, 
+    error: modelsError,
+    getModelDescriptions
+  } = useModels({ 
+    autoFetch: true,
+    includeDescriptions: true 
+  });
 
   useEffect(() => {
     if (process && onAIModelUpdate && !aiModels?.[process?.id]) {
@@ -97,13 +96,20 @@ export default function RequirementAnalysisForm({ process, onAIModelUpdate, aiMo
             value={model}
             onChange={handleModelChange}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-            disabled={disabled}
+            disabled={disabled || modelsLoading}
           >
-            <option value="">Default model: llama3.2: 1B</option>
-            {models.map(m => (
-              <option key={m} value={m}>{m}</option>
+            <option value="">
+              {modelsLoading ? "Loading models..." : "Default model: llama3.2: 1B"}
+            </option>
+            {availableModels && availableModels.map(m => (
+              <option key={m.key} value={m.key}>{m.name} - {m.description}</option>
             ))}
           </select>
+          {modelsError && (
+            <p className="mt-1 text-sm text-red-600">
+              Error loading models: {modelsError}
+            </p>
+          )}
         </div>
         <div className="mt-2 text-sm text-blue-600 font-semibold">
           Currently selected model: {model || 'llama3.2: 1B'}
