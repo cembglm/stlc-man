@@ -15,19 +15,24 @@ const safeRenderChildren = (children) => {
     return children;
   }
   
-  // If it's a React element, return its text content or a placeholder
+  // If it's a React element, return the children directly for React to render
   if (React.isValidElement(children)) {
-    return '[React Element]';
+    return children;
   }
   
   // If it's an array, process each item
   if (Array.isArray(children)) {
-    return children.map(child => safeRenderChildren(child)).join('');
+    return children.map((child, index) => {
+      if (React.isValidElement(child)) {
+        return React.cloneElement(child, { key: index });
+      }
+      return safeRenderChildren(child);
+    });
   }
   
   // If it's a DOM node, return its text content
   if (children && typeof children === 'object' && children.nodeType) {
-    return children.textContent || '[DOM Node]';
+    return children.textContent || '';
   }
   
   // For other objects, try to convert to JSON, but handle circular references
@@ -570,10 +575,18 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
             <ReactMarkdown 
               className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
               components={{
-                p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                p: ({children}) => <p className="break-words mb-2 last:mb-0">{safeRenderChildren(children)}</p>,
                 li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
-                td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
-                th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
+                td: ({children}) => <td className="break-words max-w-xs px-2 py-1">{safeRenderChildren(children)}</td>,
+                th: ({children}) => <th className="break-words px-2 py-1 font-semibold">{safeRenderChildren(children)}</th>,
+                h1: ({children}) => <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0">{safeRenderChildren(children)}</h1>,
+                h2: ({children}) => <h2 className="text-lg font-semibold mb-2 mt-3">{safeRenderChildren(children)}</h2>,
+                h3: ({children}) => <h3 className="text-md font-medium mb-2 mt-2">{safeRenderChildren(children)}</h3>,
+                ul: ({children}) => <ul className="list-disc pl-6 mb-3 space-y-1">{safeRenderChildren(children)}</ul>,
+                ol: ({children}) => <ol className="list-decimal pl-6 mb-3 space-y-1">{safeRenderChildren(children)}</ol>,
+                blockquote: ({children}) => <blockquote className="border-l-4 border-gray-300 pl-4 italic my-3">{safeRenderChildren(children)}</blockquote>,
+                code: ({children}) => <code className="bg-gray-100 px-1 rounded text-sm">{safeRenderChildren(children)}</code>,
+                pre: ({children}) => <pre className="bg-gray-100 p-3 rounded overflow-x-auto mb-3">{safeRenderChildren(children)}</pre>
               }}
             >
               {review}
@@ -1762,10 +1775,18 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   <ReactMarkdown 
                     className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
                     components={{
-                      p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                      p: ({children}) => <p className="break-words mb-2 last:mb-0">{safeRenderChildren(children)}</p>,
                       li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
-                      td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
-                      th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
+                      td: ({children}) => <td className="break-words max-w-xs px-2 py-1">{safeRenderChildren(children)}</td>,
+                      th: ({children}) => <th className="break-words px-2 py-1 font-semibold">{safeRenderChildren(children)}</th>,
+                      h1: ({children}) => <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0">{safeRenderChildren(children)}</h1>,
+                      h2: ({children}) => <h2 className="text-lg font-semibold mb-2 mt-3">{safeRenderChildren(children)}</h2>,
+                      h3: ({children}) => <h3 className="text-md font-medium mb-2 mt-2">{safeRenderChildren(children)}</h3>,
+                      ul: ({children}) => <ul className="list-disc pl-6 mb-3 space-y-1">{safeRenderChildren(children)}</ul>,
+                      ol: ({children}) => <ol className="list-decimal pl-6 mb-3 space-y-1">{safeRenderChildren(children)}</ol>,
+                      blockquote: ({children}) => <blockquote className="border-l-4 border-gray-300 pl-4 italic my-3">{safeRenderChildren(children)}</blockquote>,
+                      code: ({children}) => <code className="bg-gray-100 px-1 rounded text-sm">{safeRenderChildren(children)}</code>,
+                      pre: ({children}) => <pre className="bg-gray-100 p-3 rounded overflow-x-auto mb-3">{safeRenderChildren(children)}</pre>
                     }}
                   >
                     {analysisContent}
@@ -1985,60 +2006,37 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
 
     if (activeTab === 'environment-setup') {
       if (envSetupStatus === 'loading') {
-        return <div> Loading Environment setup results...</div>;
+        return <div>Loading Environment setup results...</div>;
       }
       if (envSetupError) {
-        return <div className="text-red-600">Hata: {envSetupError}</div>;
+        return <div className="text-red-600">Error: {envSetupError}</div>;
       }
       if (setups && setups.length > 0) {
-        // Text olarak gelen JSON planını çıkar
+        // Enhanced formatting for environment setup
         let setupContent = setups[0];
-        const jsonMatch = setupContent.match(/\{[\s\S]*\}/);
-        let jsonContent = null;
-        let filesSection = "";
-        
-        // Files kısmını ayıkla
-        const filesSectionMatch = setupContent.match(/## Files Analyzed\n([\s\S]*?)\n\n## Environment Setup/);
-        if (filesSectionMatch) {
-          filesSection = filesSectionMatch[1];
-        }
-        
-        // JSON içeriğini bul
-        if (jsonMatch) {
-          jsonContent = jsonMatch[0];
-          try {
-            // JSON formatını düzgünce formatla
-            const jsonObject = JSON.parse(jsonContent);
-            jsonContent = JSON.stringify(jsonObject, null, 2);
-          } catch (e) {
-            console.error('JSON parse error:', e);
-          }
-        }
         
         return (
           <div className="space-y-4">
-            <div className="prose prose-sm max-w-full text-gray-600 break-words overflow-x-auto">
-              <h2>Files Analyzed</h2>
+            <div className="prose prose-sm max-w-full break-words overflow-x-auto">
               <ReactMarkdown 
                 className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
                 components={{
-                  p: ({children}) => <p className="break-words">{safeRenderChildren(children)}</p>,
+                  p: ({children}) => <p className="break-words mb-2 last:mb-0">{safeRenderChildren(children)}</p>,
                   li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
-                  td: ({children}) => <td className="break-words max-w-xs">{safeRenderChildren(children)}</td>,
-                  th: ({children}) => <th className="break-words">{safeRenderChildren(children)}</th>
+                  td: ({children}) => <td className="break-words max-w-xs px-2 py-1">{safeRenderChildren(children)}</td>,
+                  th: ({children}) => <th className="break-words px-2 py-1 font-semibold">{safeRenderChildren(children)}</th>,
+                  h1: ({children}) => <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0">{safeRenderChildren(children)}</h1>,
+                  h2: ({children}) => <h2 className="text-lg font-semibold mb-2 mt-3">{safeRenderChildren(children)}</h2>,
+                  h3: ({children}) => <h3 className="text-md font-medium mb-2 mt-2">{safeRenderChildren(children)}</h3>,
+                  ul: ({children}) => <ul className="list-disc pl-6 mb-3 space-y-1">{safeRenderChildren(children)}</ul>,
+                  ol: ({children}) => <ol className="list-decimal pl-6 mb-3 space-y-1">{safeRenderChildren(children)}</ol>,
+                  blockquote: ({children}) => <blockquote className="border-l-4 border-gray-300 pl-4 italic my-3">{safeRenderChildren(children)}</blockquote>,
+                  code: ({children}) => <code className="bg-gray-100 px-1 rounded text-sm">{safeRenderChildren(children)}</code>,
+                  pre: ({children}) => <pre className="bg-gray-100 p-3 rounded overflow-x-auto mb-3">{safeRenderChildren(children)}</pre>
                 }}
               >
-                {filesSection}
+                {setupContent}
               </ReactMarkdown>
-            </div>
-            
-            {/* JSON veya XML formatında göster */}
-            <div className="bg-gray-100 rounded p-4 font-mono text-xs overflow-auto">
-              <h2 className="text-lg font-medium mb-2">Environment Setup {selectedOutputFormat === 'XML' ? '(XML Format)' : '(JSON Format)'}</h2>              <pre className="whitespace-pre-wrap break-words">
-                {selectedOutputFormat === 'XML' && jsonContent 
-                  ? jsonToXml(jsonContent)
-                  : jsonContent}
-              </pre>
             </div>
           </div>
         );

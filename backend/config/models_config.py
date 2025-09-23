@@ -451,13 +451,14 @@ def get_model_descriptions(model_key: str) -> List[str]:
 
 # Uyumluluk için eski format
 def get_legacy_model_list() -> List[Dict[str, str]]:
-    """Eski API uyumluluğu için basitleştirilmiş model listesi"""
+    """Eski API uyumluluğu için basitleştirilmiş model listesi - provider field'ı ile"""
     return [
         {
             "key": model["key"],
             "name": model["name"], 
             "description": model["description"],
-            "type": model["type"]
+            "type": model["type"],
+            "provider": model.get("provider", "Unknown")  # Provider field'ı ekle
         }
         for model in AVAILABLE_MODELS
     ]

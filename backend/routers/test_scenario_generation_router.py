@@ -56,7 +56,8 @@ async def run_test_scenario_generation(
     test_category: str = Form(None),
     test_type: str = Form(None),
     session_id: str = Form(None),
-    process_title: str = Form(None)
+    process_title: str = Form(None),
+    api_key: Optional[str] = Form(None)
 ):
     """
     Test senaryosu üretim işlemini çalıştırır.
@@ -84,7 +85,8 @@ async def run_test_scenario_generation(
             "test_category": test_category,
             "test_type": test_type,
             "session_id": session_id,
-            "process_title": process_title
+            "process_title": process_title,
+            "api_key": api_key
         }
         
         logger.info(f"[DEBUG] Calling run_step with data")
@@ -185,6 +187,7 @@ async def generate_test_scenarios(request: Request):
         model = data.get("model", "gpt-4")
         test_type = data.get("test_type", "")
         test_category = data.get("test_category", "")
+        api_key = data.get("api_key")  # API key extraction
         
         if not final_prompt:
             raise HTTPException(status_code=400, detail="Final prompt is required")
@@ -208,7 +211,7 @@ async def generate_test_scenarios(request: Request):
         
         # LLM client'ı oluştur
         from utils.model_client import LLMClient
-        llm_client = LLMClient()
+        llm_client = LLMClient(api_key=api_key, use_case='test_scenario_generation')
         
         # Test senaryosu üretme prompt'u oluştur
         test_scenario_prompt = f"""{final_prompt}
@@ -680,6 +683,7 @@ async def generate_test_cases_for_scenarios(request: Request):
         ai_model = data.get("ai_model", "llama3.2:3b")
         session_id = data.get("session_id", "")
         selected_process_title = data.get("selected_process_title", "")  # Yeni alan
+        api_key = data.get("api_key")  # API key extraction
         
         if not selected_scenarios:
             raise HTTPException(status_code=400, detail="No test scenarios selected")
@@ -689,10 +693,16 @@ async def generate_test_cases_for_scenarios(request: Request):
         
         logger.info(f"[TestCaseGeneration] Processing {len(selected_scenarios)} scenarios with model {ai_model}")
         logger.info(f"[TestCaseGeneration] Selected process title: {selected_process_title}")
+        logger.info(f"[TestCaseGeneration] API Key: {'SET' if api_key else 'NOT SET'}")
         
-        # Initialize LLM client
+        # Initialize LLM client with model name and API key
         from utils.model_client import LLMClient
-        model_client = LLMClient()  # Initialize with default
+        try:
+            model_client = LLMClient(model_name=ai_model, api_key=api_key, use_case='test_case_generation')  # Initialize with model name and API key
+            logger.info(f"[TestCaseGeneration] LLMClient initialized successfully with model: {ai_model}")
+        except Exception as e:
+            logger.error(f"[TestCaseGeneration] Failed to initialize LLMClient: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to initialize AI model: {str(e)}")
         
         # Prepare file contents and calculate tokens
         file_contents = ""
@@ -705,13 +715,15 @@ async def generate_test_cases_for_scenarios(request: Request):
         # Token limit control (same as Test Scenario Generation)
         from utils.text_splitter import count_tokens
         
+        # Define token limit at the beginning
+        TOKEN_LIMIT = 4000
+        
         total_token_count = 0
         if file_contents.strip():
             total_token_count = count_tokens(file_contents)
             logger.info(f"[TestCaseGeneration] Total token count for file contents: {total_token_count}")
             
-            # Check 4k token limit
-            TOKEN_LIMIT = 4000
+            # Check token limit
             if total_token_count > TOKEN_LIMIT:
                 logger.warning(f"[TestCaseGeneration] Token count ({total_token_count}) exceeds limit ({TOKEN_LIMIT}), switching to high-capacity model")
                 # Switch to high-capacity model
@@ -734,7 +746,7 @@ async def generate_test_cases_for_scenarios(request: Request):
         
         # Initialize LLM client with final model
         actual_model = model_client.get_model_identifier(ai_model)  # Convert frontend key to actual model
-        llm_client = LLMClient(model_name=actual_model)  # Use actual model name
+        llm_client = LLMClient(model_name=actual_model, api_key=api_key, use_case='test_scenario_generation')  # Use actual model name with API key and speed optimization
         logger.info(f"[TestCaseGeneration] Using model: {ai_model} -> {actual_model}")
         
         test_case_results = []
@@ -814,7 +826,7 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                 ai_model = "qwen2.5:7b-1m"
                 # Re-initialize LLM client with updated model
                 actual_model = model_client.get_model_identifier(ai_model)
-                llm_client = LLMClient(model_name=actual_model)
+                llm_client = LLMClient(model_name=actual_model, api_key=api_key, use_case='test_scenario_generation')
                 logger.info(f"[TestCaseGeneration] Updated to model: {ai_model} -> {actual_model}")
             
             try:

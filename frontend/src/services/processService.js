@@ -27,7 +27,7 @@ export const processService = {
     }
   },
 
-  async runCodeReview(files, model = null, customPrompt = null, sessionId = null) {
+  async runCodeReview(files, model = null, customPrompt = null, sessionId = null, apiKey = null) {
     console.log('[ProcessService] Running code review with model:', model);
     
     const formData = new FormData();
@@ -45,6 +45,10 @@ export const processService = {
     }
     if (sessionId) {
       formData.append('session_id', sessionId);
+    }
+    if (apiKey) {
+      formData.append('api_key', apiKey);
+      console.log('processService.js - API key gönderiliyor:', apiKey ? 'Yes' : 'No');
     }
 
     try {
@@ -75,7 +79,7 @@ export const processService = {
   },
 
   // Yeni eklenen requirement analysis metodu
-  async runRequirementAnalysis(files, model = null, customPrompt = null, sessionId = null) {
+  async runRequirementAnalysis(files, model = null, customPrompt = null, sessionId = null, apiKey = null) {
     const formData = new FormData();
     files.forEach(file => {
       const actualFile = file.file || file;
@@ -92,6 +96,10 @@ export const processService = {
     }
     if (sessionId) {
       formData.append('session_id', sessionId);
+    }
+    if (apiKey) {
+      formData.append('api_key', apiKey);
+      console.log('processService.js - Requirement Analysis API key gönderiliyor:', apiKey ? 'Yes' : 'No');
     }
   
     try {
@@ -183,7 +191,7 @@ export const processService = {
     }
   },
 
-  async runTestPlanning(files, model = null, customPrompt = null, sessionId = null) {
+  async runTestPlanning(files, model = null, customPrompt = null, sessionId = null, apiKey = null) {
     const formData = new FormData();
     files.forEach(fileInfo => {
       const file = fileInfo.file || fileInfo;
@@ -192,6 +200,10 @@ export const processService = {
     if (model) formData.append('model', model);
     if (customPrompt) formData.append('custom_prompt', customPrompt);
     if (sessionId) formData.append('session_id', sessionId);
+    if (apiKey) {
+      formData.append('api_key', apiKey);
+      console.log('processService.js - Test Planning API key gönderiliyor:', apiKey ? 'Yes' : 'No');
+    }
 
     try {
       const response = await fetch('http://localhost:8000/api/processes/test-planning/run', {
@@ -213,7 +225,7 @@ export const processService = {
     }
   },
 
-  async runEnvironmentSetup(files, model = null, customPrompt = null, sessionId = null) {
+  async runEnvironmentSetup(files, model = null, customPrompt = null, sessionId = null, apiKey = null) {
     console.log("runEnvironmentSetup çağrıldı. Dosyalar ve tipleri:");
     files.forEach((fileInfo, idx) => {
       const file = fileInfo.file || fileInfo;
@@ -233,6 +245,10 @@ export const processService = {
     if (model) formData.append('model', model);
     if (customPrompt) formData.append('custom_prompt', customPrompt);
     if (sessionId) formData.append('session_id', sessionId);
+    if (apiKey) {
+      formData.append('api_key', apiKey);
+      console.log('processService.js - Environment Setup API key gönderiliyor:', apiKey ? 'Yes' : 'No');
+    }
 
     try {
       const response = await fetch('http://localhost:8000/api/processes/environment-setup/run', {
@@ -385,6 +401,7 @@ export const processService = {
     if (data.testType) formData.append('test_type', data.testType);
     if (data.sessionId) formData.append('session_id', data.sessionId);
     if (data.process_title) formData.append('process_title', data.process_title);
+    if (data.apiKey) formData.append('api_key', data.apiKey);
 
     try {
       console.log('[ProcessService] Running test scenario generation with final prompt');

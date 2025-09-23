@@ -162,6 +162,7 @@ async def generate_prompt(input_data, max_retries=3):
     file_contents = input_data.get("fileContents", [])  # Array of file contents from fileProcessMappings
     process_title = input_data.get("process_title", "")  # Get process title directly from user input without fallback
     session_id = input_data.get("session_id")  # Get session_id if available
+    api_key = input_data.get("api_key")  # API key extraction
     
     # Diğer modüller gibi base prompt kontrolü ekle
     if not test_prompt:
@@ -219,9 +220,9 @@ async def generate_prompt(input_data, max_retries=3):
     while attempts < max_retries:
         # Attempt to connect to the LLM model and generate a specialized test prompt
         try:            # LLM Client'ı başlat ve model mapping yap (diğer servislerdeki gibi)
-            model_client = LLMClient()
+            model_client = LLMClient(api_key=api_key)
             actual_model = model_client.get_model_identifier(model_name)
-            llm_client = LLMClient(actual_model)
+            llm_client = LLMClient(model_name=actual_model, api_key=api_key, use_case='test_scenario_generation')
             logger.info(f"Using model: {model_name} -> {actual_model}")
             
             logger.info(f"Calling LLM to generate custom prompt... (Attempt {attempts + 1}/{max_retries})")
@@ -330,6 +331,7 @@ async def run_step(input_data):
         # Form verilerini al
         model_name = input_data.get("model", "")
         files = input_data.get("files", [])
+        api_key = input_data.get("api_key")  # API key extraction
         final_prompt = input_data.get("final_prompt", "")
         test_type = input_data.get("test_type", "")
         test_category = input_data.get("test_category", "")        # Gelen session_id'yi kullan veya yeni oluştur
@@ -481,15 +483,15 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
 
         # LLM client'ı oluştur ve model mapping yap (diğer servislerdeki gibi)
         from utils.model_client import LLMClient
-        model_client = LLMClient()
+        model_client = LLMClient(api_key=api_key)
         logger.info(f"Model key: {model_name}")
         actual_model = None
         if model_name:
             actual_model = model_client.get_model_identifier(model_name)
-            llm_client = LLMClient(actual_model)
+            llm_client = LLMClient(model_name=actual_model, api_key=api_key, use_case='test_scenario_generation')
             logger.info(f"Using model: {model_name} -> {actual_model} for test scenario generation")
         else:
-            llm_client = LLMClient()
+            llm_client = LLMClient(api_key=api_key, use_case='test_scenario_generation')
             logger.info("No model specified, using default model")
         
         logger.info(f"[DEBUG] LLM Client initialized with actual model: {actual_model}")

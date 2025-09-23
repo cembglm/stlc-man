@@ -3,10 +3,10 @@ import { processService } from '../../services/processService';
 
 export const runRequirementAnalysis = createAsyncThunk(
   'requirementAnalysis/runAnalysis',
-  async ({files, model, customPrompt, sessionId}) => {
+  async ({files, model, customPrompt, sessionId, apiKey}) => {
     try {
       window.alert(`Selected model: ${model}`);
-      const response = await processService.runRequirementAnalysis(files, model, customPrompt, sessionId);
+      const response = await processService.runRequirementAnalysis(files, model, customPrompt, sessionId, apiKey);
       if (!response) {
         throw new Error('Invalid response format');
       }

@@ -28,7 +28,7 @@ class TestPlanningService:
     def normalize_prompt(self, text):
         return ' '.join(text.strip().split()).lower()
 
-    async def run_test_planning(self, files, model_key=None, custom_prompt=None, session_id=None):
+    async def run_test_planning(self, files, model_key=None, custom_prompt=None, session_id=None, api_key=None):
         try:
             self.logger.debug(f"Starting test planning for {len(files)} files with model: {model_key}")
             
@@ -57,8 +57,8 @@ class TestPlanningService:
             model_name = None
             if model_key:
                 model_name = model_client.get_model_identifier(model_key)
-                model_client = LLMClient(model_name)
-                self.logger.info(f"Using model: {model_name} for test planning")
+                model_client = LLMClient(model_name, api_key, use_case='test_planning')  # API key ve use_case eklendi
+                self.logger.info(f"Using model: {model_name} for test planning with API key provided: {bool(api_key)}")
             else:
                 self.logger.info("No model specified, using default model")
 

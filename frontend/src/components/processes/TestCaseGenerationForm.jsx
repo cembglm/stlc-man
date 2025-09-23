@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import PropTypes from 'prop-types';
+import { useSelector } from 'react-redux';
 import { useModels } from '../../hooks/useModels';
 
 export default function TestCaseGenerationForm({ 
@@ -14,6 +15,11 @@ export default function TestCaseGenerationForm({
   managedFiles = [],
   fileProcessMappings = {}
 }) {
+  // Redux API key - Google için
+  const apiKey = useSelector((state) => state.apiKey.apiKeys.google);
+  
+  console.log('[TestCaseGeneration] API Key from Redux:', apiKey ? 'SET' : 'NOT SET');
+  
   const [availableProcessTitles, setAvailableProcessTitles] = useState([]);
   const [selectedProcessTitle, setSelectedProcessTitle] = useState('');
   const [selectedProcessData, setSelectedProcessData] = useState(null);
@@ -501,7 +507,8 @@ Generate comprehensive test cases now following the exact JSON structure above.`
         selected_files: selectedFiles,
         ai_model: modelMapping[selectedAIModel] || selectedAIModel,
         session_id: sessionId,
-        selected_process_title: selectedProcessData?.process_title || ''  // Seçilen process title'ı ekle (1. fonksiyon)
+        selected_process_title: selectedProcessData?.process_title || '',  // Seçilen process title'ı ekle (1. fonksiyon)
+        api_key: apiKey  // API key eklendi
       };
 
       const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/generate-test-cases', {
@@ -577,6 +584,7 @@ Generate comprehensive test cases now following the exact JSON structure above.`
       console.log('[TestCaseGeneration] Selected scenarios:', selectedScenariosData.length);
       console.log('[TestCaseGeneration] Selected files:', selectedFiles.length);
       console.log('[TestCaseGeneration] AI Model:', selectedAIModel);
+      console.log('[TestCaseGeneration] API Key:', apiKey ? 'SET' : 'NOT SET');
 
       const requestData = {
         selected_scenarios: selectedScenariosData,
@@ -584,8 +592,16 @@ Generate comprehensive test cases now following the exact JSON structure above.`
         selected_files: selectedFiles,
         ai_model: modelMapping[selectedAIModel] || selectedAIModel,
         session_id: sessionId,
-        selected_process_title: selectedProcessData?.process_title || ''  // Seçilen process title'ı ekle (2. fonksiyon)
+        selected_process_title: selectedProcessData?.process_title || '',  // Seçilen process title'ı ekle (2. fonksiyon)
+        api_key: apiKey  // API key eklendi
       };
+
+      console.log('[TestCaseGeneration] Request data:', {
+        ...requestData,
+        api_key: apiKey ? 'SET' : 'NOT SET',
+        selected_scenarios: `[${selectedScenariosData.length} scenarios]`,
+        process_prompt: `[${finalPrompt.length} chars]`
+      });
 
       const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/generate-test-cases', {
         method: 'POST',

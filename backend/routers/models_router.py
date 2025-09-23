@@ -71,7 +71,8 @@ async def get_all_models(
                     "key": model["key"],
                     "name": model["name"],
                     "description": model["description"],
-                    "type": model["type"]
+                    "type": model["type"],
+                    "provider": model.get("provider")
                 }
                 for model in models
             ]
