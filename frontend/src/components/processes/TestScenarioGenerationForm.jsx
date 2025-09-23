@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
+import { useSelector } from 'react-redux';
 import PropTypes from 'prop-types';
 import processService from '../../services/processService';
 import { useModels } from '../../hooks/useModels';
@@ -68,6 +69,11 @@ function useModelInfo(selectedModel) {
 }
 
 export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, onRunProcess, process, managedFiles, fileProcessMappings, onFormStateChange, sessionId }) {
+  // Redux API key - Google için
+  const apiKey = useSelector((state) => state.apiKey.apiKeys.google);
+  
+  console.log('[DEBUG] API Key from Redux:', apiKey ? 'SET' : 'NOT SET');
+  
   const [processTitle, setProcessTitle] = useState('');
   const [testCategory, setTestCategory] = useState('Select Test Category');
   const [testType, setTestType] = useState('');
@@ -403,12 +409,14 @@ export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, on
         testPrompt: testPrompt || 'Generate comprehensive test scenarios for the provided code', // Base test prompt
         fileContents: fileContents, // Include selected file contents array
         session_id: sessionId, // Use the existing session ID for consistency
-        process_title: processTitle // Use the user-entered process title directly
+        process_title: processTitle, // Use the user-entered process title directly
+        api_key: apiKey  // API key eklendi
       };
 
       console.log('[DEBUG] Prompt generation data:', {
         ...promptGenerationData,
-        fileContents: `[${fileContents.length} files with total ${fileContents.reduce((sum, content) => sum + content.length, 0)} characters]`
+        fileContents: `[${fileContents.length} files with total ${fileContents.reduce((sum, content) => sum + content.length, 0)} characters]`,
+        api_key: apiKey ? 'SET' : 'NOT SET'  // API key debug
       });
 
       // Use the regular generate-prompt endpoint with fileContents in JSON body
@@ -647,7 +655,8 @@ Generate the test scenarios now following the exact JSON structure above.`;
           testType: testType,
           testCategory: testCategory,
           process_title: processTitle, // Use the user-entered process title directly
-          sessionId: sessionId // Use global sessionId directly
+          sessionId: sessionId, // Use global sessionId directly
+          apiKey: apiKey // Add API key to config
         };
 
         console.log('[DEBUG] Calling run function with config:', {
@@ -668,6 +677,7 @@ Generate the test scenarios now following the exact JSON structure above.`;
         formData.append('test_type', testType);
         formData.append('process_title', processTitle); // Add missing process_title
         formData.append('session_id', `test_session_${Date.now()}`);
+        if (apiKey) formData.append('api_key', apiKey); // Add API key
 
         // Add files to FormData
         selectedFilesData.forEach((file, index) => {

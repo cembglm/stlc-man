@@ -31,7 +31,7 @@ class ReviewService:
     def normalize_prompt(self, text):
         return ' '.join(text.strip().split()).lower()
 
-    async def run_code_review(self, files, types=None, model_key=None, custom_prompt=None, session_id=None):
+    async def run_code_review(self, files, types=None, model_key=None, custom_prompt=None, session_id=None, api_key=None):
         try:
             self.logger.debug(f"Starting code review for {len(files)} files with model: {model_key}")
             
@@ -50,8 +50,8 @@ class ReviewService:
             model_name = None
             if model_key:
                 model_name = model_client.get_model_identifier(model_key)
-                model_client = LLMClient(model_name)
-                self.logger.info(f"Using model: {model_name} for review")
+                model_client = LLMClient(model_name, api_key, use_case='code_review')  # Code review için optimize edilmiş client
+                self.logger.info(f"Using model: {model_name} for review with API key provided: {bool(api_key)}")
             else:
                 self.logger.info("No model specified, using default model")
                 

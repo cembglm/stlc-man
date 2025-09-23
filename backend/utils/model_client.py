@@ -15,7 +15,7 @@ if backend_dir not in sys.path:
     sys.path.append(backend_dir)
 # Import from the config.py file directly
 import config
-from google import genai
+import google.generativeai as genai
 import json
 import time
 import asyncio
@@ -89,18 +89,19 @@ class LLMClient:
         'gemini': {
             'requests_per_minute': 10,  # Gemini Tier 1 sınırı
             'cooldown_seconds': 5,     # 5 saniye base cooldown
-            'random_delay_min': 2,      # Minimum rastgele bekleme (saniye)
-            'random_delay_max': 30      # Maksimum rastgele bekleme (saniye)
+            'random_delay_min': 0,      # Minimum rastgele bekleme (saniye) - hız için optimize edildi
+            'random_delay_max': 2       # Maksimum rastgele bekleme (saniye) - hız için optimize edildi
         }
     }
     
-    def __init__(self, model_name=None, api_key=None):
+    def __init__(self, model_name=None, api_key=None, use_case=None):
         self.api_url = "http://localhost:1234/v1"
         # Default model kullan veya parametre olarak verilen modeli al
         self.model_name = model_name if model_name else "llama-3.2-1b-instruct"
         self.api_key = api_key  # Gemini API key'i için
+        self.use_case = use_case  # 'code_review', 'test_generation', etc.
         self.logger = logging.getLogger("LLMClient")
-        self.logger.info(f"LLMClient initialized with model: {self.model_name}")
+        self.logger.info(f"LLMClient initialized with model: {self.model_name}, use_case: {use_case}")
         
         # Gemini model kontrolü
         self.is_gemini = self._is_gemini_model(self.model_name)
@@ -112,8 +113,8 @@ class LLMClient:
                 raise ValueError("API key is required for Gemini models")
             # Gemini client'ı başlat
             try:
-                # Gemini client oluştur
-                self.gemini_client = genai.Client(api_key=self.api_key)
+                # Gemini API key'i configure et
+                genai.configure(api_key=self.api_key)
                 self.logger.info("Gemini client initialized successfully")
                 
                 # Rate limiting bilgilerini başlat
@@ -172,7 +173,17 @@ class LLMClient:
         """Rate limiting kontrolü yap ve gerekirse bekle"""
         if not self.is_api_based:
             return  # Local modeller için rate limiting yok
+        
+        # Code review, requirement analysis, test planning ve environment setup için minimal cooldown uygula
+        if self.use_case in ['code_review', 'requirement_analysis', 'test_planning', 'environment_setup']:
+            # Single-shot işlemler için sadece minimal bekleme (API stability için)
+            minimal_delay = random.uniform(0.5, 2.0)  # 0.5-2 saniye
+            use_case_name = self.use_case.replace('_', ' ').title()
+            self.logger.info(f"🚀 {use_case_name} Mode - Minimal delay: {minimal_delay:.2f}s")
+            await asyncio.sleep(minimal_delay)
+            return
             
+        # Normal bulk operations için tam cooldown uygula
         # İstek numarasını artır
         LLMClient._global_request_counter += 1
         current_request_number = LLMClient._global_request_counter
@@ -431,12 +442,19 @@ class LLMClient:
             self.logger.debug(f"Sending request to Gemini API with model: {self.model_name}")
             self.logger.debug(f"Prompt: {prompt[:100]}...")  # İlk 100 karakteri log'la
             
-            # Gemini API çağrısı
-            response = self.gemini_client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                # Gemini için temperature ve max_tokens parametreleri farklı şekilde ayarlanabilir
-                # Bu kısım Gemini API dokümantasyonuna göre ayarlanabilir
+            # Gemini model oluştur
+            model = genai.GenerativeModel(self.model_name)
+            
+            # Generation config oluştur (basit parametreler)
+            generation_config = {
+                'temperature': temperature,
+                'max_output_tokens': max_tokens,
+            }
+            
+            # Gemini API çağrısı (async)
+            response = await model.generate_content_async(
+                prompt,
+                generation_config=generation_config
             )
             
             if response and hasattr(response, 'text'):
@@ -471,7 +489,7 @@ class LLMClient:
             elif "500" in error_str and "internal" in error_str.lower():
                 rate_config = self._get_rate_limit_config()
                 base_cooldown = 2  # 500 için biraz daha kısa bekleme
-                random_delay = random.uniform(2, 20)
+                random_delay = random.uniform(0, 5)  # Hız için optimize edildi: 0-5 saniye
                 total_wait = base_cooldown + random_delay
                 
                 self.logger.warning(f"🔴 500 Internal Error detected for Gemini API")

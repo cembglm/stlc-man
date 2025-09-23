@@ -3,11 +3,11 @@ import { processService } from '../../services/processService';
 
 export const runTestPlanning = createAsyncThunk(
   'testPlanning/runPlanning',
-  async ({files, model, customPrompt, sessionId}) => {
+  async ({files, model, customPrompt, sessionId, apiKey}) => {
     try {
       // İstersen model bilgisini gösterebilirsin
       // window.alert(`Selected model: ${model}`);
-      const response = await processService.runTestPlanning(files, model, customPrompt, sessionId);
+      const response = await processService.runTestPlanning(files, model, customPrompt, sessionId, apiKey);
       if (!response || !response.plans) {
         throw new Error('Invalid response format');
       }

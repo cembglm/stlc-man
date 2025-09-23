@@ -3,10 +3,13 @@
  * ------------
  * Merkezi AI model yönetimi için React hook'u.
  * Tüm form componentlerde kullanılabilir.
+ * API Key aware - Global API key sistemini destekler.
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
+import { useSelector } from 'react-redux';
+import { selectApiKeys, selectAllValidationStatus, selectApiKeySettings } from '../store/slices/apiKeySlice';
 
 // API base URL
 const API_BASE_URL = 'http://localhost:8000/api/models';
@@ -21,6 +24,8 @@ const API_BASE_URL = 'http://localhost:8000/api/models';
  * @param {boolean} options.fastOnly - Sadece hızlı modeller
  * @param {boolean} options.autoFetch - Otomatik fetch (default: true)
  * @param {boolean} options.includeDescriptions - Model açıklamalarını dahil et
+ * @param {boolean} options.includeUnavailableApi - API key olmayan API modellerini dahil et
+ * @param {boolean} options.showApiKeyStatus - API key durumunu model bilgisinde göster
  * @returns {Object} Hook state ve fonksiyonları
  */
 export const useModels = (options = {}) => {
@@ -31,10 +36,17 @@ export const useModels = (options = {}) => {
     optimizationReady = null,
     fastOnly = false,
     autoFetch = true,
-    includeDescriptions = true
+    includeDescriptions = true,
+    includeUnavailableApi = false,
+    showApiKeyStatus = null // null = global setting'i kullan
   } = options;
 
-  // State
+  // Redux state - API key management
+  const apiKeys = useSelector(selectApiKeys);
+  const validationStatus = useSelector(selectAllValidationStatus);
+  const apiKeySettings = useSelector(selectApiKeySettings);
+
+  // Local state
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -42,6 +54,140 @@ export const useModels = (options = {}) => {
 
   // Cache için model açıklamaları
   const [modelDescriptions, setModelDescriptions] = useState({});
+
+  // API key status gösterimi için setting
+  const shouldShowApiKeyStatus = showApiKeyStatus !== null 
+    ? showApiKeyStatus 
+    : apiKeySettings.showApiKeyStatus;
+
+  /**
+   * API key durumuna göre modelleri filtrele
+   */
+  const filterModelsByApiKeyAvailability = useCallback((modelList) => {
+    if (includeUnavailableApi) {
+      return modelList; // Tüm modelleri dahil et
+    }
+
+    return modelList.filter(model => {
+      // Local modeller her zaman kullanılabilir
+      if (model.type === 'local') {
+        return true;
+      }
+
+      // API modeller için API key kontrolü
+      if (model.type === 'api') {
+        const provider = model.provider?.toLowerCase();
+        
+        // Provider bilgisi yoksa dahil et (güvenli taraf)
+        if (!provider) {
+          return true;
+        }
+
+        // API key var mı ve geçerli mi kontrol et
+        const hasKey = apiKeys[provider];
+        const isValid = validationStatus[provider]?.isValid;
+        
+        // API key varsa ve geçerliliği bilinmiyorsa dahil et
+        if (hasKey && isValid !== false) {
+          return true;
+        }
+
+        // API key yoksa veya geçersizse dahil etme
+        return false;
+      }
+
+      return true; // Diğer tip modeller için
+    });
+  }, [includeUnavailableApi, apiKeys, validationStatus]);
+
+  /**
+   * Modellere API key durumu bilgisini ekle
+   */
+  const enhanceModelsWithApiKeyStatus = useCallback((modelList) => {
+    console.log('🔧 Enhancing models with API key status...');
+    console.log('🔧 Input models (first 3):', modelList.slice(0, 3).map(m => ({
+      key: m.key,
+      name: m.name,
+      provider: m.provider,
+      type: m.type
+    })));
+    
+    return modelList.map(model => {
+      const enhancedModel = { ...model };
+
+      if (model.type === 'api' && shouldShowApiKeyStatus) {
+        // Provider mapping - backend'den gelen provider'ları Redux key'leri ile eşleştir
+        const providerMapping = {
+          'Google': 'google',
+          'OpenAI': 'openai',
+          // Diğer provider'lar eklenebilir
+        };
+        
+        const backendProvider = model.provider;
+        const reduxProvider = providerMapping[backendProvider] || backendProvider?.toLowerCase();
+        
+        console.log(`🔧 Provider mapping for ${model.key}:`, {
+          backendProvider: backendProvider,
+          reduxProvider: reduxProvider,
+          hasApiKey: !!apiKeys[reduxProvider],
+          apiKeys: apiKeys
+        });
+        
+        if (reduxProvider && apiKeys[reduxProvider]) {
+          const validation = validationStatus[reduxProvider];
+          
+          console.log(`🔧 API key found for ${reduxProvider}:`, {
+            hasKey: !!apiKeys[reduxProvider],
+            validation: validation,
+            isValid: validation?.isValid
+          });
+          
+          enhancedModel.apiKeyStatus = {
+            hasKey: true,
+            isValid: validation?.isValid,
+            isValidating: validation?.isValidating,
+            error: validation?.error,
+            lastValidated: validation?.lastValidated,
+            provider: reduxProvider
+          };
+
+          // Model adına durum ekle (eğer ayar aktifse)
+          if (validation?.isValid === true) {
+            enhancedModel.displayName = `${model.name} ✓`;
+          } else if (validation?.isValid === false) {
+            enhancedModel.displayName = `${model.name} ⚠️`;
+          } else if (validation?.isValidating) {
+            enhancedModel.displayName = `${model.name} 🔄`;
+          } else {
+            enhancedModel.displayName = `${model.name} ❓`;
+          }
+        } else {
+          enhancedModel.apiKeyStatus = {
+            hasKey: false,
+            isValid: false,
+            isValidating: false,
+            error: 'No API key configured',
+            lastValidated: null,
+            provider: reduxProvider || backendProvider?.toLowerCase()
+          };
+          
+          enhancedModel.displayName = `${model.name} 🔐`;
+        }
+      } else {
+        // Local modeller için durum
+        enhancedModel.displayName = model.name;
+        enhancedModel.apiKeyStatus = {
+          hasKey: true, // Local modeller için API key gerekmez
+          isValid: true,
+          isValidating: false,
+          error: null,
+          provider: 'local'
+        };
+      }
+
+      return enhancedModel;
+    });
+  }, [shouldShowApiKeyStatus, apiKeys, validationStatus]);
 
   /**
    * API'den modelleri getir
@@ -75,10 +221,13 @@ export const useModels = (options = {}) => {
             performance: model.performance,
             category: model.category
           }));
-          setModels(fastModels);
+          
+          // API key durumunu ekle
+          const modelsWithApiKeyStatus = enhanceModelsWithApiKeyStatus(fastModels);
+          setModels(modelsWithApiKeyStatus);
           setLastFetch(new Date());
           setLoading(false);
-          return fastModels;
+          return modelsWithApiKeyStatus;
         }
       }
 
@@ -90,10 +239,37 @@ export const useModels = (options = {}) => {
         }
       });
 
+      // Test with direct fetch
+      console.log('🔍 Making request to:', `${API_BASE_URL}?${params}`);
+      const testResponse = await fetch(`${API_BASE_URL}?${params}`);
+      const testData = await testResponse.json();
+      console.log('🔍 Direct fetch response:', testData);
+      console.log('🔍 Direct fetch models (first 3):', testData.data?.slice(0, 3).map(m => ({
+        key: m.key,
+        name: m.name,
+        provider: m.provider,
+        type: m.type
+      })));
+
       const response = await axios.get(`${API_BASE_URL}?${params}`);
       
+      console.log('🔍 Raw API Response:', response.data);
+      console.log('🔍 First 3 models from API:', response.data.data?.slice(0, 3).map(m => ({
+        key: m.key,
+        name: m.name,
+        provider: m.provider,
+        type: m.type
+      })));
+      
       if (response.data.success) {
-        const fetchedModels = response.data.data;
+        let fetchedModels = response.data.data;
+        
+        // API key aware filtering
+        fetchedModels = filterModelsByApiKeyAvailability(fetchedModels);
+        
+        // API key durumunu ekle
+        fetchedModels = enhanceModelsWithApiKeyStatus(fetchedModels);
+        
         setModels(fetchedModels);
         setLastFetch(new Date());
 
@@ -113,12 +289,13 @@ export const useModels = (options = {}) => {
       
       // Fallback: Static model listesi (geriye uyumluluk)
       const fallbackModels = getFallbackModels(filterType, filterCategory);
-      setModels(fallbackModels);
-      return fallbackModels;
+      const fallbackWithApiKeyStatus = enhanceModelsWithApiKeyStatus(fallbackModels);
+      setModels(fallbackWithApiKeyStatus);
+      return fallbackWithApiKeyStatus;
     } finally {
       setLoading(false);
     }
-  }, [filterType, filterCategory, filterPerformance, optimizationReady, fastOnly, includeDescriptions]);
+  }, [filterType, filterCategory, filterPerformance, optimizationReady, fastOnly, includeDescriptions, includeUnavailableApi, apiKeys, validationStatus]);
 
   /**
    * Model açıklamalarını getir
@@ -239,6 +416,42 @@ export const useModels = (options = {}) => {
     return models.filter(model => model.type === 'local');
   }, [models]);
 
+  // API key aware computed values
+  const availableApiModels = useMemo(() => {
+    return apiModels.filter(model => 
+      model.apiKeyStatus?.hasKey && model.apiKeyStatus?.isValid !== false
+    );
+  }, [apiModels]);
+
+  const unavailableApiModels = useMemo(() => {
+    return apiModels.filter(model => 
+      !model.apiKeyStatus?.hasKey || model.apiKeyStatus?.isValid === false
+    );
+  }, [apiModels]);
+
+  const validatedApiModels = useMemo(() => {
+    return apiModels.filter(model => 
+      model.apiKeyStatus?.isValid === true
+    );
+  }, [apiModels]);
+
+  const modelsByApiKeyStatus = useMemo(() => {
+    return {
+      available: models.filter(model => 
+        model.type === 'local' || (model.apiKeyStatus?.hasKey && model.apiKeyStatus?.isValid !== false)
+      ),
+      unavailable: models.filter(model => 
+        model.type === 'api' && (!model.apiKeyStatus?.hasKey || model.apiKeyStatus?.isValid === false)
+      ),
+      validated: models.filter(model => 
+        model.type === 'local' || model.apiKeyStatus?.isValid === true
+      ),
+      pending: models.filter(model => 
+        model.type === 'api' && model.apiKeyStatus?.hasKey && model.apiKeyStatus?.isValid === null
+      )
+    };
+  }, [models]);
+
   // Yardımcı fonksiyonlar
   const getModelByKey = useCallback((key) => {
     return models.find(model => model.key === key);
@@ -262,6 +475,12 @@ export const useModels = (options = {}) => {
     apiModels,
     localModels,
 
+    // API key aware data
+    availableApiModels,
+    unavailableApiModels,
+    validatedApiModels,
+    modelsByApiKeyStatus,
+
     // Model açıklamaları
     modelDescriptions,
     getModelDescriptions,
@@ -274,13 +493,26 @@ export const useModels = (options = {}) => {
     fetchCategories,
     fetchPerformanceLevels,
 
+    // API key aware fonksiyonlar
+    filterModelsByApiKeyAvailability,
+    enhanceModelsWithApiKeyStatus,
+
     // Yardımcı fonksiyonlar
     hasModels: models.length > 0,
     isEmpty: models.length === 0,
     totalCount: models.length,
     localCount: localModels.length,
     apiCount: apiModels.length,
-    fastCount: fastModels.length
+    fastCount: fastModels.length,
+    availableApiCount: availableApiModels.length,
+    unavailableApiCount: unavailableApiModels.length,
+    validatedApiCount: validatedApiModels.length,
+
+    // API key status
+    apiKeySettings,
+    shouldShowApiKeyStatus,
+    hasValidApiKeys: Object.values(apiKeys).some(key => key),
+    validApiProviders: Object.entries(validationStatus).filter(([_, status]) => status.isValid === true).map(([provider]) => provider)
   };
 };
 
@@ -335,10 +567,17 @@ export const useOptimizationModels = () => {
 };
 
 /**
- * API modelleri için özel hook
+ * API modelleri için özel hook (sadece kullanılabilir olanlar)
  */
 export const useApiModels = () => {
-  return useModels({ filterType: 'api' });
+  return useModels({ filterType: 'api', includeUnavailableApi: false });
+};
+
+/**
+ * Tüm API modelleri için özel hook (kullanılabilir olmayan dahil)
+ */
+export const useAllApiModels = () => {
+  return useModels({ filterType: 'api', includeUnavailableApi: true });
 };
 
 /**
@@ -353,6 +592,20 @@ export const useLocalModels = () => {
  */
 export const useModelsByCategory = (category) => {
   return useModels({ filterCategory: category });
+};
+
+/**
+ * Sadece geçerli API key'i olan modeller
+ */
+export const useValidatedModels = () => {
+  return useModels({ includeUnavailableApi: false, showApiKeyStatus: true });
+};
+
+/**
+ * API key durumu gösteren modeller
+ */
+export const useModelsWithApiKeyStatus = () => {
+  return useModels({ includeUnavailableApi: true, showApiKeyStatus: true });
 };
 
 export default useModels;

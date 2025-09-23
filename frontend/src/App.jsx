@@ -19,6 +19,7 @@ import { runEnvironmentSetup } from './store/slices/environmentSetupSlice';
 function AppContents() {
 	const dispatch = useDispatch();
 	const { status, reviews, error } = useSelector(state => state.codeReview);
+	const apiKeys = useSelector(state => state.apiKey.apiKeys);  // API keys'i al
 
 	// Session ID yönetimi - HER YENİLEMEDE YENİ OLUŞTUR
 	const [sessionId, setSessionId] = useState(() => {
@@ -401,7 +402,10 @@ function AppContents() {
 				console.log(`[App] Using AI model for code review: ${selectedModel}`);
 				// Custom prompt'u al
 				const customPrompt = processPrompts[processId]?.prompt_text || processPrompts[processId]?.content || null;
-				await dispatch(runCodeReview({files, model: selectedModel, customPrompt, sessionId})).unwrap();
+				// API key'i al - Gemini modelleri için google key'ini kullan
+				const apiKey = apiKeys?.google || null;
+				console.log(`[App] Using API key for code review: ${apiKey ? 'Yes' : 'No'}`);
+				await dispatch(runCodeReview({files, model: selectedModel, customPrompt, sessionId, apiKey})).unwrap();
 				if (error) {
 					throw new Error(error);
 				}
@@ -420,7 +424,11 @@ function AppContents() {
 				console.log('[App] Running test planning');
 				const selectedModel = aiModels[processId] || 'default';
 				const customPrompt = processPrompts[processId]?.prompt_text || processPrompts[processId]?.content || null;
-				await dispatch(runTestPlanning({files, model: selectedModel, customPrompt, sessionId})).unwrap();
+				
+				// API key'i al ve geçir
+				const googleApiKey = apiKeys?.google || null;
+				console.log('[App] Google API key for test planning:', googleApiKey ? 'Available' : 'Not found');
+				await dispatch(runTestPlanning({files, model: selectedModel, customPrompt, sessionId, apiKey: googleApiKey})).unwrap();
 				// OutputPanel zaten plans dizisini redux'tan okuyacak!
 			} else if (processId === 'requirement-analysis') {
 				console.log('[App] Running requirement analysis');
@@ -429,7 +437,11 @@ function AppContents() {
 					const fileNames = files.map(file => file.name || file.file?.name || 'Unnamed File').join('\n');
 					window.alert(`Requirement Analysis şu model ile çalıştırılıyor: ${selectedModel}\n\nKullanılan dosyalar:\n${fileNames}`);
 					const customPrompt = processPrompts[processId]?.prompt_text || processPrompts[processId]?.content || null;
-					await dispatch(runRequirementAnalysis({files, model: selectedModel, customPrompt, sessionId})).unwrap();
+					
+					// API key'i al ve geçir (code review ile aynı field kullan)
+					const googleApiKey = apiKeys?.google || null;
+					console.log('[App] Google API key for requirement analysis:', googleApiKey ? 'Available' : 'Not found');
+					await dispatch(runRequirementAnalysis({files, model: selectedModel, customPrompt, sessionId, apiKey: googleApiKey})).unwrap();
 					console.log('[App] Requirement analysis completed, redux state güncellendi');
 				} catch (error) {
 					console.error('[App] Error in requirement analysis:', error);
@@ -449,7 +461,11 @@ function AppContents() {
 				console.log('[App] Running environment setup');
 				const selectedModel = aiModels[processId] || 'default';
 				const customPrompt = processPrompts[processId]?.prompt_text || processPrompts[processId]?.content || null;
-				await dispatch(runEnvironmentSetup({files, model: selectedModel, customPrompt, sessionId})).unwrap();
+				
+				// API key'i al ve geçir
+				const googleApiKey = apiKeys?.google || null;
+				console.log('[App] Google API key for environment setup:', googleApiKey ? 'Available' : 'Not found');
+				await dispatch(runEnvironmentSetup({files, model: selectedModel, customPrompt, sessionId, apiKey: googleApiKey})).unwrap();
 				// OutputPanel zaten setups dizisini redux'tan okuyacak!		} else if (processId === 'test-scenario-generation') {
 			console.log('[App] Running test scenario generation');
 			
@@ -480,7 +496,8 @@ function AppContents() {
 				finalPrompt: finalPrompt,
 				testType: processPrompts[processId]?.testType || 'Functional Testing',
 				testCategory: processPrompts[processId]?.testCategory || 'Functional',
-				sessionId: sessionId // Use global sessionId instead of generating new one
+				sessionId: sessionId, // Use global sessionId instead of generating new one
+				apiKey: apiKey  // API key eklendi
 			};
 			
 			console.log('[App] Test scenario generation config:', {
@@ -722,10 +739,18 @@ function AppContents() {
 				[processId]: 'running'
 			}));
 
-			if (processId === 'test-scenario-generation') {
-				console.log('[App] Running test scenario generation with provided config');
-				
-				const result = await processService.runTestScenarioGeneration(config);
+		if (processId === 'test-scenario-generation') {
+			console.log('[App] Running test scenario generation with provided config');
+			
+			// Get Google API key from Redux
+			const googleApiKey = apiKeys.google;
+			console.log('[App] Google API Key:', googleApiKey ? 'SET' : 'NOT SET');
+			
+			// Add API key to config
+			const configWithApiKey = {
+				...config,
+				apiKey: googleApiKey
+			};				const result = await processService.runTestScenarioGeneration(configWithApiKey);
 				console.log('[App] Test scenario generation result:', result);
 				
 				// Format the output for display - use the same detailed formatting as handleProcessRun

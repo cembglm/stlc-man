@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { useSelector } from 'react-redux';
 import { useModels } from '../../hooks/useModels';
+import { useApiKey } from '../../hooks/useApiKey';
 
 const TestCaseOptimization = ({ onPromptChange, onRunFunction, onLoadingChange, onRunningStateChange, onOptimizationResults }) => {
   const [processTitles, setProcessTitles] = useState([]);
@@ -15,12 +17,18 @@ const TestCaseOptimization = ({ onPromptChange, onRunFunction, onLoadingChange, 
   // New states for enhanced optimization
   const [optimizationType, setOptimizationType] = useState('individual');
   const [selectedModel, setSelectedModel] = useState('');
-  const [apiKey, setApiKey] = useState('');
   const [processName, setProcessName] = useState('');
 
   // Process tracking states
   const [currentProcessId, setCurrentProcessId] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  // Redux API keys - doğrudan Redux'tan al
+  const apiKeys = useSelector(state => state.apiKey.apiKeys);
+  console.log('[TestCaseOptimization] API Keys from Redux:', apiKeys);
+
+  // Global API key management
+  const { hasValidKey, getApiKey } = useApiKey();
 
   // Merkezi model hook'unu kullan
   const { 
@@ -28,11 +36,30 @@ const TestCaseOptimization = ({ onPromptChange, onRunFunction, onLoadingChange, 
     loading: modelsLoading, 
     error: modelsError,
     getModelDescriptions,
-    refetch: refetchModels
+    refetch: refetchModels,
+    availableApiModels,
+    modelsByApiKeyStatus
   } = useModels({ 
     autoFetch: true,
-    includeDescriptions: true 
+    includeDescriptions: true,
+    includeUnavailableApi: false, // Sadece kullanılabilir API modelleri göster
+    showApiKeyStatus: true
   });
+
+  // Debug: Redux state'i her render'da logla
+  console.log('[TestCaseOptimization] Current render - API Keys:', apiKeys);
+  console.log('[TestCaseOptimization] Current render - Available models count:', availableModels.length);
+  console.log('[TestCaseOptimization] Current render - Selected model:', selectedModel);
+  
+  // Seçili modelin detaylarını göster
+  if (selectedModel && availableModels.length > 0) {
+    const selectedModelObj = availableModels.find(m => m.key === selectedModel);
+    console.log('[TestCaseOptimization] Selected model object:', selectedModelObj);
+    console.log('[TestCaseOptimization] Model provider:', selectedModelObj?.provider);
+    console.log('[TestCaseOptimization] Model type:', selectedModelObj?.type);
+    console.log('[TestCaseOptimization] Model apiKeyStatus:', selectedModelObj?.apiKeyStatus);
+    console.log('[TestCaseOptimization] Has valid Google key:', hasValidKey('google'));
+  }
 
   // Default prompts for each optimization type
   const defaultPrompts = {
@@ -114,15 +141,22 @@ IMPORTANT:
     return defaultPrompts[optimizationType] || defaultPrompts.individual;
   }, [optimizationType]);
 
-  // Component mount edildiğinde process title'ları ve modelleri getir
+  // Component mount edildiğinde process title'ları getir
   useEffect(() => {
     fetchProcessTitles();
-    fetchAvailableModels();
     // İlk render'da default prompt'u bildir
     if (onPromptChange) {
       onPromptChange(getCurrentPrompt());
     }
-  }, [onPromptChange]);
+  }, [onPromptChange, getCurrentPrompt]);
+
+  // Models yüklendiğinde default model seç
+  useEffect(() => {
+    if (!selectedModel && availableModels.length > 0) {
+      setSelectedModel(availableModels[0].key);
+      console.log('TestCaseOptimization - Default model selected:', availableModels[0].key);
+    }
+  }, [availableModels, selectedModel]);
 
   // Process titles değiştiğinde test case'leri getir
   useEffect(() => {
@@ -143,25 +177,65 @@ IMPORTANT:
     }
   }, [optimizationType, onPromptChange, getCurrentPrompt]);
 
+  // Function to get API key for a model
+  const getModelApiKey = useCallback((modelKey) => {
+    const model = availableModels.find(m => m.key === modelKey);
+    if (!model || model.type === 'local') {
+      return null; // Local modeller için API key gerekmez
+    }
+    
+    const provider = model.provider?.toLowerCase();
+    if (provider && apiKeys[provider]) {
+      return apiKeys[provider];
+    }
+    
+    return null;
+  }, [availableModels, apiKeys]);
+
+  // Function to check if model is available (has valid API key if needed)
+  const isModelAvailable = useCallback((modelKey) => {
+    const model = availableModels.find(m => m.key === modelKey);
+    if (!model) {
+      console.log(`[isModelAvailable] Model not found: ${modelKey}`);
+      return false;
+    }
+    
+    if (model.type === 'local') {
+      console.log(`[isModelAvailable] Local model available: ${modelKey}`);
+      return true; // Local modeller her zaman kullanılabilir
+    }
+    
+    // API modeller için doğrudan Redux'tan API key kontrol et
+    const modelApiKey = getModelApiKey(modelKey);
+    const isAvailable = !!modelApiKey;
+    
+    console.log(`[isModelAvailable] API model: ${modelKey}, Provider: ${model.provider}, Available: ${isAvailable}`);
+    
+    return isAvailable;
+  }, [availableModels, getModelApiKey]);
+
   // runSmartSelection fonksiyonunu parent'a expose et
   useEffect(() => {
     console.log('TestCaseOptimization - useEffect triggered for validation');
     
     if (onRunFunction) {
       // Validasyon logic'i
+      console.log('[TestCaseOptimization] About to check isModelAvailable for:', selectedModel);
+      const modelAvailable = isModelAvailable(selectedModel);
+      console.log('[TestCaseOptimization] Model availability result:', modelAvailable);
+      
       const canRun = selectedTestCases.size > 0 && 
                     selectedProcessTitles.length > 0 && 
                     selectedModel && 
-                    processName.trim() !== '' && 
-                    !(selectedModel.toLowerCase().includes('gemini') && !apiKey.trim());
+                    processName.trim() !== '' &&
+                    modelAvailable; // Global API key kontrolü
       
       console.log('TestCaseOptimization - Form validation:', {
         selectedTestCases: selectedTestCases.size,
         selectedProcessTitles: selectedProcessTitles.length,
         selectedModel: selectedModel,
         processName: processName.trim(),
-        apiKey: apiKey.trim(),
-        isGeminiModel: selectedModel.toLowerCase().includes('gemini'),
+        isModelAvailable: modelAvailable,
         canRun: canRun,
         isRunning: isRunning
       });
@@ -183,7 +257,7 @@ IMPORTANT:
     } else {
       console.log('TestCaseOptimization - onRunFunction prop not available');
     }
-  }, [onRunFunction, selectedTestCases.size, selectedProcessTitles.length, selectedModel, processName, apiKey, isRunning]);
+  }, [onRunFunction, selectedTestCases.size, selectedProcessTitles.length, selectedModel, processName, isModelAvailable, isRunning]);
 
   // isRunning state değişikliklerini parent'a bildir
   useEffect(() => {
@@ -210,24 +284,6 @@ IMPORTANT:
       setError('Failed to fetch process titles: ' + err.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchAvailableModels = async () => {
-    try {
-      console.log('TestCaseOptimization - Initializing available models from static list');
-      setAvailableModels(modelsList);
-      
-      // Set default model if none selected
-      if (!selectedModel && modelsList.length > 0) {
-        setSelectedModel(modelsList[0].key);
-      }
-      
-      console.log('TestCaseOptimization - Available models loaded:', modelsList.length);
-    } catch (err) {
-      console.error('Failed to fetch models:', err.message);
-      // Fallback to static list
-      setAvailableModels(modelsList);
     }
   };
 
@@ -335,10 +391,14 @@ IMPORTANT:
       return;
     }
 
-    // Check if Gemini model is selected and API key is required
-    const isGeminiModel = selectedModel.toLowerCase().includes('gemini');
-    if (isGeminiModel && !apiKey.trim()) {
-      setError('API key is required for Gemini models');
+    // Check if model is available (has valid API key if needed)
+    if (!isModelAvailable(selectedModel)) {
+      const model = availableModels.find(m => m.key === selectedModel);
+      if (model && model.type === 'api') {
+        setError(`API key is required for ${model.provider} models. Please configure your API key in Settings.`);
+      } else {
+        setError('Selected model is not available');
+      }
       return;
     }
 
@@ -357,13 +417,16 @@ IMPORTANT:
       console.log(`Selected test case keys:`, Array.from(selectedTestCases));
       console.log(`Available test case keys:`, testCases.map((tc, index) => getUniqueKey(tc, index)));
       
+      // Global API key'i al
+      const modelApiKey = getModelApiKey(selectedModel);
+      
       const requestData = {
         selected_test_cases: selectedTestCaseData,
         process_titles: selectedProcessTitles,
         process_name: processName,
         selected_model: selectedModel,
         optimization_type: optimizationType,
-        api_key: apiKey.trim() || undefined
+        api_key: modelApiKey || undefined // Global API key
       };
 
       const response = await axios.post('http://localhost:8000/api/test-case-optimization/smart-selection', requestData);
@@ -607,7 +670,7 @@ IMPORTANT:
             </option>
             {availableModels && availableModels.map((model) => (
               <option key={model.key} value={model.key}>
-                {model.name} - {model.description}
+                {model.displayName || `${model.name} - ${model.description}`}
               </option>
             ))}
           </select>
@@ -616,24 +679,52 @@ IMPORTANT:
               Error loading models: {modelsError}
             </p>
           )}
+          
+          {/* API Key Status for selected model */}
+          {selectedModel && availableModels && (() => {
+            const model = availableModels.find(m => m.key === selectedModel);
+            if (model && model.type === 'api') {
+              // Manuel API key kontrolü - Redux'tan doğrudan
+              const modelApiKey = getModelApiKey(selectedModel);
+              const hasApiKey = !!modelApiKey;
+              const provider = model.provider || 'Unknown';
+              
+              console.log(`[TestCaseOptimization] API Key Status Check:`, {
+                modelKey: selectedModel,
+                provider: provider,
+                hasApiKey: hasApiKey,
+                apiKeyLength: modelApiKey ? modelApiKey.length : 0,
+                allApiKeys: apiKeys
+              });
+              
+              return (
+                <div className="mt-2 p-3 bg-gray-50 rounded-md">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">
+                      API Key Status for {provider}:
+                    </span>
+                    <span className={`text-sm font-medium ${
+                      hasApiKey ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {hasApiKey ? 'Valid ✓' : 'Invalid ✗'}
+                    </span>
+                  </div>
+                  {!hasApiKey && (
+                    <p className="mt-1 text-sm text-red-600">
+                      Please configure your {provider} API key in Settings to use this model.
+                    </p>
+                  )}
+                  {hasApiKey && (
+                    <p className="mt-1 text-sm text-green-600">
+                      API key configured and ready to use.
+                    </p>
+                  )}
+                </div>
+              );
+            }
+            return null;
+          })()}
         </div>
-
-        {/* API Key for external models */}
-        {selectedModel && selectedModel.toLowerCase().includes('gemini') && (
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              API Key *
-            </label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your API key for external models"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              disabled={loading}
-            />
-          </div>
-        )}
 
         {/* Error Display */}
         {error && (

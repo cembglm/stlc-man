@@ -13,7 +13,8 @@ async def process_code_review(
     types: Optional[List[str]] = Form(None),
     model: Optional[str] = Form(None),
     custom_prompt: Optional[str] = Form(None),
-    session_id: Optional[str] = Form(None)  # session_id parametresi eklendi
+    session_id: Optional[str] = Form(None),  # session_id parametresi eklendi
+    api_key: Optional[str] = Form(None)  # API key parametresi eklendi
 ):
     try:
         if not files:
@@ -21,7 +22,7 @@ async def process_code_review(
         
         logger.info(f"Code review requested with model: {model} ve session_id: {session_id}")
         # session_id parametresini de geçiriyoruz
-        results = await review_service.run_code_review(files, types, model, custom_prompt, session_id)
+        results = await review_service.run_code_review(files, types, model, custom_prompt, session_id, api_key)
         return results
     except Exception as e:
         logger.error(f"Code Review Error: {str(e)}")

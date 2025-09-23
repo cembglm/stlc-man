@@ -11,6 +11,7 @@ import CodeReviewForm from './processes/CodeReviewForm';
 import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
 import EnvironmentSetupForm from './processes/EnvironmentSetupForm';
+import ApiSettingsModal from './ApiSettingsModal';
 
 export default function TabPanel({
   processes,
@@ -47,6 +48,7 @@ export default function TabPanel({
   const [editingPrompt, setEditingPrompt] = useState(null);
   const [tempPrompt, setTempPrompt] = useState('');
   const [showHelp, setShowHelp] = useState(false);
+  const [isApiSettingsOpen, setIsApiSettingsOpen] = useState(false);
   
   // Test Scenario Generation form state tracking for main button
   const [testScenarioFormState, setTestScenarioFormState] = useState({
@@ -648,17 +650,30 @@ Important:
       {/* Enable Auto-selection toggle - yeni eklendi */}
       <div className="bg-white border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="pipelineToggle"
-              checked={isPipelineEnabled}
-              onChange={() => onTogglePipeline(!isPipelineEnabled)}
-              className="h-4 w-4 text-indigo-600 rounded"
-            />
-            <label htmlFor="pipelineToggle" className="text-sm text-gray-700">
-              Enable Auto-selection
-            </label>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="pipelineToggle"
+                checked={isPipelineEnabled}
+                onChange={() => onTogglePipeline(!isPipelineEnabled)}
+                className="h-4 w-4 text-indigo-600 rounded"
+              />
+              <label htmlFor="pipelineToggle" className="text-sm text-gray-700">
+                Enable Auto-selection
+              </label>
+            </div>
+            
+            {/* API Settings Button */}
+            <button
+              onClick={() => setIsApiSettingsOpen(true)}
+              className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+              <svg className="h-4 w-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m0 0a2 2 0 012 2m-2-2a2 2 0 00-2 2m2-2V5a2 2 0 00-2-2m0 0V3m0 2H9M7 7a2 2 0 012-2m0 0a2 2 0 012 2m-2-2V3m0 4H3m4 0a2 2 0 012 2m-2-2v6a2 2 0 002 2m-2-2a2 2 0 00-2-2m2 2h4m-4 0a2 2 0 01-2-2m2 2v4m0-4h4" />
+              </svg>
+              API Settings
+            </button>
           </div>
           <div className="text-xs text-gray-500">
             Auto-selected processes will be highlighted in yellow
@@ -1013,6 +1028,12 @@ Important:
           </div>
         </div>
       </div>
+      
+      {/* API Settings Modal */}
+      <ApiSettingsModal 
+        isOpen={isApiSettingsOpen}
+        onClose={() => setIsApiSettingsOpen(false)}
+      />
     </div>
   );
 }

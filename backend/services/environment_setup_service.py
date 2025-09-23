@@ -27,7 +27,7 @@ class EnvironmentSetupService:
     def normalize_prompt(self, text):
         return ' '.join(text.strip().split()).lower()
 
-    async def run_environment_setup(self, files, types, model_key=None, custom_prompt=None, session_id=None):
+    async def run_environment_setup(self, files, types, model_key=None, custom_prompt=None, session_id=None, api_key=None):
         try:
             self.logger.debug(f"run_environment_setup çağrıldı. Dosya sayısı: {len(files)}, Types: {types}")
             # Dosya isimlerini ve tiplerini logla
@@ -56,8 +56,8 @@ class EnvironmentSetupService:
             model_name = None
             if model_key:
                 model_name = model_client.get_model_identifier(model_key)
-                model_client = LLMClient(model_name)
-                self.logger.info(f"Using model: {model_name} for environment setup")
+                model_client = LLMClient(model_name, api_key, use_case='environment_setup')  # API key ve use_case eklendi
+                self.logger.info(f"Using model: {model_name} for environment setup with API key provided: {bool(api_key)}")
             else:
                 self.logger.info("No model specified, using default model")
             used_prompt = None
