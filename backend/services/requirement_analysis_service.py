@@ -69,14 +69,50 @@ class RequirementAnalysisService:
                 else:
                     raise ValueError("No prompt found in database for requirement_analysis process. Please add a prompt to the database.")
 
-            # Promptu oluştururken doğru alanları kullan
+            # Promptu oluştururken doğru alanları kullan ve token limitine dikkat et
             analysis_prompt = used_prompt + system_suffix
+            
+            # Check content lengths to avoid token limit issues
+            prompt_base_length = len(analysis_prompt.split())
+            code_length = len(code_files_content.split())
+            req_length = len(requirement_doc_content.split())
+            total_estimated_tokens = prompt_base_length + code_length + req_length
+            
+            self.logger.debug(f"Estimated token usage: base={prompt_base_length}, code={code_length}, req={req_length}, total={total_estimated_tokens}")
+            
+            # If total is too large, truncate content to fit within limits
+            MAX_INPUT_TOKENS = 95000  # Gemini 2.5 Flash supports up to 100K tokens
+            if total_estimated_tokens > MAX_INPUT_TOKENS:
+                self.logger.warning(f"Input too large ({total_estimated_tokens} tokens), truncating content...")
+                
+                # Reserve space for the base prompt (usually ~500-800 tokens)
+                available_tokens = MAX_INPUT_TOKENS - prompt_base_length - 200  # 200 buffer
+                
+                # Split available tokens between code and requirements (prioritize requirements)
+                if req_length > available_tokens // 2:
+                    req_tokens = available_tokens // 2
+                    code_tokens = available_tokens - req_tokens
+                else:
+                    req_tokens = req_length
+                    code_tokens = available_tokens - req_tokens
+                
+                # Truncate content if needed (cleanly, without technical messages)
+                if req_length > req_tokens:
+                    req_words = requirement_doc_content.split()
+                    requirement_doc_content = " ".join(req_words[:req_tokens])
+                    
+                if code_length > code_tokens:
+                    code_words = code_files_content.split()
+                    code_files_content = " ".join(code_words[:code_tokens])
+                
+                self.logger.info(f"Content truncated - req: {len(requirement_doc_content.split())} tokens, code: {len(code_files_content.split())} tokens")
+            
             analysis_prompt = analysis_prompt.format(
                 code=code_files_content,
                 requirement_document=requirement_doc_content
             )
 
-            MAX_TOKENS = 4000
+            MAX_TOKENS = 95000  # Utilize Gemini 2.5's full capacity
             if len(analysis_prompt.split()) > MAX_TOKENS:
                 self.logger.debug(f"Token limit exceeded: {len(analysis_prompt.split())} > {MAX_TOKENS}")
                 chunks = self.text_processor.chunk_text(analysis_prompt)
@@ -89,10 +125,13 @@ class RequirementAnalysisService:
                 final_result = self._combine_results(all_results)
             else:
                 self.logger.debug(f"Using single analysis. Token count: {len(analysis_prompt.split())}")
-                final_result = await model_client.generate_response(analysis_prompt)
+                final_result = await model_client.generate_response(analysis_prompt, max_tokens=90000)
 
             if not final_result:
                 raise ValueError("Failed to generate requirement analysis")
+
+            # Clean and format the result
+            final_result = self._format_analysis_output(final_result)
 
             file_names = [os.path.basename(path) for path in file_paths]
             files_header = "Files analyzed:\n" + "\n".join(file_names)
@@ -146,5 +185,53 @@ class RequirementAnalysisService:
         return combined_content
 
     def _combine_results(self, results):
-        combined = "\n\n".join(results)
-        return "# Complete Requirement Analysis Summary\n\n" + combined 
+        # Clean each result and join them properly
+        cleaned_results = []
+        for result in results:
+            if result:
+                cleaned = self._format_analysis_output(result)
+                if cleaned.strip():
+                    cleaned_results.append(cleaned)
+        
+        if not cleaned_results:
+            return "No analysis results generated."
+        
+        return "\n\n".join(cleaned_results)
+    
+    def _format_analysis_output(self, text):
+        """Clean and format analysis output for better UI presentation"""
+        if not text:
+            return ""
+        
+        # Remove excessive whitespace and normalize line breaks
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Remove extra spaces and tabs
+            cleaned_line = ' '.join(line.split())
+            
+            # Skip empty lines at the beginning and end, but preserve structure
+            if cleaned_line or (cleaned_lines and cleaned_lines[-1]):
+                cleaned_lines.append(cleaned_line)
+        
+        # Remove trailing empty lines
+        while cleaned_lines and not cleaned_lines[-1]:
+            cleaned_lines.pop()
+        
+        # Join with single line breaks and ensure proper spacing
+        result = '\n'.join(cleaned_lines)
+        
+        # Remove any technical truncation messages that might have slipped through
+        technical_messages = [
+            '[Response truncated due to token limit]',
+            '[Content truncated due to length. Please provide a brief analysis.]',
+            '[Brief analysis requested due to token limits.]',
+            '[Analysis based on truncated input due to token limits]',
+            '[Content truncated due to size limits]'
+        ]
+        
+        for msg in technical_messages:
+            result = result.replace(msg, '').strip()
+        
+        return result 

@@ -59,10 +59,11 @@ function useModelInfo(selectedModel) {
   return modelDescriptions[selectedModel] || [];
 }
 
-export default function EnvironmentSetupForm({ process, onAIModelUpdate, onOutputFormatUpdate, aiModels, disabled }) {
+export default function EnvironmentSetupForm({ process, onAIModelUpdate, onOutputFormatUpdate, aiModels, disabled, onEnvironmentNameUpdate, environmentNames }) {
   const [model, setModel] = useState(aiModels?.[process?.id] || 'llama3.2: 1B');
   const [modelInfo, setModelInfo] = useState([]);
   const [outputFormat, setOutputFormat] = useState('JSON');
+  const [environmentName, setEnvironmentName] = useState(environmentNames?.[process?.id] || '');
 
   // Merkezi model hook'unu kullan
   const { 
@@ -105,11 +106,40 @@ export default function EnvironmentSetupForm({ process, onAIModelUpdate, onOutpu
     }
   };
 
+  const handleEnvironmentNameChange = (e) => {
+    const name = e.target.value;
+    setEnvironmentName(name);
+    console.log(`[EnvironmentSetupForm] Environment name changed to: ${name}`);
+    
+    if (process && onEnvironmentNameUpdate) {
+      onEnvironmentNameUpdate(process.id, name);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto p-4">
       <form className="space-y-6">
         <div className="bg-white p-4 rounded-lg shadow">
           <h2 className="text-lg font-semibold mb-4">Process Configuration</h2>
+          
+          {/* Environment Name Field */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Environment Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={environmentName}
+              onChange={handleEnvironmentNameChange}
+              placeholder="e.g., Development, Testing, Production, Local Setup..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              disabled={disabled}
+            />
+            <p className="mt-1 text-sm text-gray-500">
+              Enter a descriptive name for this environment configuration. This will be used to identify the setup in Test Code Generation.
+            </p>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700">AI Model</label>
             <select
@@ -122,7 +152,7 @@ export default function EnvironmentSetupForm({ process, onAIModelUpdate, onOutpu
                 {modelsLoading ? "Loading models..." : "Default model: llama3.2: 1B"}
               </option>
               {availableModels && availableModels.map(m => (
-                <option key={m.key} value={m.key}>{m.name} - {m.description}</option>
+                <option key={m.key} value={m.key}>{m.displayName}</option>
               ))}
             </select>
             {modelsError && (
@@ -170,6 +200,8 @@ EnvironmentSetupForm.propTypes = {
   process: PropTypes.object.isRequired,
   onAIModelUpdate: PropTypes.func,
   onOutputFormatUpdate: PropTypes.func,
+  onEnvironmentNameUpdate: PropTypes.func,
   aiModels: PropTypes.object,
+  environmentNames: PropTypes.object,
   disabled: PropTypes.bool
 }; 

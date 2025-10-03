@@ -27,7 +27,7 @@ class EnvironmentSetupService:
     def normalize_prompt(self, text):
         return ' '.join(text.strip().split()).lower()
 
-    async def run_environment_setup(self, files, types, model_key=None, custom_prompt=None, session_id=None, api_key=None):
+    async def run_environment_setup(self, files, types, model_key=None, custom_prompt=None, session_id=None, environment_name=None, api_key=None):
         try:
             self.logger.debug(f"run_environment_setup çağrıldı. Dosya sayısı: {len(files)}, Types: {types}")
             # Dosya isimlerini ve tiplerini logla
@@ -104,6 +104,7 @@ class EnvironmentSetupService:
                 edited_prompt = (self.normalize_prompt(custom_prompt) != self.normalize_prompt(base_prompt))
             elif custom_prompt and not base_prompt:
                 edited_prompt = True
+            # Prepare session data for nested processes structure
             session_data = {
                 "session_id": session_id,
                 "output": {
@@ -112,7 +113,9 @@ class EnvironmentSetupService:
                 },
                 "edited_prompt": edited_prompt,
                 "used_prompt": used_prompt,
-                "used_model": model_name
+                "used_model": model_name,
+                "environment_name": environment_name,
+                "process_name": "Environment Setup"
             }
             save_session_data(session_data, process_type="environment_setup")
             for path in file_paths:

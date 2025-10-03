@@ -778,7 +778,7 @@ Generate the test scenarios now following the exact JSON structure above.`;
               {modelsLoading ? "Loading models..." : "Default model: llama3.2:3b"}
             </option>
             {availableModels && availableModels.map(m => (
-              <option key={m.key} value={m.key}>{m.name} - {m.description}</option>
+              <option key={m.key} value={m.key}>{m.displayName}</option>
             ))}
           </select>
           {modelsError && (

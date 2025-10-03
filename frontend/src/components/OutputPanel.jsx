@@ -739,9 +739,31 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
     try {
       console.log('[OutputPanel] Processing test case output:', output);
       
-      if (output && output.data && output.data.test_case_results) {
-        const results = output.data.test_case_results;
-        const summary = output.data.summary;
+      // Handle nested data structure: check both output.data.test_case_results and output.data.data.test_case_results
+      let results, summary;
+      
+      if (output && output.data) {
+        // Try direct data access first (for outputs[activeTab])
+        if (output.data.test_case_results) {
+          results = output.data.test_case_results;
+          summary = output.data.summary;
+        }
+        // Try nested data access (for nested data structure from TestCaseGenerationForm)
+        else if (output.data.data && output.data.data.test_case_results) {
+          results = output.data.data.test_case_results;
+          summary = output.data.data.summary;
+        }
+        // Try rawData access (backwards compatibility)
+        else if (output.rawData && output.rawData.test_case_results) {
+          results = output.rawData.test_case_results;
+          summary = output.rawData.summary;
+        }
+      }
+      
+      console.log('[OutputPanel] Extracted results:', results ? results.length : 'none');
+      console.log('[OutputPanel] Extracted summary:', summary);
+      
+      if (results && results.length > 0) {
         
         return (
           <div className="space-y-6">
@@ -958,11 +980,41 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
           </div>
         );
       }
+      
+      // No valid data found, return debug information
+      console.warn('[OutputPanel] No test case results found in output:', output);
+      return (
+        <div className="bg-yellow-50 rounded-lg p-4 border border-yellow-200">
+          <h4 className="font-medium text-yellow-800 mb-2">⚠️ No Test Case Results Found</h4>
+          <div className="text-sm text-yellow-700">
+            <p>The test case generation completed but no results could be displayed.</p>
+            <p className="mt-2">Possible reasons:</p>
+            <ul className="list-disc list-inside mt-1 space-y-1">
+              <li>Data structure mismatch between frontend and backend</li>
+              <li>Results are stored in an unexpected format</li>
+              <li>API timeout occurred during processing</li>
+            </ul>
+            <details className="mt-3">
+              <summary className="cursor-pointer font-medium">View Debug Information</summary>
+              <pre className="mt-2 bg-yellow-100 rounded p-2 text-xs overflow-auto max-h-32">
+                {JSON.stringify(output, null, 2)}
+              </pre>
+            </details>
+          </div>
+        </div>
+      );
+      
     } catch (error) {
-      console.error('Error rendering test case content:', error);
+      console.error('[OutputPanel] Error rendering test case content:', error);
+      return (
+        <div className="bg-red-50 rounded-lg p-4 border border-red-200">
+          <h4 className="font-medium text-red-800 mb-2">❌ Error Displaying Results</h4>
+          <p className="text-sm text-red-700">
+            An error occurred while displaying the test case generation results: {error.message}
+          </p>
+        </div>
+      );
     }
-    
-    return null;
   };
 
   const renderTestCaseOptimizationContent = (output) => {
@@ -1643,6 +1695,158 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
       }
     }
 
+    // Test Code Generation için özel gösterim
+    if (activeTab === 'test-code-generation' && outputs && outputs[activeTab]) {
+      const testCodeOutput = outputs[activeTab];
+      const result = testCodeOutput.result;
+      
+      return (
+        <div className="space-y-4">
+          <section>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-lg font-medium">Test Code Generation Results</h3>
+              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                testCodeOutput.status === 'success' 
+                  ? 'bg-green-100 text-green-800' 
+                  : testCodeOutput.status === 'error'
+                  ? 'bg-red-100 text-red-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}>
+                {testCodeOutput.status === 'success' ? 'Success' : 
+                 testCodeOutput.status === 'error' ? 'Error' : 'Processing'}
+              </span>
+            </div>
+
+            {result && result.summary && (
+              <>
+                {/* Generation Summary */}
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 mb-4">
+                  <h4 className="font-medium text-blue-800 mb-2">Generation Summary</h4>
+                  <div className="grid grid-cols-3 gap-4 text-sm text-blue-700">
+                    <div>
+                      <p className="font-medium">Total Test Cases</p>
+                      <p className="text-lg">{result.summary.total_test_cases || 0}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Generated Successfully</p>
+                      <p className="text-lg text-green-600">{result.summary.generated_count || 0}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Failed</p>
+                      <p className="text-lg text-red-600">{result.summary.failed_count || 0}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-blue-200">
+                    <div className="grid grid-cols-3 gap-4 text-sm text-blue-700">
+                      <div>
+                        <p className="font-medium">Process Title</p>
+                        <p>{result.summary.process_title || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="font-medium">AI Model</p>
+                        <p>{result.summary.model_name || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="font-medium">Environment</p>
+                        <p>{result.environment_info?.language || 'N/A'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Generated Test Codes */}
+                <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-4">
+                  <h4 className="font-medium text-green-800 mb-2">
+                    ✅ Generated Test Codes ({result.generated_tests?.length || 0})
+                  </h4>
+                  {result.generated_tests?.length > 0 ? (
+                    <div className="space-y-3">
+                      {result.generated_tests.map((test, index) => (
+                        <details key={index} className="cursor-pointer">
+                          <summary className="text-sm text-green-700 hover:text-green-900 font-medium">
+                            {test.status === 'success' ? '✅' : '❌'} {test.test_case_id || `Test #${index + 1}`}: {test.title || 'Untitled Test'}
+                          </summary>
+                          <div className="mt-3 bg-white p-4 rounded border border-green-200">
+                            {test.status === 'success' ? (
+                              <>
+                                <div className="mb-3">
+                                  <h6 className="font-medium text-gray-900 mb-1">Test Information</h6>
+                                  <div className="text-sm text-gray-600 space-y-1">
+                                    <p><strong>Test Case ID:</strong> {test.test_case_id}</p>
+                                    <p><strong>Title:</strong> {test.title}</p>
+                                    {test.description && <p><strong>Description:</strong> {test.description}</p>}
+                                    {test.framework && <p><strong>Framework:</strong> {test.framework}</p>}
+                                  </div>
+                                </div>
+                                {test.code && (
+                                  <div className="bg-gray-900 text-green-400 p-4 rounded font-mono text-sm overflow-x-auto">
+                                    <pre className="whitespace-pre-wrap">{test.code}</pre>
+                                  </div>
+                                )}
+                                {test.explanation && (
+                                  <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
+                                    <h6 className="font-medium text-blue-800 mb-1">Explanation</h6>
+                                    <p className="text-sm text-blue-700">{test.explanation}</p>
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div className="bg-red-50 border border-red-200 rounded p-3">
+                                <h6 className="font-medium text-red-800 mb-1">Generation Failed</h6>
+                                <p className="text-sm text-red-700">{test.error || 'Unknown error occurred'}</p>
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No test codes generated.</p>
+                  )}
+                </div>
+
+                {/* Environment Information */}
+                {result.environment_info && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-md p-4 mb-4">
+                    <h4 className="font-medium text-gray-800 mb-2">Environment Information</h4>
+                    <div className="text-sm text-gray-600 space-y-1">
+                      <p><strong>Language:</strong> {result.environment_info.language}</p>
+                      <p><strong>Framework:</strong> {result.environment_info.framework}</p>
+                      {result.environment_info.dependencies?.length > 0 && (
+                        <p><strong>Dependencies:</strong> {result.environment_info.dependencies.join(', ')}</p>
+                      )}
+                      {result.environment_info.setup_commands?.length > 0 && (
+                        <p><strong>Setup Commands:</strong> {result.environment_info.setup_commands.join(', ')}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {testCodeOutput.status === 'error' && (
+              <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                <h4 className="font-medium text-red-800 mb-2">Generation Failed</h4>
+                <p className="text-sm text-red-700">{result?.error || testCodeOutput.error || 'Unknown error occurred'}</p>
+              </div>
+            )}
+
+            <section>
+              <h3 className="text-lg font-medium mb-3">Execution Details</h3>
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 shadow-sm">
+                <div className="text-gray-600">
+                  <p><strong>Status:</strong> {testCodeOutput.status || 'completed'}</p>
+                  <p><strong>Process:</strong> Test Code Generation</p>
+                  <p><strong>Last Updated:</strong> {new Date(testCodeOutput.timestamp).toLocaleString()}</p>
+                  <p><strong>Session ID:</strong> {testCodeOutput.sessionId || result.summary?.environment_session_id || 'N/A'}</p>
+                </div>
+              </div>
+            </section>
+          </section>
+        </div>
+      );
+    }
+
     if (activeTab === 'test-scenario-generation' && outputs && outputs[activeTab]) {
       const testScenarioOutput = outputs[activeTab];
       return (
@@ -1683,8 +1887,16 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
     }
 
     // Check for test-case-generation specific output
+    console.log('[OutputPanel] Checking for test-case-generation output:', {
+      activeTab,
+      hasOutputs: !!outputs,
+      outputKeys: outputs ? Object.keys(outputs) : [],
+      hasActiveTabOutput: !!(outputs && outputs[activeTab])
+    });
+    
     if (activeTab === 'test-case-generation' && outputs && outputs[activeTab]) {
       const testCaseOutput = outputs[activeTab];
+      console.log('[OutputPanel] Found test-case-generation output:', testCaseOutput);
       const testCaseContent = renderTestCaseContent(testCaseOutput);
       
       if (testCaseContent) {
@@ -1764,7 +1976,11 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
         return <div className="text-red-600">Error: {reqError}</div>;
       }
       if (reqResult && Array.isArray(reqResult.analysis) && reqResult.analysis.length > 0) {
-        const analysisContent = reqResult.analysis.map(item => `**Files Analyzed:**\n${item.files}\n\n**Analysis:**\n${item.result}`).join('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+        const analysisContent = reqResult.analysis.map(item => {
+          // Clean and format the analysis result
+          const cleanResult = item.result ? item.result.replace(/\n\s*\n\s*\n/g, '\n\n').trim() : '';
+          return `**Files Analyzed:**\n${item.files}\n\n**Analysis:**\n${cleanResult}`;
+        }).join('\n\n---\n\n');
         return (
           <div className="space-y-4">
             <section>
@@ -1773,9 +1989,9 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               </div>              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 shadow-sm overflow-x-auto">
                 <div className="prose prose-sm max-w-full text-gray-600 break-words">
                   <ReactMarkdown 
-                    className="whitespace-pre-wrap break-words overflow-wrap-anywhere"
+                    className="break-words overflow-wrap-anywhere leading-relaxed"
                     components={{
-                      p: ({children}) => <p className="break-words mb-2 last:mb-0">{safeRenderChildren(children)}</p>,
+                      p: ({children}) => <p className="break-words mb-3 last:mb-0 leading-relaxed">{safeRenderChildren(children)}</p>,
                       li: ({children}) => <li className="break-words">{safeRenderChildren(children)}</li>,
                       td: ({children}) => <td className="break-words max-w-xs px-2 py-1">{safeRenderChildren(children)}</td>,
                       th: ({children}) => <th className="break-words px-2 py-1 font-semibold">{safeRenderChildren(children)}</th>,

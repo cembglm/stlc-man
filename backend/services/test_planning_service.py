@@ -81,14 +81,52 @@ class TestPlanningService:
                     self.logger.info("Using base prompt from database")
                 else:
                     raise ValueError("No prompt found in database for test_planning process. Please add a prompt to the database.")
+            # Token management similar to requirement_analysis_service
+            prompt_base_length = len((used_prompt + system_suffix).split())
+            code_length = len(code_files_content.split())
+            req_length = len(requirement_doc_content.split())
+            total_estimated_tokens = prompt_base_length + code_length + req_length
+            
+            self.logger.debug(f"Estimated token usage: base={prompt_base_length}, code={code_length}, req={req_length}, total={total_estimated_tokens}")
+            
+            # If total is too large, truncate content to fit within limits
+            MAX_INPUT_TOKENS = 95000  # Gemini 2.5 Flash supports up to 100K tokens
+            if total_estimated_tokens > MAX_INPUT_TOKENS:
+                self.logger.warning(f"Input too large ({total_estimated_tokens} tokens), truncating content...")
+                
+                # Reserve space for the base prompt
+                available_tokens = MAX_INPUT_TOKENS - prompt_base_length - 200  # buffer
+                
+                # Split available tokens between code and requirements (prioritize requirements)
+                if req_length > available_tokens // 2:
+                    req_tokens = available_tokens // 2
+                    code_tokens = available_tokens - req_tokens
+                else:
+                    req_tokens = req_length
+                    code_tokens = available_tokens - req_tokens
+                
+                # Truncate content if needed (cleanly)
+                if req_length > req_tokens:
+                    req_words = requirement_doc_content.split()
+                    requirement_doc_content = " ".join(req_words[:req_tokens])
+                    
+                if code_length > code_tokens:
+                    code_words = code_files_content.split()
+                    code_files_content = " ".join(code_words[:code_tokens])
+                
+                self.logger.info(f"Content truncated - req: {len(requirement_doc_content.split())} tokens, code: {len(code_files_content.split())} tokens")
+
             today = datetime.now().strftime("%Y-%m-%d")
-            planning_prompt = used_prompt.format(
+            
+            # Add system suffix to the prompt
+            full_prompt = used_prompt + system_suffix
+            planning_prompt = full_prompt.format(
                 code=code_files_content,
                 requirement_document=requirement_doc_content,
                 today=today
             )
 
-            MAX_TOKENS = 4000
+            MAX_TOKENS = 95000  # Utilize Gemini 2.5's full capacity
             if len(planning_prompt.split()) > MAX_TOKENS:
                 self.logger.debug(f"Token limit exceeded: {len(planning_prompt.split())} > {MAX_TOKENS}")
                 chunks = self.text_processor.chunk_text(planning_prompt)
@@ -101,10 +139,13 @@ class TestPlanningService:
                 final_plan = self._combine_plans(all_plans)
             else:
                 self.logger.debug(f"Using single plan. Token count: {len(planning_prompt.split())}")
-                final_plan = await model_client.generate_response(planning_prompt)
+                final_plan = await model_client.generate_response(planning_prompt, max_tokens=90000)
             
             if not final_plan:
                 raise ValueError("Failed to generate test planning")
+
+            # Clean and format the result
+            final_plan = self._format_planning_output(final_plan)
                 
             file_names = [os.path.basename(path) for path in file_paths]
             files_header = "Files analyzed:\n" + "\n".join(file_names)
@@ -158,5 +199,53 @@ class TestPlanningService:
         return combined_content
 
     def _combine_plans(self, plans):
-        combined = "\n\n".join(plans)
-        return "# Complete Test Planning Summary\n\n" + combined 
+        # Clean each plan and join them properly
+        cleaned_plans = []
+        for plan in plans:
+            if plan:
+                cleaned = self._format_planning_output(plan)
+                if cleaned.strip():
+                    cleaned_plans.append(cleaned)
+        
+        if not cleaned_plans:
+            return "No test planning results generated."
+        
+        return "\n\n".join(cleaned_plans)
+    
+    def _format_planning_output(self, text):
+        """Clean and format test planning output for better UI presentation"""
+        if not text:
+            return ""
+        
+        # Remove excessive whitespace and normalize line breaks
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Remove extra spaces and tabs
+            cleaned_line = ' '.join(line.split())
+            
+            # Skip empty lines at the beginning and end, but preserve structure
+            if cleaned_line or (cleaned_lines and cleaned_lines[-1]):
+                cleaned_lines.append(cleaned_line)
+        
+        # Remove trailing empty lines
+        while cleaned_lines and not cleaned_lines[-1]:
+            cleaned_lines.pop()
+        
+        # Join with single line breaks and ensure proper spacing
+        result = '\n'.join(cleaned_lines)
+        
+        # Remove any technical truncation messages that might have slipped through
+        technical_messages = [
+            '[Response truncated due to token limit]',
+            '[Content truncated due to length. Please provide a brief analysis.]',
+            '[Brief analysis requested due to token limits.]',
+            '[Analysis based on truncated input due to token limits]',
+            '[Content truncated due to size limits]'
+        ]
+        
+        for msg in technical_messages:
+            result = result.replace(msg, '').strip()
+        
+        return result 

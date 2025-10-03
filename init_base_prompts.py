@@ -3,7 +3,7 @@ import json
 
 def initialize_base_prompts():
     client = MongoClient('mongodb://localhost:27017')
-    db = client['stlc_db']
+    db = client['stlc_database']
     collection = db['test_scenario_generation_prompt']
     
     # Check if collection has any data

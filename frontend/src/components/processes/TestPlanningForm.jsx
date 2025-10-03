@@ -173,7 +173,7 @@ export default function TestPlanningForm({ process, onAIModelUpdate, onOutputFor
                 {modelsLoading ? "Loading models..." : "Default model: llama3.2: 1B"}
               </option>
               {availableModels && availableModels.map(m => (
-                <option key={m.key} value={m.key}>{m.name} - {m.description}</option>
+                <option key={m.key} value={m.key}>{m.displayName}</option>
               ))}
             </select>
             {modelsError && (

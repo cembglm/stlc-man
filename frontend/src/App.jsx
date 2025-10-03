@@ -11,6 +11,7 @@ import { runRequirementAnalysis } from './store/slices/requirementAnalysisSlice'
 import axios from 'axios';
 import TestScenarioGenerationForm from "./components/processes/TestScenarioGenerationForm";
 import TestCaseOptimization from "./components/processes/TestCaseOptimization";
+import TestCodeGeneration from "./components/processes/TestCodeGeneration";
 import { v4 as uuidv4 } from 'uuid';
 import { runTestPlanning } from './store/slices/testPlanningSlice';
 import { runEnvironmentSetup } from './store/slices/environmentSetupSlice';
@@ -33,6 +34,7 @@ function AppContents() {
 	const [processOrigins, setProcessOrigins] = useState({}); // { processId: 'manual' | 'auto' }
 	const [processFiles, setProcessFiles] = useState({});
 	const [aiModels, setAIModels] = useState({});  // New state for AI models
+	const [environmentNames, setEnvironmentNames] = useState({});  // New state for environment names
 	const [processPrompts, setProcessPrompts] = useState({});
 	const [output, setOutput] = useState(null);
 	const [pipelineStatus, setPipelineStatus] = useState({});
@@ -139,6 +141,14 @@ function AppContents() {
 		setOutputFormats(prev => ({
 			...prev,
 			[processId]: format
+		}));
+	};
+
+	const handleEnvironmentNameUpdate = (processId, environmentName) => {
+		console.log(`[App] Environment name updated for process ${processId}:`, environmentName);
+		setEnvironmentNames(prev => ({
+			...prev,
+			[processId]: environmentName
 		}));
 	};
 
@@ -461,12 +471,26 @@ function AppContents() {
 				console.log('[App] Running environment setup');
 				const selectedModel = aiModels[processId] || 'default';
 				const customPrompt = processPrompts[processId]?.prompt_text || processPrompts[processId]?.content || null;
+				const environmentName = environmentNames[processId] || 'Unnamed Environment';
 				
 				// API key'i al ve geçir
 				const googleApiKey = apiKeys?.google || null;
 				console.log('[App] Google API key for environment setup:', googleApiKey ? 'Available' : 'Not found');
-				await dispatch(runEnvironmentSetup({files, model: selectedModel, customPrompt, sessionId, apiKey: googleApiKey})).unwrap();
-				// OutputPanel zaten setups dizisini redux'tan okuyacak!		} else if (processId === 'test-scenario-generation') {
+				console.log('[App] Environment name for environment setup:', environmentName);
+				await dispatch(runEnvironmentSetup({files, model: selectedModel, customPrompt, sessionId, environmentName, apiKey: googleApiKey})).unwrap();
+				// OutputPanel zaten setups dizisini redux'tan okuyacak!
+			} else if (processId === 'test-code-generation') {
+				console.log('[App] Running test code generation');
+				
+				// Call the component's execute function if available
+				if (window.testCodeGenerationExecute && typeof window.testCodeGenerationExecute === 'function') {
+					console.log('[App] Calling TestCodeGeneration component execute function');
+					await window.testCodeGenerationExecute();
+				} else {
+					console.warn('[App] TestCodeGeneration execute function not available');
+					throw new Error('Test Code Generation component not ready. Please ensure all required fields are filled.');
+				}
+			} else if (processId === 'test-scenario-generation') {
 			console.log('[App] Running test scenario generation');
 			
 			// Debug the current state
@@ -880,6 +904,69 @@ function AppContents() {
 				}));
 
 				console.log('[App] Test case generation completed and output set');
+			} else if (processId === 'test-code-generation') {
+				console.log('[App] Running test code generation with provided config');
+				
+				// Test Code Generation için özel işlem
+				const result = config.data;
+				console.log('[App] Test code generation result:', result);
+				
+				// Markdown formatında output oluştur
+				let formattedOutput = '';
+				if (result.status === 'success') {
+					formattedOutput = `# Test Code Generation Results\n\n`;
+					formattedOutput += `**Status:** ✅ Success\n`;
+					formattedOutput += `**Environment Setup:** ${result.environment_setup_id}\n`;
+					formattedOutput += `**Process Title:** ${result.process_title}\n`;
+					formattedOutput += `**Generated Test Codes:** ${result.test_codes?.length || 0}\n\n`;
+					
+					if (result.test_codes && result.test_codes.length > 0) {
+						formattedOutput += `## Generated Test Codes\n\n`;
+						result.test_codes.forEach((testCode, index) => {
+							formattedOutput += `### Test Code ${index + 1}\n`;
+							formattedOutput += `**Test Case ID:** ${testCode.test_case_id}\n`;
+							formattedOutput += `**Framework:** ${testCode.framework}\n`;
+							formattedOutput += `**Language:** ${testCode.language}\n\n`;
+							formattedOutput += `\`\`\`${testCode.language}\n${testCode.code}\n\`\`\`\n\n`;
+						});
+					}
+				} else {
+					formattedOutput = `# Test Code Generation Failed\n\n`;
+					formattedOutput += `**Status:** ❌ Error\n`;
+					formattedOutput += `**Message:** ${result.message || 'Unknown error'}\n\n`;
+					formattedOutput += `Please check your configuration and try again.`;
+				}
+				
+				// Output'u set et
+				setOutput({
+					type: 'test-code-generation',
+					data: result,
+					sessionId: config.sessionId,
+					processId: processId,
+					timestamp: new Date().toISOString()
+				});
+				
+				// Outputs state'ini de güncelle
+				setOutputs(prev => ({
+					...prev,
+					[processId]: {
+						type: 'test-code-generation',
+						data: result,
+						content: formattedOutput,
+						status: result.status === 'success' ? 'completed' : 'error',
+						processType: 'Test Code Generation',
+						processId: processId,
+						timestamp: new Date().toISOString(),
+						rawData: result
+					}
+				}));
+
+				setPipelineStatus(prev => ({
+					...prev,
+					[processId]: result.status === 'success' ? 'completed' : 'error'
+				}));
+
+				console.log('[App] Test code generation completed and output set');
 			} else {
 				console.warn('[App] handleRunProcessWithConfig called for unsupported process:', processId);
 			}
@@ -1010,7 +1097,7 @@ function AppContents() {
 		}));
 		setPipelineStatus(prev => ({
 			...prev,
-			[processId]: outputData.status || 'completed'
+			[processId]: (outputData && outputData.status) || 'completed'
 		}));
 	};
 
@@ -1034,7 +1121,9 @@ function AppContents() {
 					onFileUpload={handleFileUpload}
 					onAIModelUpdate={handleAIModelUpdate}
 					onOutputFormatUpdate={handleOutputFormatUpdate}
+					onEnvironmentNameUpdate={handleEnvironmentNameUpdate}
 					aiModels={aiModels}
+					environmentNames={environmentNames}
 					outputFormats={outputFormats}
 					processPrompts={processPrompts}
 					onPromptUpdate={handlePromptUpdate}

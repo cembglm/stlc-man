@@ -670,7 +670,7 @@ IMPORTANT:
             </option>
             {availableModels && availableModels.map((model) => (
               <option key={model.key} value={model.key}>
-                {model.displayName || `${model.name} - ${model.description}`}
+                {model.displayName}
               </option>
             ))}
           </select>

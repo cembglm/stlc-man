@@ -7,6 +7,7 @@ import OutputPanel from './OutputPanel';
 import TestScenarioGenerationForm from './processes/TestScenarioGenerationForm';
 import TestCaseGenerationForm from './processes/TestCaseGenerationForm';
 import TestCaseOptimization from './processes/TestCaseOptimization';
+import TestCodeGeneration from './processes/TestCodeGeneration';
 import CodeReviewForm from './processes/CodeReviewForm';
 import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
@@ -24,7 +25,9 @@ export default function TabPanel({
   onFileUpload,
   onAIModelUpdate,
   onOutputFormatUpdate,
+  onEnvironmentNameUpdate,
   aiModels,
+  environmentNames,
   outputFormats,
   processPrompts,
   onPromptUpdate,
@@ -349,6 +352,7 @@ Important:
     'test-scenario-generation': TestScenarioGenerationForm,
     'test-case-generation': TestCaseGenerationForm,
     'test-case-optimization': TestCaseOptimization,
+    'test-code-generation': TestCodeGeneration,
     'test-planning': TestPlanningForm,
     'environment-setup': EnvironmentSetupForm,
   };
@@ -425,7 +429,7 @@ Important:
           </div>
         </div>
 
-        {/* File Selection Section - Hide for test-case-optimization */}
+        {/* File Selection Section - Hide for test-case-optimization only */}
         {processId !== 'test-case-optimization' && (
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Select Input Files</h3>
@@ -510,7 +514,9 @@ Important:
                   process={process}
                   onAIModelUpdate={onAIModelUpdate}
                   onOutputFormatUpdate={onOutputFormatUpdate}
+                  onEnvironmentNameUpdate={onEnvironmentNameUpdate}
                   aiModels={aiModels}
+                  environmentNames={environmentNames}
                   outputFormats={outputFormats}
                   disabled={isDisabled}
                   managedFiles={managedFiles}
@@ -522,9 +528,11 @@ Important:
                   onTestCaseGeneration={processId === 'test-case-generation' ? setTestCaseFormState : undefined}
                   onTestCaseOptimization={processId === 'test-case-optimization' ? handleTestCaseOptimizationStateChange : undefined}
                   onPromptChange={processId === 'test-case-optimization' ? handleTestCaseOptimizationPromptChange : undefined}
-                  currentPrompt={processId === 'test-case-optimization' ? (testCaseOptimizationFormState.prompt || '') : undefined}
+                  currentPrompt={processId === 'test-case-optimization' ? (testCaseOptimizationFormState.prompt || '') : 
+                               processId === 'test-code-generation' ? processPrompts[processId] : undefined}
                   onOptimizationResults={processId === 'test-case-optimization' ? handleTestCaseOptimizationResults : undefined}
                   onFinalPromptChange={processId === 'test-case-generation' ? setTestCaseGenerationCombinedPrompt : undefined}
+                  onPromptUpdate={processId === 'test-code-generation' ? (newPrompt) => onPromptUpdate(processId, newPrompt) : undefined}
                   onGeneratePrompt={async (processIdFromForm, formData) => {
                     try {
                       console.log('[TabPanel] onGeneratePrompt called with:', { processIdFromForm, processId, hasFormData: !!formData });
@@ -628,6 +636,8 @@ Important:
               <p className="text-gray-600 whitespace-pre-wrap">
                 {promptText || (processId === 'test-case-generation' ? 
                   "Please select a test scenario process above to load the prompt." : 
+                  processId === 'test-code-generation' ?
+                  "Generate executable test code based on unique test cases, source code analysis, and environment setup configuration." :
                   "Prompt bulunamadı.")}
               </p>
             </div>
@@ -870,6 +880,12 @@ Important:
                       return;
                     }
                     
+                    // Special handling for Test Code Generation
+                    if (activeTab === 'test-code-generation') {
+                      onRun(activeTab);
+                      return;
+                    }
+                    
                     // Standard handling for other processes
                     const foundProcess = processes.find(p => p.id === activeTab);
                     const relevantFiles = managedFiles.filter(file => 
@@ -894,7 +910,7 @@ Important:
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
-                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && pipelineStatus[activeTab] === 'running')
+                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
                 }
                 className={clsx(
                   "w-full py-3 px-4 rounded-md text-white font-medium transition-colors shadow-sm flex items-center justify-center",
@@ -902,7 +918,7 @@ Important:
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
-                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && pipelineStatus[activeTab] === 'running')
+                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
                     ? "bg-gray-300 cursor-not-allowed" 
                     : "bg-indigo-600 hover:bg-indigo-700"
                 )}

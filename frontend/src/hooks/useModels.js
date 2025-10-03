@@ -151,15 +151,18 @@ export const useModels = (options = {}) => {
             provider: reduxProvider
           };
 
+          // Standart model adı formatı: "Model Adı - Açıklama"
+          const baseDisplayName = `${model.name} - ${model.description}`;
+          
           // Model adına durum ekle (eğer ayar aktifse)
           if (validation?.isValid === true) {
-            enhancedModel.displayName = `${model.name} ✓`;
+            enhancedModel.displayName = `${baseDisplayName} ✓`;
           } else if (validation?.isValid === false) {
-            enhancedModel.displayName = `${model.name} ⚠️`;
+            enhancedModel.displayName = `${baseDisplayName} ⚠️`;
           } else if (validation?.isValidating) {
-            enhancedModel.displayName = `${model.name} 🔄`;
+            enhancedModel.displayName = `${baseDisplayName} 🔄`;
           } else {
-            enhancedModel.displayName = `${model.name} ❓`;
+            enhancedModel.displayName = `${baseDisplayName} ❓`;
           }
         } else {
           enhancedModel.apiKeyStatus = {
@@ -171,11 +174,11 @@ export const useModels = (options = {}) => {
             provider: reduxProvider || backendProvider?.toLowerCase()
           };
           
-          enhancedModel.displayName = `${model.name} 🔐`;
+          enhancedModel.displayName = `${model.name} - ${model.description} 🔐`;
         }
       } else {
-        // Local modeller için durum
-        enhancedModel.displayName = model.name;
+        // Local modeller için standart format
+        enhancedModel.displayName = `${model.name} - ${model.description}`;
         enhancedModel.apiKeyStatus = {
           hasKey: true, // Local modeller için API key gerekmez
           isValid: true,

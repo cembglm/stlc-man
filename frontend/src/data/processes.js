@@ -147,12 +147,17 @@ export const processes = [
     id: 'test-code-generation',
     name: 'Test Code Generation',
     details: [
-      'Create automated test scripts based on test cases',
-      'Implement test framework and utilities',
-      'Ensure code quality and maintainability'
+      'Generate executable test code from unique test cases and source code',
+      'Automatically detect programming language and recommend appropriate test framework',
+      'Use environment setup results to ensure generated tests are compatible with the target environment',
+      'Create framework-specific test codes (pytest, unittest, jest, junit, etc.)',
+      'Generate one test code per unique test case for comprehensive coverage',
+      'Ensure generated test codes are ready to run without modifications',
+      'Support multiple programming languages (Python, JavaScript, Java, C#, etc.)'
     ],
-    inputs: ['Optimized Test Cases', 'Source Code'],
-    output: 'Test Scripts'
+    inputs: ['Unique Test Cases', 'Source Code', 'Environment Setup Results'],
+    output: 'Executable Test Code Files',
+    defaultPrompt: 'Generate executable test code based on unique test cases, source code analysis, and environment setup configuration.'
   },
  
   {

@@ -225,7 +225,7 @@ export const processService = {
     }
   },
 
-  async runEnvironmentSetup(files, model = null, customPrompt = null, sessionId = null, apiKey = null) {
+  async runEnvironmentSetup(files, model = null, customPrompt = null, sessionId = null, environmentName = null, apiKey = null) {
     console.log("runEnvironmentSetup çağrıldı. Dosyalar ve tipleri:");
     files.forEach((fileInfo, idx) => {
       const file = fileInfo.file || fileInfo;
@@ -245,6 +245,10 @@ export const processService = {
     if (model) formData.append('model', model);
     if (customPrompt) formData.append('custom_prompt', customPrompt);
     if (sessionId) formData.append('session_id', sessionId);
+    if (environmentName) {
+      formData.append('environment_name', environmentName);
+      console.log('processService.js - Environment name gönderiliyor:', environmentName);
+    }
     if (apiKey) {
       formData.append('api_key', apiKey);
       console.log('processService.js - Environment Setup API key gönderiliyor:', apiKey ? 'Yes' : 'No');

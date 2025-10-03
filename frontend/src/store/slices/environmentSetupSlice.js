@@ -3,9 +3,9 @@ import { processService } from '../../services/processService';
 
 export const runEnvironmentSetup = createAsyncThunk(
   'environmentSetup/runSetup',
-  async ({files, model, customPrompt, sessionId, apiKey}) => {
+  async ({files, model, customPrompt, sessionId, environmentName, apiKey}) => {
     try {
-      const response = await processService.runEnvironmentSetup(files, model, customPrompt, sessionId, apiKey);
+      const response = await processService.runEnvironmentSetup(files, model, customPrompt, sessionId, environmentName, apiKey);
       if (!response || !response.setups) {
         throw new Error('Invalid response format');
       }

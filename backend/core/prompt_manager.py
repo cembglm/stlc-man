@@ -322,6 +322,7 @@ def save_session_data(session_data: dict, process_type: str = "code_review"):
         process_name = session_data.get("process_name", "")  # Get process_name if available (for test_case_optimization)
         selected_category = session_data.get("selected_category", "")  # Get selected_category if available
         selected_test_type = session_data.get("selected_test_type", "")  # Get selected_test_type if available
+        environment_name = session_data.get("environment_name", "")  # Get environment_name for environment_setup
 
         if not session_id or output is None or edited_prompt is None or used_prompt is None:
             logger.warning("Eksik session verisi: session_id, output, edited_prompt veya used_prompt yok.")
@@ -362,6 +363,11 @@ def save_session_data(session_data: dict, process_type: str = "code_review"):
                 process_data["selected_category"] = selected_category
             if selected_test_type and selected_test_type.strip():
                 process_data["selected_test_type"] = selected_test_type
+        
+        # Add environment_name for environment_setup
+        if process_type == "environment_setup":
+            if environment_name and environment_name.strip():
+                process_data["environment_name"] = environment_name
             
         update_field = {
             f"processes.{process_type}": process_data
