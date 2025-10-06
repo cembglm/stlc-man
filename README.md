@@ -234,18 +234,6 @@ This project builds upon established frameworks and methodologies:
 
 This project is licensed under the Apache License 2.0 License. For detailed information, please refer to the `LICENSE` file in the repository.
 
-## 12. Citation
-
-```bibtex
-@software{stlc_manager_2024,
-  title={STLC Manager: An AI-Powered Software Testing Life Cycle Management System},
-  author={Development Team},
-  year={2024},
-  url={https://github.com/cembglm/temp-stlc},
-  version={1.0.0}
-}
-```
-
 ---
 
 **STLC Manager** - Advancing software testing methodologies through artificial intelligence integration and modern software engineering practices.
