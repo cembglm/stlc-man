@@ -232,7 +232,7 @@ This project builds upon established frameworks and methodologies:
 
 ## 11. License
 
-This project is licensed under the MIT License. For detailed information, please refer to the `LICENSE` file in the repository.
+This project is licensed under the Apache License 2.0 License. For detailed information, please refer to the `LICENSE` file in the repository.
 
 ## 12. Citation
 
