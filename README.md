@@ -19,11 +19,11 @@ The system implements eleven comprehensive STLC modules, each designed according
 | 1 | Code Review | Static analysis, security assessment, performance evaluation |
 | 2 | Requirement Analysis | Requirement validation, gap analysis, compliance verification |
 | 3 | Test Planning | Resource allocation, timeline management, Gantt chart generation |
-| 4 | Test Scenario Generation | Comprehensive test scenario generation |
-| 5 | Test Case Generation | Detailed test case specification, step-by-step procedures |
-| 6 | Test Case Optimization | Samrt selection for generated test cases |
-| 7 | Test Code Generation | Automated test script generation |
-| 8 | Environment Setup | Configuration management |
+| 4 | Environment Setup | Configuration management |
+| 5 | Test Scenario Generation | Comprehensive test scenario generation |
+| 6 | Test Case Generation | Detailed test case specification, step-by-step procedures |
+| 7 | Test Case Optimization | Samrt selection for generated test cases |
+| 8 | Test Code Generation | Automated test script generation |
 | 9 | Test Execution | Automated test running using the MCP Server |
 | 10 | Test Reporting | Comprehensive reporting, stakeholder communication |
 | 11 | Test Closure | Process completion analysis |
