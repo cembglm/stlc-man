@@ -724,3 +724,80 @@ def analyze_file_patterns_for_prompts():
     except Exception as e:
         logger.error(f"Error analyzing file patterns: {str(e)}")
         return []
+
+def initialize_test_execution_prompt():
+    """Initialize default prompt for Test Execution process"""
+    try:
+        prompt_type = "test_execution"
+        
+        # Check if prompt already exists
+        existing_prompt = get_base_prompt(prompt_type)
+        if existing_prompt:
+            logger.info(f"Test Execution prompt already exists")
+            return existing_prompt
+        
+        # Default test execution prompt
+        default_prompt = {
+            "type": prompt_type,
+            "name": "Test Execution",
+            "description": "Default prompt for executing test cases and analyzing results",
+            "template": """# Test Execution Analysis
+
+You are an expert test execution analyst. Analyze the provided test code and execution results.
+
+## Test Code:
+{test_code}
+
+## Execution Environment:
+- Provider: {provider}
+- Model: {model_name}
+
+## Task:
+1. Execute the provided test code
+2. Capture and analyze any output, errors, or results
+3. Provide detailed feedback on:
+   - Test execution status
+   - Any failures or errors encountered
+   - Performance observations
+   - Recommendations for improvement
+
+## Response Format:
+Provide a structured analysis including:
+- Execution Summary
+- Detailed Results
+- Error Analysis (if any)
+- Performance Metrics
+- Recommendations
+
+Be thorough and provide actionable insights.""",
+            "variables": [
+                {
+                    "name": "test_code",
+                    "description": "The test code to execute",
+                    "required": True
+                },
+                {
+                    "name": "provider",
+                    "description": "AI provider being used",
+                    "required": True
+                },
+                {
+                    "name": "model_name",
+                    "description": "Model name for execution",
+                    "required": True
+                }
+            ],
+            "is_active": True,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+        
+        # Save to database
+        result = save_custom_prompt(prompt_type, default_prompt["template"])
+        logger.info(f"Test Execution prompt initialized successfully: {result}")
+        
+        return default_prompt
+        
+    except Exception as e:
+        logger.error(f"Error initializing Test Execution prompt: {str(e)}")
+        raise e

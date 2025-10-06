@@ -234,6 +234,12 @@ const TestCodeGeneration = ({
 
   // Handle process execution when onRun is called
   const executeProcess = async () => {
+    // Validate required fields
+    if (!environmentName || environmentName.trim() === '') {
+      toast.error('Test Code Generation Process Name cannot be empty. Please enter a process name.');
+      return;
+    }
+
     const formDataObj = collectFormData();
     if (formDataObj) {
       try {

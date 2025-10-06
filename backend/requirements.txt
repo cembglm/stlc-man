@@ -12,4 +12,6 @@ python-docx
 python-dotenv
 pydantic
 requests
-google-genai
+google-generativeai
+aiohttp
+motor

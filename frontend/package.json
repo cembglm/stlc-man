@@ -12,7 +12,10 @@
     "@headlessui/react": "^1.7.17",
     "@hello-pangea/dnd": "^16.3.0",
     "@heroicons/react": "^2.0.18",
+    "@monaco-editor/react": "^4.7.0",
     "@reduxjs/toolkit": "^2.6.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "autoprefixer": "^10.4.16",
     "axios": "^1.8.1",
     "clsx": "^2.0.0",
@@ -28,7 +31,9 @@
     "react-markdown": "^8.0.7",
     "react-redux": "^9.2.0",
     "tailwindcss": "^3.3.3",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.15",

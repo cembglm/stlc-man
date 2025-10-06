@@ -17,6 +17,8 @@ from routers.test_case_optimization_router import router as test_case_optimizati
 from stlc.test_code_generation import router as test_code_generation_router
 from routers.models_router import router as models_router
 from routers.api_key_validation_router import router as api_key_validation_router
+from routers.test_execution_router import router as test_execution_router
+from routers.test_execution_prompt_router import router as test_execution_prompt_router
 # from routers.test_scenario_analytics_router import router as test_scenario_analytics_router
 
 # Auto-initialization import
@@ -26,17 +28,8 @@ from core.prompt_manager import (
     initialize_requirement_analysis_prompt,
     initialize_test_planning_prompt,
     initialize_environment_setup_prompt,
-    initialize_test_scenario_generation_prompt
-)
-
-# Auto-initialization import
-from core.prompt_manager import (
-    initialize_base_prompts,
-    initialize_code_review_prompt,
-    initialize_requirement_analysis_prompt,
-    initialize_test_planning_prompt,
-    initialize_environment_setup_prompt,
-    initialize_test_scenario_generation_prompt
+    initialize_test_scenario_generation_prompt,
+    initialize_test_execution_prompt
 )
 
 # Logger configuration
@@ -68,6 +61,9 @@ def initialize_application():
         
         logger.info("  ├── Test Scenario Generation prompt'ları kontrol ediliyor...")
         initialize_test_scenario_generation_prompt()
+        
+        logger.info("  ├── Test Execution prompt'ları kontrol ediliyor...")
+        initialize_test_execution_prompt()
         
         # Unified initialization (backup)
         logger.info("  └── Tüm prompt'lar için genel kontrol yapılıyor...")
@@ -118,6 +114,8 @@ app.include_router(test_case_optimization_router)  # test case optimization rout
 app.include_router(test_code_generation_router, prefix="/api/processes/test-code-generation")  # test code generation router
 app.include_router(models_router)  # Merkezi model yönetimi router'ı
 app.include_router(api_key_validation_router, prefix="/api")  # API key validation router
+app.include_router(test_execution_router)  # Test execution router
+app.include_router(test_execution_prompt_router)  # Test execution prompt router
 # app.include_router(test_scenario_analytics_router, prefix="/api")  # Test scenario analytics
 
 @app.get("/")
@@ -137,7 +135,8 @@ async def check_prompts_status():
         "requirement_analysis", 
         "test_planning",
         "environment_setup",
-        "test_scenario_generation"
+        "test_scenario_generation",
+        "test_execution"
     ]
     
     status = {}

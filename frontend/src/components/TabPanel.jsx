@@ -8,6 +8,7 @@ import TestScenarioGenerationForm from './processes/TestScenarioGenerationForm';
 import TestCaseGenerationForm from './processes/TestCaseGenerationForm';
 import TestCaseOptimization from './processes/TestCaseOptimization';
 import TestCodeGeneration from './processes/TestCodeGeneration';
+import TestExecutionForm from './processes/TestExecutionForm';
 import CodeReviewForm from './processes/CodeReviewForm';
 import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
@@ -346,13 +347,14 @@ Important:
     }))
   ];
 
-  const ProcessFormComponents = {
+    const ProcessFormComponents = {
     'code-review': CodeReviewForm,
     'requirement-analysis': RequirementAnalysisForm,
     'test-scenario-generation': TestScenarioGenerationForm,
     'test-case-generation': TestCaseGenerationForm,
     'test-case-optimization': TestCaseOptimization,
     'test-code-generation': TestCodeGeneration,
+    'test-execution': TestExecutionForm,
     'test-planning': TestPlanningForm,
     'environment-setup': EnvironmentSetupForm,
   };

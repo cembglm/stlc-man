@@ -70,6 +70,9 @@ async def process_test_code_generation(
         if not environment_session_id:
             raise HTTPException(status_code=400, detail="Environment session ID is required")
         
+        if not environment_name or environment_name.strip() == "":
+            raise HTTPException(status_code=400, detail="Test Code Generation Process Name is required")
+        
         logger.info(f"Running test code generation process")
         logger.info(f"Process title: {process_title}")
         logger.info(f"Environment session: {environment_session_id}")

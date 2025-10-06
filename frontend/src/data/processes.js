@@ -164,11 +164,15 @@ export const processes = [
     id: 'test-execution',
     name: 'Test Execution',
     details: [
-      'Execute test cases and record results',
-      'Track defects and issues',
-      'Monitor test progress and coverage'
+      'Execute generated test code using AI providers (LM Studio or Gemini)',
+      'View test code in an integrated Monaco Editor with syntax highlighting',
+      'Run tests through Model Context Protocol (MCP) server for reliable execution',
+      'Monitor real-time execution results in a terminal-like interface',
+      'Switch between different AI providers seamlessly',
+      'Track execution history and performance metrics',
+      'Support for multiple programming languages and test frameworks'
     ],
-    inputs: ['Test Scripts', 'Environment Setup Report', 'Optimized Test Cases'],
+    inputs: ['Generated Test Code', 'AI Provider Configuration'],
     output: 'Test Execution Results'
   },
   {

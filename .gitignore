@@ -1,53 +1,194 @@
-# Backend (Python)
+# ==============================================
+# STLC Manager - Git Ignore Configuration
+# ==============================================
+
+# ============== IDE/Editor Files ==============
+# VS Code - Tamamen ignore et
+.vscode/
+*.code-workspace
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Other editors
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+*.atom
+*~
+
+# ============== Python Backend ==============
+# Python cache files
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
+
+# Python environments
 .Python
 env/
 venv/
-.env
-*.log
-logs/
-uploads/
-.pytest_cache/
-backend/review_service.log
+.venv/
+ENV/
+env.bak/
+venv.bak/
 
-# Frontend (React/Node)
+# Python testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Python distributions / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ============== Node.js Frontend ==============
+# Dependencies
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build outputs
 /build
 /dist
+.next/
+out/
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# ============== Environment & Config ==============
+# Environment variables
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+.env.*.local
 
-# IDE/Editor
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-.idea/
-*.swp
-*.swo
-*.sublime-workspace
-*.sublime-project
+# ============== Log Files ==============
+# Tüm log dosyaları
+*.log
+logs/
 
-# OS
-.DS_Store
-Thumbs.db
+# Specific service logs mentioned in README
+environment_setup_service.log
+review_service.log
+test_planning_service.log
+
+# Backend log directories
+/backend/logs/
+/backend/*.log
+
+# ============== Upload & Data Files ==============
+# Upload directories
+uploads/
+/uploads/
+/backend/uploads/
+/frontend/uploads/
+
+# Data files
 *.db
+*.sqlite
+*.sqlite3
 
-# Project specific
-/backend/uploads/*
-/backend/logs/*
-/backend/__pycache__/*
-/backend/core/__pycache__/*
-/backend/pipeline/__pycache__/*
-/backend/stlc/__pycache__/*
-/backend/utils/__pycache__/*
+# ============== Test Files ==============
+# Test directories and files
+tests/
+/tests/
+test_*.py
+*_test.py
+test_results/
+coverage/
 
-# MongoDB (eğer lokal MongoDB kullanılıyorsa)
-/data/db/*
+# ============== Package Lock Files ==============
+# Package managers lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ============== OS Generated Files ==============
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============== Database Files ==============
+# MongoDB (if using local MongoDB)
+/data/db/
+*.lock
+/data/
+
+# ============== Temporary Files ==============
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.sass-cache/
+
+# ============== Security Files ==============
+# API keys and secrets
+secrets.json
+.secrets
+*.pem
+*.key
+*.p12
+*.pfx

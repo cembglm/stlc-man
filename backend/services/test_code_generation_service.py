@@ -331,6 +331,13 @@ class TestCodeGenerationService:
         Ana test code generation fonksiyonu
         """
         try:
+            # Validate required environment_name
+            if not environment_name or environment_name.strip() == "":
+                return {
+                    "success": False, 
+                    "error": "Test Code Generation Process Name is required and cannot be empty"
+                }
+
             logger.info(f"🔍 Debug: Test code generation parameters:")
             logger.info(f"  - process_title: {process_title}")
             logger.info(f"  - environment_session_id: {environment_session_id}")
@@ -719,7 +726,8 @@ Return ONLY the executable test code, no explanations or markdown formatting.
                 clean_structure = {
                     "status": "completed" if results.get("success") else "failed",
                     "timestamp": datetime.now().isoformat(),
-                    "process_name": environment_name or "Test Code Generation",
+                    "process_name": environment_name,  # Required field from frontend
+                    "code_generation_process_name": environment_name,  # Required field for Test Execution
                     "model_name": results.get("model_name", "llama3.2:3b"),  # Unified field name
                     "input": {
                         "process_title": results.get("process_title"),
