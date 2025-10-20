@@ -61,7 +61,7 @@ Below is an example JSON structure to follow:
     {{
         "Task Name": "Test Environment and Tool Setup",
         "Description": "Define and set up the test environment, including hardware, software, network configurations, and necessary test tools, ensuring full compliance with ISTQB guidelines.",
-        "Start Date": "{today}+15,
+        "Start Date": "{today}+15",
         "End Date": "{today}+19",
         "Duration (days)": 5
     }}

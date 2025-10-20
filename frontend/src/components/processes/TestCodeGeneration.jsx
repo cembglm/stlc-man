@@ -221,8 +221,7 @@ const TestCodeGeneration = ({
       environment_name: environmentName,
       sessionId: sessionId, // Add session ID from props
       prompt: effectivePrompt,
-      output_format: outputFormat,
-      sessionId: sessionId
+      output_format: outputFormat
     };
   };
 
