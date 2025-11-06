@@ -208,7 +208,7 @@ function TestCaseOptimizationResults({ sessionId, liveResults }) {
         <div className="grid grid-cols-3 gap-4 text-sm text-blue-700">
           <div>
             <p className="font-medium">Original Test Cases</p>
-            <p className="text-lg">{(optimizationResults.unique_test_cases?.length || 0) + (optimizationResults.similar_test_cases?.length || 0)}</p>
+            <p className="text-lg">{optimizationResults.total_test_cases || ((optimizationResults.unique_test_cases?.length || 0) + (optimizationResults.similar_test_cases?.length || 0))}</p>
           </div>
           <div>
             <p className="font-medium">Unique Test Cases</p>
@@ -276,7 +276,7 @@ function TestCaseOptimizationResults({ sessionId, liveResults }) {
       )}{/* Comparison Logs Summary */}
       <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
         <h4 className="font-medium text-gray-800 mb-2">
-          📊 Comparison Logs ({optimizationResults.comparison_logs?.length || 0} comparisons)
+          📊 Comparison Logs ({optimizationResults.total_comparisons || optimizationResults.comparison_logs?.length || 0} comparisons)
         </h4>
         {optimizationResults.comparison_logs?.length > 0 ? (
           <details className="cursor-pointer">
@@ -1373,8 +1373,9 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   <div>
                     <p className="font-medium">Original Test Cases</p>
                     <p className="text-lg">
-                      {(results.unique_test_cases?.length || 0) + 
-                       (results.similar_test_cases?.length || 0)}
+                      {results.total_test_cases || 
+                       ((results.unique_test_cases?.length || 0) + 
+                       (results.similar_test_cases?.length || 0))}
                     </p>
                   </div>
                   <div>
@@ -1447,7 +1448,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               {/* Comparison Logs */}
               <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
                 <h4 className="font-medium text-gray-800 mb-2">
-                  📊 Comparison Logs ({results.comparison_logs?.length || 0} comparisons)
+                  📊 Comparison Logs ({results.total_comparisons || results.comparison_logs?.length || 0} comparisons)
                 </h4>
                 {results.comparison_logs?.length > 0 ? (
                   <details className="cursor-pointer">
@@ -1597,8 +1598,9 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   <div>
                     <p className="font-medium">Original Test Cases</p>
                     <p className="text-lg">
-                      {(testCaseOptimizationResults.unique_test_cases?.length || 0) + 
-                       (testCaseOptimizationResults.similar_test_cases?.length || 0)}
+                      {testCaseOptimizationResults.total_test_cases || 
+                       ((testCaseOptimizationResults.unique_test_cases?.length || 0) + 
+                       (testCaseOptimizationResults.similar_test_cases?.length || 0))}
                     </p>
                   </div>
                   <div>
@@ -1671,7 +1673,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
               {/* Comparison Logs */}
               <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
                 <h4 className="font-medium text-gray-800 mb-2">
-                  📊 Comparison Logs ({testCaseOptimizationResults.comparison_logs?.length || 0} comparisons)
+                  📊 Comparison Logs ({testCaseOptimizationResults.total_comparisons || testCaseOptimizationResults.comparison_logs?.length || 0} comparisons)
                 </h4>
                 {testCaseOptimizationResults.comparison_logs?.length > 0 ? (
                   <details className="cursor-pointer">
@@ -1809,8 +1811,9 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                       <div>
                         <p className="font-medium">Original Test Cases</p>
                         <p className="text-lg">
-                          {(optimizationOutput.results.unique_test_cases?.length || 0) + 
-                           (optimizationOutput.results.similar_test_cases?.length || 0)}
+                          {optimizationOutput.results.total_test_cases || 
+                           ((optimizationOutput.results.unique_test_cases?.length || 0) + 
+                           (optimizationOutput.results.similar_test_cases?.length || 0))}
                         </p>
                       </div>
                       <div>
@@ -1879,7 +1882,7 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                   )}{/* Comparison Logs Summary */}
                   <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
                     <h4 className="font-medium text-gray-800 mb-2">
-                      📊 Comparison Logs ({optimizationOutput.results.comparison_logs?.length || 0} comparisons)
+                      📊 Comparison Logs ({optimizationOutput.results.total_comparisons || optimizationOutput.results.comparison_logs?.length || 0} comparisons)
                     </h4>
                     {optimizationOutput.results.comparison_logs?.length > 0 ? (
                       <details className="cursor-pointer">
