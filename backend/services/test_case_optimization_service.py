@@ -12,6 +12,14 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+# Import parallel optimization service
+try:
+    from services.parallel_optimization_service import parallel_smart_select
+    PARALLEL_OPTIMIZATION_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Parallel optimization service not available: {e}")
+    PARALLEL_OPTIMIZATION_AVAILABLE = False
+
 # Global dictionary to track running processes
 running_processes = {}
 
@@ -929,6 +937,168 @@ class TestCaseOptimizationService:
                 "message": f"Error running smart selection: {str(e)}",
                 "data": {},
                 "process_id": process_id
+            }
+        finally:
+            # Clean up completed or errored processes after some time
+            if process_id in running_processes:
+                status = running_processes[process_id]["status"]
+                if status in ["completed", "stopped", "error"]:
+                    # Keep for a short time for status checking, then remove
+                    pass
+
+    async def run_parallel_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None, selected_model: str = "gemini-2.5-flash", api_key: str = None, process_id: str = None, grouping_strategy: str = "round_robin") -> Dict[str, Any]:
+        """
+        Paralel smart selection - sadece Gemini modelleri ile çalışır.
+        Test case'leri gruplara böler, paralel optimize eder, sonra final optimization yapar.
+        """
+        # DEBUG: Log input
+        logger.info(f"🔍 PARALLEL SMART SELECTION:")
+        logger.info(f"   Input test cases: {len(selected_test_cases)}")
+        logger.info(f"   Original test cases (before validation): {len(selected_test_cases)}")
+        
+        # Generate process ID if not provided
+        if not process_id:
+            process_id = str(uuid.uuid4())
+        
+        # Gemini model kontrolü
+        if not any(gemini in selected_model.lower() for gemini in ["gemini"]):
+            return {
+                "success": False,
+                "message": "Parallel optimization only works with Gemini models",
+                "data": {},
+                "process_id": process_id
+            }
+        
+        # Parallel optimization available kontrolü
+        if not PARALLEL_OPTIMIZATION_AVAILABLE:
+            return {
+                "success": False,
+                "message": "Parallel optimization service is not available",
+                "data": {},
+                "process_id": process_id
+            }
+        
+        # Track this process
+        running_processes[process_id] = {
+            "status": "running",
+            "start_time": datetime.now(),
+            "process_type": "parallel_smart_selection"
+        }
+        
+        try:
+            # Check if process should be stopped
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Parallel process {process_id} was stopped by user")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+            
+            # Pydantic modeline dönüştür
+            valid_data = []
+            for item in selected_test_cases:
+                try:
+                    test_case = TestCase(
+                        ScenarioID=item.get("ScenarioID", ""),
+                        TestCaseID=item.get("TestCaseID", ""),
+                        Title=item.get("Title", ""),
+                        Description=item.get("Description"),
+                        Objective=item.get("Objective")
+                    )
+                    valid_data.append(test_case)
+                except Exception as e:
+                    logger.warning(f"Skipping invalid test case: {item}. Error: {e}")
+            
+            logger.info(f"   Valid test cases after Pydantic validation: {len(valid_data)}")
+            
+            # Store original count BEFORE validation
+            original_test_case_count = len(selected_test_cases)
+            
+            if not valid_data:
+                # Remove from tracking
+                running_processes.pop(process_id, None)
+                return {
+                    "success": False,
+                    "message": "No valid test cases to process",
+                    "data": {},
+                    "process_id": process_id
+                }
+            
+            # Minimum test case kontrolü (paralel optimization için)
+            if len(valid_data) < 20:
+                return {
+                    "success": False,
+                    "message": f"Parallel optimization requires at least 20 test cases (you have {len(valid_data)}). Use serial optimization instead.",
+                    "data": {},
+                    "process_id": process_id
+                }
+            
+            # Check again before processing
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Parallel process {process_id} was stopped before processing")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+            
+            # Parallel smart selection işlemini çalıştır
+            test_case_list = TestCaseList(test_cases=valid_data)
+            result_list = await parallel_smart_select(
+                test_case_list,
+                custom_prompt,
+                selected_model,
+                api_key,
+                process_id,
+                use_file_mode=True  # Use Batch API with adaptive batching
+            )
+            
+            # Extract unique test cases from result
+            unique_test_cases = result_list
+            
+            # Check if process was stopped during execution
+            if process_id in running_processes and running_processes[process_id]["status"] == "stopped":
+                logger.info(f"Parallel process {process_id} was stopped during execution")
+                return {
+                    "success": False,
+                    "message": "Process stopped by user",
+                    "data": {},
+                    "process_id": process_id
+                }
+            
+            results = {
+                "unique_test_cases": [case.model_dump() for case in unique_test_cases.test_cases],
+                "similar_test_cases": unique_test_cases.duplicates,
+                "comparison_logs": unique_test_cases.comparison_logs,
+                "optimization_type": "parallel",
+                "total_test_cases": original_test_case_count,  # Use original count from frontend
+                "total_comparisons": unique_test_cases.comparison_logs[0].get("TotalComparisons", 0) if unique_test_cases.comparison_logs else 0  # Add comparison count
+            }
+            
+            # Mark process as completed
+            running_processes[process_id]["status"] = "completed"
+            running_processes[process_id]["end_time"] = datetime.now()
+            
+            return {
+                "success": True,
+                "message": "Parallel smart selection completed successfully",
+                "data": results,
+                "process_id": process_id
+            }
+        
+        except Exception as e:
+            # Remove from tracking on error
+            running_processes.pop(process_id, None)
+            logger.error(f"Error running parallel smart selection: {e}")
+            return {
+                "success": False,
+                "message": f"Unexpected error in parallel optimization: {str(e)}",
+                "data": {},
+                "process_id": process_id,
+                "error_type": "unexpected_error"
             }
         finally:
             # Clean up completed or errored processes after some time
