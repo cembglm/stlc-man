@@ -3,6 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import { useSelector } from 'react-redux';
 import { Gantt, ViewMode } from 'gantt-task-react';
 import "gantt-task-react/dist/index.css";
+import '../styles/markdown.css'; // Import markdown styling
+import TestReportViewer from './reports/TestReportViewer';
 
 // Helper function to safely render children in ReactMarkdown components
 const safeRenderChildren = (children) => {
@@ -2206,6 +2208,56 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                 <p><strong>Process:</strong> {testScenarioOutput.processType || 'Test Scenario Generation'}</p>
                 <p><strong>Process ID:</strong> {testScenarioOutput.processId}</p>
                 <p><strong>Last Updated:</strong> {new Date(testScenarioOutput.timestamp).toLocaleString()}</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    // Check for test-reporting specific output
+    if (activeTab === 'test-reporting' && outputs && outputs[activeTab]) {
+      const testReportOutput = outputs[activeTab];
+      const isLoading = testReportOutput.status === 'loading' || testReportOutput.status === 'processing';
+      
+      return (
+        <div className="space-y-6">
+          <section>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-lg font-medium">Test Report</h3>
+              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                testReportOutput.status === 'completed' 
+                  ? 'bg-green-100 text-green-800' 
+                  : testReportOutput.status === 'error'
+                  ? 'bg-red-100 text-red-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}>
+                {testReportOutput.status === 'completed' ? 'Success' : 
+                 testReportOutput.status === 'error' ? 'Error' : 'Processing'}
+              </span>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+              <TestReportViewer 
+                output={testReportOutput.content} 
+                isLoading={isLoading}
+              />
+            </div>
+          </section>
+          
+          <section>
+            <h3 className="text-lg font-medium mb-3">Report Details</h3>
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 shadow-sm">
+              <div className="text-gray-600">
+                <p><strong>Status:</strong> {testReportOutput.status}</p>
+                <p><strong>Process:</strong> {testReportOutput.processType || 'Test Reporting'}</p>
+                {testReportOutput.model_used && <p><strong>Model:</strong> {testReportOutput.model_used}</p>}
+                {testReportOutput.metadata && testReportOutput.metadata.sessions_analyzed && (
+                  <p><strong>Sessions Analyzed:</strong> {testReportOutput.metadata.sessions_analyzed}</p>
+                )}
+                {testReportOutput.metadata && testReportOutput.metadata.processes_included && (
+                  <p><strong>Processes:</strong> {testReportOutput.metadata.processes_included.join(', ')}</p>
+                )}
+                <p><strong>Last Updated:</strong> {testReportOutput.timestamp ? new Date(testReportOutput.timestamp).toLocaleString() : new Date().toLocaleString()}</p>
               </div>
             </div>
           </section>

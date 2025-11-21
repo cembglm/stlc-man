@@ -179,12 +179,15 @@ export const processes = [
     id: 'test-reporting',
     name: 'Test Reporting',
     details: [
-      'Generate detailed test execution reports',
-      'Analyze test results and metrics',
-      'Provide recommendations and insights'
+      'Generate comprehensive reports from STLC process data',
+      'AI-powered analysis with smart chunking for large datasets',
+      'Supports multi-process analysis and synthesis',
+      'Provides executive summaries and detailed insights',
+      'Includes metrics, trends, and actionable recommendations',
+      'Flexible reporting with configurable analysis depth'
     ],
-    inputs: ['Test Execution Results'],
-    output: 'Test Report'
+    inputs: ['Session Data', 'Selected Processes'],
+    output: 'Comprehensive Test Report'
   },
   {
     id: 'test-closure',
