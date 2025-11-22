@@ -9,6 +9,7 @@ import TestCaseGenerationForm from './processes/TestCaseGenerationForm';
 import TestCaseOptimization from './processes/TestCaseOptimization';
 import TestCodeGeneration from './processes/TestCodeGeneration';
 import TestExecutionForm from './processes/TestExecutionForm';
+import TestReportingForm from './processes/TestReportingForm';
 import CodeReviewForm from './processes/CodeReviewForm';
 import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
@@ -89,6 +90,13 @@ export default function TabPanel({
     handleRun: null
   });
 
+  // Test Reporting form state tracking for main button
+  const [testReportingFormState, setTestReportingFormState] = useState({
+    canRun: false,
+    isRunning: false,
+    handleRun: null
+  });
+
   // Stable callback for Test Case Optimization form state changes
   const handleTestCaseOptimizationStateChange = useCallback((handler) => {
     setTestCaseOptimizationFormState(prev => ({ ...prev, ...handler }));
@@ -143,8 +151,8 @@ export default function TabPanel({
       activeTab !== 'test-case-optimization' && // Test Case Optimization kendi prompt'unu yönetir
       !processPrompts[activeTab]
     ) {
-      // Code review, requirement-analysis, test-planning, environment-setup ve test-execution için yeni endpoint ve veri yapısı
-      if (activeTab === 'code-review' || activeTab === 'requirement-analysis' || activeTab === 'test-planning' || activeTab === 'environment-setup' || activeTab === 'test-execution') {
+      // Code review, requirement-analysis, test-planning, environment-setup, test-execution ve test-reporting için yeni endpoint ve veri yapısı
+      if (activeTab === 'code-review' || activeTab === 'requirement-analysis' || activeTab === 'test-planning' || activeTab === 'environment-setup' || activeTab === 'test-execution' || activeTab === 'test-reporting') {
         let endpoint;
         if (activeTab === 'code-review') {
           endpoint = 'http://localhost:8000/api/prompts/code-review';
@@ -156,6 +164,8 @@ export default function TabPanel({
           endpoint = 'http://localhost:8000/api/prompts/environment-setup';
         } else if (activeTab === 'test-execution') {
           endpoint = 'http://localhost:8000/api/prompts/test-execution';
+        } else if (activeTab === 'test-reporting') {
+          endpoint = 'http://localhost:8000/api/prompts/test-reporting';
         }
         
         fetch(endpoint)
@@ -379,6 +389,7 @@ Important:
     'test-case-optimization': TestCaseOptimization,
     'test-code-generation': TestCodeGeneration,
     'test-execution': TestExecutionForm,
+    'test-reporting': TestReportingForm,
     'test-planning': TestPlanningForm,
     'environment-setup': EnvironmentSetupForm,
   };
@@ -554,6 +565,7 @@ Important:
                   onTestCaseGeneration={
                     processId === 'test-case-generation' ? setTestCaseFormState : 
                     processId === 'test-execution' ? setTestExecutionFormState : 
+                    processId === 'test-reporting' ? setTestReportingFormState :
                     undefined
                   }
                   onTestCaseOptimization={processId === 'test-case-optimization' ? handleTestCaseOptimizationStateChange : undefined}
@@ -918,6 +930,14 @@ Important:
                       return;
                     }
                     
+                    // Special handling for Test Reporting
+                    if (activeTab === 'test-reporting') {
+                      if (testReportingFormState.handleRun && typeof testReportingFormState.handleRun === 'function') {
+                        testReportingFormState.handleRun();
+                      }
+                      return;
+                    }
+                    
                     // Special handling for Test Code Generation
                     if (activeTab === 'test-code-generation') {
                       onRun(activeTab);
@@ -949,7 +969,8 @@ Important:
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
                   (activeTab === 'test-execution' && (!testExecutionFormState.canRun || testExecutionFormState.isRunning)) ||
-                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-execution' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
+                  (activeTab === 'test-reporting' && (!testReportingFormState.canRun || testReportingFormState.isRunning)) ||
+                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-execution' && activeTab !== 'test-reporting' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
                 }
                 className={clsx(
                   "w-full py-3 px-4 rounded-md text-white font-medium transition-colors shadow-sm flex items-center justify-center",
@@ -1022,6 +1043,18 @@ Important:
                     </>
                   ) : (
                     'Run Process'
+                  )
+                ) : activeTab === 'test-reporting' ? (
+                  testReportingFormState.isRunning ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 0 1 4 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Generating Report...
+                    </>
+                  ) : (
+                    'Generate Report'
                   )
                 ) : (
                   pipelineStatus[activeTab] === 'running' ? (
