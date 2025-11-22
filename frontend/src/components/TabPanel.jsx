@@ -10,6 +10,7 @@ import TestCaseOptimization from './processes/TestCaseOptimization';
 import TestCodeGeneration from './processes/TestCodeGeneration';
 import TestExecutionForm from './processes/TestExecutionForm';
 import TestReportingForm from './processes/TestReportingForm';
+import TestClosureForm from './processes/TestClosureForm';
 import CodeReviewForm from './processes/CodeReviewForm';
 import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
@@ -97,6 +98,13 @@ export default function TabPanel({
     handleRun: null
   });
 
+  // Test Closure form state tracking for main button
+  const [testClosureFormState, setTestClosureFormState] = useState({
+    canRun: false,
+    isRunning: false,
+    handleRun: null
+  });
+
   // Stable callback for Test Case Optimization form state changes
   const handleTestCaseOptimizationStateChange = useCallback((handler) => {
     setTestCaseOptimizationFormState(prev => ({ ...prev, ...handler }));
@@ -151,8 +159,8 @@ export default function TabPanel({
       activeTab !== 'test-case-optimization' && // Test Case Optimization kendi prompt'unu yönetir
       !processPrompts[activeTab]
     ) {
-      // Code review, requirement-analysis, test-planning, environment-setup, test-execution ve test-reporting için yeni endpoint ve veri yapısı
-      if (activeTab === 'code-review' || activeTab === 'requirement-analysis' || activeTab === 'test-planning' || activeTab === 'environment-setup' || activeTab === 'test-execution' || activeTab === 'test-reporting') {
+      // Code review, requirement-analysis, test-planning, environment-setup, test-execution, test-reporting ve test-closure için yeni endpoint ve veri yapısı
+      if (activeTab === 'code-review' || activeTab === 'requirement-analysis' || activeTab === 'test-planning' || activeTab === 'environment-setup' || activeTab === 'test-execution' || activeTab === 'test-reporting' || activeTab === 'test-closure') {
         let endpoint;
         if (activeTab === 'code-review') {
           endpoint = 'http://localhost:8000/api/prompts/code-review';
@@ -166,6 +174,8 @@ export default function TabPanel({
           endpoint = 'http://localhost:8000/api/prompts/test-execution';
         } else if (activeTab === 'test-reporting') {
           endpoint = 'http://localhost:8000/api/prompts/test-reporting';
+        } else if (activeTab === 'test-closure') {
+          endpoint = 'http://localhost:8000/api/prompts/test-closure';
         }
         
         fetch(endpoint)
@@ -390,6 +400,7 @@ Important:
     'test-code-generation': TestCodeGeneration,
     'test-execution': TestExecutionForm,
     'test-reporting': TestReportingForm,
+    'test-closure': TestClosureForm,
     'test-planning': TestPlanningForm,
     'environment-setup': EnvironmentSetupForm,
   };
@@ -566,6 +577,7 @@ Important:
                     processId === 'test-case-generation' ? setTestCaseFormState : 
                     processId === 'test-execution' ? setTestExecutionFormState : 
                     processId === 'test-reporting' ? setTestReportingFormState :
+                    processId === 'test-closure' ? setTestClosureFormState :
                     undefined
                   }
                   onTestCaseOptimization={processId === 'test-case-optimization' ? handleTestCaseOptimizationStateChange : undefined}
