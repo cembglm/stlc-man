@@ -238,7 +238,7 @@ export default function TestExecutionForm({
     
     if (selectedModelInfo?.type === 'api') {
       // Gemini modeller için Google API key kullan
-      if (selectedModel.includes('gemini')) {
+      if (selectedModel.startsWith('gemini')) {
         apiKey = apiKeys.google;
         if (!apiKey) {
           toast.error('Gemini API key is required. Please configure it in API Settings.');

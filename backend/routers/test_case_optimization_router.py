@@ -223,15 +223,20 @@ async def run_smart_selection(request: Request):
         process_id = str(uuid.uuid4())
         
         # Choose optimization method based on type
+        logger.info(f"🎯 ROUTER: Optimization type selected = '{optimization_type}'")
+        
         if optimization_type == "parallel":
+            logger.info("🎯 ROUTER: Calling run_parallel_smart_selection")
             result = await service.run_parallel_smart_selection(
                 selected_test_cases, custom_prompt, selected_model, api_key, process_id
             )
         elif optimization_type == "bulk":
+            logger.info("🎯 ROUTER: Calling run_bulk_smart_selection")
             result = await service.run_bulk_smart_selection(
                 selected_test_cases, custom_prompt, selected_model, api_key, process_id
             )
         else:  # individual (default, serial)
+            logger.info(f"🎯 ROUTER: Calling run_smart_selection (serial) - optimization_type was '{optimization_type}'")
             result = await service.run_smart_selection(
                 selected_test_cases, custom_prompt, selected_model, api_key, process_id
             )

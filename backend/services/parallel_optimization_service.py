@@ -43,20 +43,21 @@ except ImportError:
 
 # GEMINI BATCH API RATE LIMITS
 # https://ai.google.dev/gemini-api/docs/rate-limits
+# Note: Batch API handles rate limiting internally, so we can use large batch sizes
 BATCH_LIMITS = {
     "gemini-2.5-pro": {
-        "rpm": 150,
-        "tpm": 2_000_000,
-        "rpd": 10_000,
-        "batch_enqueued_tokens": 5_000_000,
-        "safe_batch_size": 1000  # Conservative: RPM / 1 minute = 150 RPM ~ 1000 per batch
+        "rpm": 150,  # Requests per minute (for standard API)
+        "tpm": 2_000_000,  # Tokens per minute
+        "rpd": 10_000,  # Requests per day
+        "batch_enqueued_tokens": 5_000_000,  # Max tokens in batch
+        "max_requests_per_batch": 10000  # Maximum requests per batch for Batch API
     },
     "gemini-2.5-flash": {
-        "rpm": 1000,
-        "tpm": 1_000_000,
-        "rpd": 10_000,
-        "batch_enqueued_tokens": 3_000_000,
-        "safe_batch_size": 2000  # Conservative: Less than RPM to avoid rate limiting
+        "rpm": 1000,  # Requests per minute (for standard API)
+        "tpm": 1_000_000,  # Tokens per minute
+        "rpd": 10_000,  # Requests per day
+        "batch_enqueued_tokens": 3_000_000,  # Max tokens in batch
+        "max_requests_per_batch": 20000  # Maximum requests per batch for Batch API
     }
 }
 
@@ -119,11 +120,15 @@ def get_batch_limit(model_name: str) -> int:
     # Normalize model name
     model_lower = model_name.lower()
     
+    # Check each key in BATCH_LIMITS
     for key, limits in BATCH_LIMITS.items():
-        if key in model_lower:
-            return limits["max_requests_per_batch"]
+        # Match model name with key (e.g., "gemini-2.5-pro" matches "gemini-2.5-pro")
+        if key.lower() in model_lower or model_lower in key.lower():
+            max_requests = limits.get("max_requests_per_batch", DEFAULT_BATCH_LIMIT)
+            logger.info(f"📊 Model '{model_name}' matched with '{key}': max_requests_per_batch = {max_requests}")
+            return max_requests
     
-    logger.warning(f"Unknown model {model_name}, using default limit {DEFAULT_BATCH_LIMIT}")
+    logger.warning(f"⚠️ Unknown model '{model_name}', using default limit {DEFAULT_BATCH_LIMIT}")
     return DEFAULT_BATCH_LIMIT
 
 
@@ -250,8 +255,11 @@ async def create_batch_job_inline(
     
     client = genai.Client(api_key=api_key)
     
-    logger.info(f"🚀 Creating batch job with {len(requests)} inline requests...")
+    logger.info(f"🚀 CREATING GEMINI BATCH API JOB (PARALLEL PROCESSING)")
+    logger.info(f"   Requests: {len(requests)} comparisons")
     logger.info(f"   Model: {model}")
+    logger.info(f"   Mode: Inline Batch (all requests sent to Batch API)")
+    logger.info(f"   This is NOT serial processing - all comparisons will be processed in parallel")
     
     batch_job = client.batches.create(
         model=f"models/{model}",
@@ -259,7 +267,8 @@ async def create_batch_job_inline(
         config={'display_name': display_name}
     )
     
-    logger.info(f"✅ Batch job created: {batch_job.name}")
+    logger.info(f"✅ Batch job created successfully: {batch_job.name}")
+    logger.info(f"   Job will process {len(requests)} comparisons in parallel via Batch API")
     return batch_job
 
 
@@ -596,28 +605,30 @@ async def process_with_auto_split(
         Tuple of (unique_cases, duplicates, comparison_logs)
     """
     logger.info("="*80)
-    logger.info("🚀 ADAPTIVE BATCH STRATEGY")
+    logger.info("🚀 GEMINI BATCH API - ADAPTIVE BATCH PROCESSING")
     logger.info(f"   Total comparisons: {len(comparisons):,}")
     logger.info(f"   Model: {selected_model}")
+    logger.info(f"   Processing Mode: BATCH API (NOT Serial)")
     logger.info("="*80)
     
-    # Get model limits
+    # Get model limits - use max_requests_per_batch for initial batch size
     model_limits = BATCH_LIMITS.get(selected_model, {})
-    safe_batch_size = model_limits.get("safe_batch_size", DEFAULT_BATCH_LIMIT)
+    max_batch_size = model_limits.get("max_requests_per_batch", DEFAULT_BATCH_LIMIT)
     
-    logger.info(f"📊 Safe batch size: {safe_batch_size:,} requests/batch")
+    logger.info(f"📊 Maximum batch size: {max_batch_size:,} requests/batch")
+    logger.info(f"📊 Strategy: Start with maximum batch size, split only if quota exceeded")
     
-    # Pre-split into safe batch sizes
+    # Start with maximum possible batch sizes (don't pre-split conservatively)
     initial_batches = []
-    if len(comparisons) > safe_batch_size:
-        logger.info(f"📊 Pre-splitting {len(comparisons):,} comparisons into batches of {safe_batch_size:,}")
-        for i in range(0, len(comparisons), safe_batch_size):
-            batch = comparisons[i:i + safe_batch_size]
+    if len(comparisons) > max_batch_size:
+        logger.info(f"📊 Splitting {len(comparisons):,} comparisons into batches of {max_batch_size:,}")
+        for i in range(0, len(comparisons), max_batch_size):
+            batch = comparisons[i:i + max_batch_size]
             initial_batches.append(batch)
         logger.info(f"   Created {len(initial_batches)} initial batches")
     else:
         initial_batches = [comparisons]
-        logger.info(f"   Single batch (within safe limit)")
+        logger.info(f"   Single batch (within batch limit)")
     
     all_results = []
     batches_to_process = initial_batches
@@ -628,13 +639,14 @@ async def process_with_auto_split(
         batches_to_process = []
         
         for batch_idx, batch in enumerate(current_batches, 1):
-            # Add delay between batches to avoid rate limiting (RPM)
+            # Add minimal delay between batches (Batch API handles rate limiting internally)
             if batch_idx > 1:
-                wait_time = 60  # Wait 1 minute between batches to respect RPM
-                logger.info(f"⏳ Waiting {wait_time} seconds to respect RPM limit...")
+                wait_time = 5  # Short delay to avoid overwhelming the API submission
+                logger.info(f"⏳ Brief pause: {wait_time} seconds before next batch submission...")
                 await asyncio.sleep(wait_time)
             
             logger.info(f"\n📦 Processing batch {batch_idx}/{len(current_batches)}: {len(batch):,} comparisons")
+            logger.info(f"   This batch will be processed in PARALLEL via Batch API")
             
             results, error = await process_single_batch(
                 batch,
@@ -843,12 +855,14 @@ async def parallel_smart_select(
     will_use_file_mode = use_file_mode and total_comparisons > 20000
     
     logger.info("=" * 80)
-    logger.info(f"🚀 GEMINI BATCH API - ADAPTIVE STRATEGY")
+    logger.info(f"🚀 GEMINI BATCH API - PARALLEL OPTIMIZATION")
     logger.info(f"   Test cases: {n}")
     logger.info(f"   Total comparisons: {total_comparisons:,}")
     logger.info(f"   Model: {selected_model}")
-    logger.info(f"   Strategy: Try single batch, auto-split if quota exceeded")
-    logger.info(f"   Cost: 50% of standard API")
+    logger.info(f"   API Mode: BATCH API (Parallel Processing)")
+    logger.info(f"   Strategy: Adaptive batching with auto-split on quota exceeded")
+    logger.info(f"   Cost: 50% cheaper than standard API")
+    logger.info(f"   Processing Type: ALL comparisons processed in parallel batches")
     logger.info("=" * 80)
     
     # Prepare all comparisons
@@ -875,7 +889,10 @@ async def parallel_smart_select(
     # Create summary only (don't include all 13k comparison results to avoid MongoDB size limit)
     summary = {
         "Step": "SUMMARY",
-        "ProcessType": "GeminiBatchAPI_Adaptive",
+        "ProcessType": "GeminiBatchAPI_Parallel",
+        "ProcessingMode": "Batch API (Parallel)",
+        "APIType": "Gemini Batch API",
+        "IsSerialProcessing": False,
         "ProcessID": process_id,
         "Timestamp": datetime.now().isoformat(),
         "TotalTestCases": n,
@@ -884,20 +901,24 @@ async def parallel_smart_select(
         "TotalDuplicates": len(duplicates),
         "ValidationPassed": validation_passed,
         "TotalTime": f"{total_elapsed:.1f}s",
+        "TotalTimeMinutes": f"{total_elapsed/60:.1f} min",
         "Model": selected_model,
-        "CostSavings": "50%"
+        "CostSavings": "50% (Batch API pricing)",
+        "Strategy": "Adaptive batching with auto-split on quota exceeded"
     }
     
     # Use summary as comparison_logs (not all 13k results)
     comparison_logs = [summary]
     
     logger.info("=" * 80)
-    logger.info(f"🎉 BATCH API OPTIMIZATION COMPLETED")
-    logger.info(f"   Strategy: Adaptive batching")
+    logger.info(f"🎉 BATCH API PARALLEL OPTIMIZATION COMPLETED")
+    logger.info(f"   Processing Mode: Gemini Batch API (Parallel)")
+    logger.info(f"   Strategy: Adaptive batching with auto-split")
     logger.info(f"   Total time: {total_elapsed:.1f}s ({total_elapsed/60:.1f} min)")
     logger.info(f"   Unique: {len(unique_cases)}, Duplicates: {len(duplicates)}")
     logger.info(f"   Reduction: {len(duplicates)/n*100:.1f}%")
-    logger.info(f"   Cost savings: 50%")
+    logger.info(f"   Cost savings: 50% (Batch API pricing)")
+    logger.info(f"   This was NOT serial processing - Batch API processed all comparisons in parallel")
     logger.info("=" * 80)
     
     # Convert TestCase objects to dictionaries for compatibility

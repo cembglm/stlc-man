@@ -214,6 +214,10 @@ async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, 
     Bu fonksiyon, test_cases listesindeki benzer (duplicate) test case'leri 
     LLM tabanlı karşılaştırma ile ayıklar, unique bir liste döndürür.
     """
+    logger.info("🔴 SMART_SELECT (SERIAL) CALLED")
+    logger.info(f"🔴 Processing {len(test_case_list.test_cases)} test cases in SERIAL mode (multiple LLM calls)")
+    logger.info(f"🔴 Selected model: {selected_model}")
+    
     unique_cases = []
     step = 1
     comparison_logs = []
@@ -276,6 +280,10 @@ async def bulk_smart_select(test_case_list: TestCaseList, custom_prompt: str = N
     Bu yöntem daha hızlı ve kaynak-verimli olmasına rağmen, büyük test case grupları için
     token limitlerini aşabilir.
     """
+    logger.info("🔵 BULK_SMART_SELECT CALLED")
+    logger.info(f"🔵 Processing {len(test_case_list.test_cases)} test cases in BULK mode (single LLM call)")
+    logger.info(f"🔵 Selected model: {selected_model}")
+    
     try:
         # Create test cases array for bulk processing
         test_cases_data = []
@@ -289,64 +297,61 @@ async def bulk_smart_select(test_case_list: TestCaseList, custom_prompt: str = N
 
         # Create bulk comparison prompt
         if custom_prompt:
-            prompt_text = f"""{custom_prompt}
+            prompt_text = f"""CRITICAL: Return ONLY valid JSON. NO explanations, NO markdown, NO text outside JSON.
 
-Below are the test cases to analyze in JSON array format:
+{custom_prompt}
 
+TEST CASES TO ANALYZE:
 {json.dumps(test_cases_data, indent=2, ensure_ascii=False)}
 
-Please analyze all test cases and return a JSON response with unique test cases and duplicates."""
-        else:
-            prompt_text = f"""
-You are an expert test case analyst. Your task is to analyze ALL provided test cases in a single operation and identify duplicate/similar test cases efficiently.
-
-ANALYSIS CRITERIA:
-1. Test cases are considered DUPLICATES if they have:
-   - Same or substantially similar Title (case-insensitive)
-   - AND very similar Description and/or Objective
-   - AND serve essentially the same testing purpose
-2. Priority order for comparison: Description > Objective > Title
-3. Consider contextual similarity, not just exact text matches
-
-OPTIMIZATION APPROACH:
-- Analyze the complete set of test cases holistically
-- Group similar test cases and select the best representative for each group
-- Preserve unique test cases that serve distinct testing purposes
-- Ensure comprehensive coverage while eliminating redundancy
-
-Below are the test cases in JSON array format:
-
-{json.dumps(test_cases_data, indent=2, ensure_ascii=False)}
-
-Return your response **only** in valid JSON with the following format:
-
+REQUIRED JSON OUTPUT (exact format):
 {{
-  "unique_indices": [0, 2, 5, ...],
+  "unique_indices": [0, 1, 2],
   "duplicate_groups": [
     {{
       "representative_index": 0,
-      "duplicate_indices": [3, 7, 12]
-    }},
-    {{
-      "representative_index": 2,
-      "duplicate_indices": [8, 15]
+      "duplicate_indices": [3, 4]
     }}
   ]
 }}
 
-Where:
-- unique_indices: Array of indices representing unique test cases (including representatives from duplicate groups)
-- duplicate_groups: Array of groups where each group has a representative and its duplicates
-- representative_index: The index of the test case chosen as the representative for a duplicate group
-- duplicate_indices: Array of indices that are duplicates of the representative
+Return ONLY the JSON object. Start with {{ and end with }}. NO other text."""
+        else:
+            prompt_text = f"""
+CRITICAL INSTRUCTION: You MUST return ONLY a valid JSON object. NO explanations, NO markdown, NO text before or after the JSON.
 
-IMPORTANT:
-- Return ONLY the raw JSON object, no markdown formatting
-- Do not use ```json``` or ``` code blocks
-- Do not provide any additional text outside the JSON object
-- Each test case should appear in either unique_indices or as part of a duplicate group, but not both
-- Representatives should also be included in unique_indices
-- Ensure all test case indices are accounted for in the response
+Your task: Analyze the test cases and identify duplicates.
+
+ANALYSIS CRITERIA:
+1. Test cases are DUPLICATES if they have:
+   - Same or very similar Title (case-insensitive)
+   - AND very similar Description and/or Objective
+   - AND serve the same testing purpose
+2. Priority: Description > Objective > Title
+
+TEST CASES TO ANALYZE:
+{json.dumps(test_cases_data, indent=2, ensure_ascii=False)}
+
+REQUIRED OUTPUT FORMAT (COPY THIS STRUCTURE EXACTLY):
+{{
+  "unique_indices": [0, 1, 2],
+  "duplicate_groups": [
+    {{
+      "representative_index": 0,
+      "duplicate_indices": [3, 4]
+    }}
+  ]
+}}
+
+RULES:
+- unique_indices: Indices of ALL unique test cases (including representatives)
+- duplicate_groups: Groups of duplicates with their representative
+- representative_index: Best test case from a duplicate group
+- duplicate_indices: Other test cases that are duplicates of the representative
+- Return ONLY the JSON object
+- NO markdown code blocks (```json)
+- NO explanations or text
+- START your response with {{ and END with }}
 """
 
         # Make single LLM call with retry
@@ -484,8 +489,195 @@ IMPORTANT:
         try:
             # Parse the cleaned bulk response
             parsed_content = json.loads(cleaned_response)
-            unique_indices = parsed_content.get("unique_indices", [])
-            duplicate_groups = parsed_content.get("duplicate_groups", [])
+            
+            # Handle different response formats from LLM
+            # Format 1: {"unique_indices": [...], "duplicate_groups": [...]}
+            # Format 2: {"duplicates": [[0,1], [2,3], ...]}
+            # Format 3: [[0,1], [2,3], ...] (plain array)
+            # Format 4: {"duplicate_sets": [[0,1], [2,3], ...]}
+            
+            # Check if parsed_content is a plain list (Format 3)
+            if isinstance(parsed_content, list):
+                logger.info("🔄 Converting plain array format to standard format")
+                
+                # Check if it's array of objects with "test_cases" key (detailed format)
+                if parsed_content and isinstance(parsed_content[0], dict) and "test_cases" in parsed_content[0]:
+                    # Format: [{"duplicate_group": 1, "test_cases": [{"Index": 69}, {"Index": 103}]}]
+                    duplicates_array = []
+                    for group in parsed_content:
+                        indices = [tc.get("Index") for tc in group.get("test_cases", []) if "Index" in tc]
+                        if indices:
+                            duplicates_array.append(indices)
+                else:
+                    # Simple array of arrays
+                    duplicates_array = parsed_content
+                
+                # Build unique_indices and duplicate_groups from plain array
+                all_duplicate_indices = set()
+                duplicate_groups = []
+                
+                for dup_group in duplicates_array:
+                    if len(dup_group) > 1:
+                        representative = dup_group[0]
+                        duplicates = dup_group[1:]
+                        duplicate_groups.append({
+                            "representative_index": representative,
+                            "duplicate_indices": duplicates
+                        })
+                        # Add all to duplicate set
+                        all_duplicate_indices.update(dup_group)
+                
+                # Unique indices are all indices NOT in duplicate groups
+                total_cases = len(test_case_list.test_cases)
+                unique_indices = [i for i in range(total_cases) if i not in all_duplicate_indices]
+                
+                # Add representatives to unique_indices
+                for group in duplicate_groups:
+                    rep_idx = group["representative_index"]
+                    if rep_idx not in unique_indices:
+                        unique_indices.append(rep_idx)
+                
+                unique_indices.sort()
+                
+                logger.info(f"✅ Converted {len(duplicates_array)} duplicate groups from plain array")
+            elif "duplicate_sets" in parsed_content:
+                # Format 4: {"duplicate_sets": [[0,1], [2,3], ...]}
+                # or Format 4b: {"duplicate_sets": [{"indices": [0,1], "reason": "..."}, ...]}
+                logger.info("🔄 Converting duplicate_sets format to standard format")
+                duplicates_raw = parsed_content.get("duplicate_sets", [])
+                
+                # Check if it's array of objects with "indices" key
+                if duplicates_raw and isinstance(duplicates_raw[0], dict) and "indices" in duplicates_raw[0]:
+                    # Format 4b: Array of objects with indices and reasons
+                    duplicates_array = [item["indices"] for item in duplicates_raw]
+                else:
+                    # Format 4: Simple array of arrays
+                    duplicates_array = duplicates_raw
+                
+                # Build unique_indices and duplicate_groups from duplicate_sets
+                all_duplicate_indices = set()
+                duplicate_groups = []
+                
+                for dup_group in duplicates_array:
+                    if len(dup_group) > 1:
+                        representative = dup_group[0]
+                        duplicates = dup_group[1:]
+                        duplicate_groups.append({
+                            "representative_index": representative,
+                            "duplicate_indices": duplicates
+                        })
+                        # Add all to duplicate set
+                        all_duplicate_indices.update(dup_group)
+                
+                # Unique indices are all indices NOT in duplicate groups
+                total_cases = len(test_case_list.test_cases)
+                unique_indices = [i for i in range(total_cases) if i not in all_duplicate_indices]
+                
+                # Add representatives to unique_indices
+                for group in duplicate_groups:
+                    rep_idx = group["representative_index"]
+                    if rep_idx not in unique_indices:
+                        unique_indices.append(rep_idx)
+                
+                unique_indices.sort()
+                
+                logger.info(f"✅ Converted {len(duplicates_array)} duplicate groups from duplicate_sets")
+            elif "duplicates" in parsed_content and "unique_indices" not in parsed_content:
+                # Convert Format 2 to Format 1
+                # Can be: {"duplicates": [[0,1], [2,3], ...]} 
+                # or {"duplicates": [{"indices": [...], "reason": "..."}]}
+                # or {"duplicates": [{"primary_test_case_index": X, "duplicate_test_case_indices": [...], "reason": "..."}]}
+                logger.info("🔄 Converting alternative duplicate format to standard format")
+                duplicates_raw = parsed_content.get("duplicates", [])
+                
+                # Check if it's array of objects with "primary_test_case_index" and "duplicate_test_case_indices"
+                if duplicates_raw and isinstance(duplicates_raw[0], dict) and "primary_test_case_index" in duplicates_raw[0]:
+                    # Format: Array of objects with primary_test_case_index and duplicate_test_case_indices
+                    logger.info("🔍 Detected primary_test_case_index format")
+                    duplicates_array = []
+                    for item in duplicates_raw:
+                        primary_idx = item.get("primary_test_case_index")
+                        duplicate_indices = item.get("duplicate_test_case_indices", [])
+                        # Combine primary with duplicates into single group
+                        group = [primary_idx] + duplicate_indices
+                        duplicates_array.append(group)
+                    logger.info(f"✅ Converted {len(duplicates_array)} groups from primary_test_case_index format")
+                # Check if it's array of objects with "indices" key
+                elif duplicates_raw and isinstance(duplicates_raw[0], dict) and "indices" in duplicates_raw[0]:
+                    # Format: Array of objects with indices and reasons
+                    duplicates_array = [item["indices"] for item in duplicates_raw]
+                else:
+                    # Format: Simple array of arrays
+                    duplicates_array = duplicates_raw
+                
+                # Build unique_indices and duplicate_groups from duplicates array
+                all_duplicate_indices = set()
+                duplicate_groups = []
+                
+                for dup_group in duplicates_array:
+                    if len(dup_group) > 1:
+                        representative = dup_group[0]
+                        duplicates = dup_group[1:]
+                        duplicate_groups.append({
+                            "representative_index": representative,
+                            "duplicate_indices": duplicates
+                        })
+                        # Add all to duplicate set
+                        all_duplicate_indices.update(dup_group)
+                
+                # Unique indices are all indices NOT in duplicate groups
+                total_cases = len(test_case_list.test_cases)
+                unique_indices = [i for i in range(total_cases) if i not in all_duplicate_indices]
+                
+                # Add representatives to unique_indices
+                for group in duplicate_groups:
+                    rep_idx = group["representative_index"]
+                    if rep_idx not in unique_indices:
+                        unique_indices.append(rep_idx)
+                
+                unique_indices.sort()
+                
+                logger.info(f"✅ Converted {len(duplicates_array)} duplicate groups")
+            else:
+                # Standard format or {"duplicate_groups": [[array], [array]]}
+                unique_indices = parsed_content.get("unique_indices", [])
+                duplicate_groups_raw = parsed_content.get("duplicate_groups", [])
+                
+                # Check if duplicate_groups is array of arrays (not array of objects)
+                if duplicate_groups_raw and isinstance(duplicate_groups_raw[0], list):
+                    # Format: {"duplicate_groups": [[0,1], [2,3], ...]}
+                    logger.info("🔄 Converting duplicate_groups array format to standard format")
+                    
+                    all_duplicate_indices = set()
+                    duplicate_groups = []
+                    
+                    for dup_group in duplicate_groups_raw:
+                        if len(dup_group) > 1:
+                            representative = dup_group[0]
+                            duplicates = dup_group[1:]
+                            duplicate_groups.append({
+                                "representative_index": representative,
+                                "duplicate_indices": duplicates
+                            })
+                            all_duplicate_indices.update(dup_group)
+                    
+                    # If unique_indices is empty, calculate it
+                    if not unique_indices:
+                        total_cases = len(test_case_list.test_cases)
+                        unique_indices = [i for i in range(total_cases) if i not in all_duplicate_indices]
+                        
+                        # Add representatives
+                        for group in duplicate_groups:
+                            rep_idx = group["representative_index"]
+                            if rep_idx not in unique_indices:
+                                unique_indices.append(rep_idx)
+                        
+                        unique_indices.sort()
+                    
+                    logger.info(f"✅ Converted {len(duplicate_groups_raw)} duplicate groups from array format")
+                else:
+                    # Standard object format
+                    duplicate_groups = duplicate_groups_raw
             
             logger.info(f"JSON parsing successful!")
             logger.info(f"Found unique_indices: {unique_indices}")
@@ -502,8 +694,13 @@ IMPORTANT:
             # Build duplicates list
             duplicates = []
             for group in duplicate_groups:
-                rep_idx = group.get("representative_index")
-                dup_indices = group.get("duplicate_indices", [])
+                # Handle both dict and potential other formats
+                if isinstance(group, dict):
+                    rep_idx = group.get("representative_index")
+                    dup_indices = group.get("duplicate_indices", [])
+                else:
+                    # Shouldn't happen but just in case
+                    continue
                 
                 if 0 <= rep_idx < len(test_case_list.test_cases):
                     representative = test_case_list.test_cases[rep_idx]
@@ -949,12 +1146,16 @@ class TestCaseOptimizationService:
     async def run_parallel_smart_selection(self, selected_test_cases: List[Dict[str, Any]], custom_prompt: str = None, selected_model: str = "gemini-2.5-flash", api_key: str = None, process_id: str = None, grouping_strategy: str = "round_robin") -> Dict[str, Any]:
         """
         Paralel smart selection - sadece Gemini modelleri ile çalışır.
-        Test case'leri gruplara böler, paralel optimize eder, sonra final optimization yapar.
+        Gemini Batch API kullanarak GERÇEK paralel işlem yapar.
         """
         # DEBUG: Log input
-        logger.info(f"🔍 PARALLEL SMART SELECTION:")
+        logger.info("="*80)
+        logger.info(f"🔍 PARALLEL SMART SELECTION INITIATED")
         logger.info(f"   Input test cases: {len(selected_test_cases)}")
-        logger.info(f"   Original test cases (before validation): {len(selected_test_cases)}")
+        logger.info(f"   Model: {selected_model}")
+        logger.info(f"   Mode: BATCH API (Parallel Processing)")
+        logger.info(f"   This is NOT serial processing")
+        logger.info("="*80)
         
         # Generate process ID if not provided
         if not process_id:
@@ -1046,6 +1247,10 @@ class TestCaseOptimizationService:
                 }
             
             # Parallel smart selection işlemini çalıştır
+            logger.info(f"🚀 Starting Gemini Batch API parallel processing...")
+            logger.info(f"   Valid test cases: {len(valid_data)}")
+            logger.info(f"   Expected comparisons: {len(valid_data) * (len(valid_data) - 1) // 2:,}")
+            
             test_case_list = TestCaseList(test_cases=valid_data)
             result_list = await parallel_smart_select(
                 test_case_list,
@@ -1055,6 +1260,8 @@ class TestCaseOptimizationService:
                 process_id,
                 use_file_mode=True  # Use Batch API with adaptive batching
             )
+            
+            logger.info(f"✅ Gemini Batch API parallel processing completed successfully")
             
             # Extract unique test cases from result
             unique_test_cases = result_list
@@ -1084,7 +1291,7 @@ class TestCaseOptimizationService:
             
             return {
                 "success": True,
-                "message": "Parallel smart selection completed successfully",
+                "message": "Parallel smart selection completed successfully using Gemini Batch API",
                 "data": results,
                 "process_id": process_id
             }
@@ -1113,6 +1320,10 @@ class TestCaseOptimizationService:
         Seçilen test case'ler üzerinde bulk smart selection işlemini çalıştır.
         Tüm test case'leri tek bir LLM çağrısında karşılaştırır.
         """
+        logger.info("🟢 RUN_BULK_SMART_SELECTION METHOD CALLED")
+        logger.info(f"🟢 Input: {len(selected_test_cases)} test cases")
+        logger.info(f"🟢 Model: {selected_model}")
+        
         # Generate process ID if not provided
         if not process_id:
             process_id = str(uuid.uuid4())
