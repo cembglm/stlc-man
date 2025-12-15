@@ -17,8 +17,8 @@ from routers.test_case_optimization_router import router as test_case_optimizati
 from stlc.test_code_generation import router as test_code_generation_router
 from routers.models_router import router as models_router
 from routers.api_key_validation_router import router as api_key_validation_router
-from routers.test_execution_router import router as test_execution_router
-from routers.test_execution_prompt_router import router as test_execution_prompt_router
+from routers.execution_router import router as test_execution_router
+from routers.execution_prompt_router import router as test_execution_prompt_router
 from routers.test_reporting_router import router as test_reporting_router
 from routers.test_reporting_prompt_router import router as test_reporting_prompt_router
 from routers.test_closure_router import router as test_closure_router

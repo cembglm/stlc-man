@@ -32,26 +32,42 @@ MCP_SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8001"))
 LM_STUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
 DEFAULT_LM_STUDIO_MODEL = os.getenv("DEFAULT_LM_STUDIO_MODEL", "llama-3.2-3b-instruct")
 
-# Model name mapping: Ollama format -> LM Studio format
+# Model name mapping: Frontend model key -> LM Studio format
 MODEL_NAME_MAPPING = {
+    # Small models
     "llama3.2:1b": "llama-3.2-1b-instruct",
     "llama3.2:3b": "llama-3.2-3b-instruct",
     "llama3.1:8b": "llama-3.1-8b-instruct",
     "codellama:7b": "codellama-7b-instruct",
     "codellama:13b": "codellama-13b-instruct",
     "codellama:34b": "codellama-34b-instruct",
-    "codellama:70b-instruct": "codellama-70b-instruct",
     "deepseek-coder:6.7b": "deepseek-coder-6.7b-instruct",
-    "gemma2:2b": "gemma-2-2b-instruct",
-    "gemma3:4b": "gemma-3-4b-instruct",
-    "qwen2.5:7b": "qwen-2.5-7b-instruct",
-    "qwen2.5-coder:3b": "qwen-2.5-coder-3b-instruct",
-    "stable-code:3b": "stable-code-3b",
+    "gemma2:2b": "gemma-2-2b-it",
+    "gemma3:4b": "gemma-3-4b-it",
+    "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
+    "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",
+    "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
+    "stable-code:3b": "stable-code-instruct-3b",
     "starcoder2:7b": "starcoder2-7b",
-    "codegeex4:9b": "codegeex4-9b",
-    "deepseek-r1-distill:32b": "deepseek-r1-distill-32b",
-    "kimi-dev:72b": "kimi-dev-72b",
-    "qwen2.5:7b-1m": "qwen-2.5-7b-1m-instruct"
+    "codegeex4:9b": "codegeex4-all-9b",
+    
+    # Large models with full paths
+    "codellama:70b-instruct": "CodeLlama-70B-Instruct-GGUF/codellama-70b-instruct.Q4_K_S.gguf",
+    "kimi-dev:72b": "Kimi-Dev-72B-GGUF/Kimi-Dev-72B-Q3_K_S.gguf",
+    "openai/gpt-oss-20b": "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b": "openai/gpt-oss-120b",
+    "deepseek-r1-distill:32b": "DeepSeek-R1-Distill-Qwen-32B-GGUF/DeepSeek-R1-Distill-Qwen-32B-Q3_K_L.gguf",
+    "google/gemma-3-12b": "gemma-3-12b-it",
+    "google/gemma-3-27b": "google/gemma-3-27b",
+    "qwen/qwq-32b": "qwen/qwq-32b",
+    "qwen/qwen3-14b": "qwen3-14b-instruct",
+    "qwen/qwen3-coder-30b": "qwen/qwen3-coder-30b",
+    "deepseek/deepseek-r1-qwen3-8b": "deepseek/deepseek-r1-0528-qwen3-8b",
+    "meta/llama-3.3-70b": "meta/llama-3.3-70b",
+    "mistralai/codestral-22b-v0.1": "mistralai/codestral-22b-v0.1",
+    
+    # Alternative formats
+    "llama-3.2-3b-instruct": "llama-3.2-3b-instruct"
 }
 
 def convert_model_name_to_lm_studio(ollama_model: str) -> str:

@@ -291,7 +291,7 @@ export default function TestReportingForm({
     let apiKey = null;
     
     if (selectedModelInfo?.type === 'api') {
-      if (selectedModel.includes('gemini')) {
+      if (selectedModel.startsWith('gemini')) {
         apiKey = apiKeys.google;
         if (!apiKey) {
           toast.error('Gemini API key is required. Please configure it in API Settings.');
