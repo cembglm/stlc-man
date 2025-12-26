@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from services.test_reporting_service import test_reporting_service
+from utils.model_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +20,6 @@ router = APIRouter(
     prefix="/api/test-reporting",
     tags=["test-reporting"]
 )
-
-# LLM Service URL (reuse existing infrastructure)
-LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
 class SessionListRequest(BaseModel):
@@ -45,6 +42,7 @@ class ReportGenerationRequest(BaseModel):
     model: str  # e.g., "llama3.2:1b", "gemini-2.5-pro"
     api_key: Optional[str] = None  # Required for Gemini
     analysis_depth: str = "detailed"  # "summary" | "detailed" | "deep"
+    custom_prompt: Optional[str] = None  # Optional custom prompt override
 
 
 class ReportGenerationResponse(BaseModel):
@@ -88,7 +86,7 @@ async def call_llm(
     max_tokens: int = 4000
 ) -> str:
     """
-    Call LLM service (LM Studio or Gemini)
+    Call LLM service using LLMClient (supports both LM Studio and Gemini)
     
     Args:
         prompt: Prompt to send
@@ -99,88 +97,37 @@ async def call_llm(
     Returns:
         LLM response text
     """
-    provider, model_name = parse_model_to_provider_info(model)
-    
     try:
-        if provider == "gemini":
-            # Gemini API call
-            if not api_key:
-                raise ValueError("API key required for Gemini models")
-            
-            url = f"{GEMINI_API_BASE}/{model_name}:generateContent"
-            params = {"key": api_key}
-            
-            payload = {
-                "contents": [{
-                    "parts": [{
-                        "text": prompt
-                    }]
-                }],
-                "generationConfig": {
-                    "maxOutputTokens": max_tokens,
-                    "temperature": 0.7
-                }
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, params=params) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise HTTPException(
-                            status_code=response.status,
-                            detail=f"Gemini API error: {error_text}"
-                        )
-                    
-                    result = await response.json()
-                    
-                    # Extract text from Gemini response
-                    if "candidates" in result and result["candidates"]:
-                        candidate = result["candidates"][0]
-                        if "content" in candidate and "parts" in candidate["content"]:
-                            parts = candidate["content"]["parts"]
-                            if parts and "text" in parts[0]:
-                                return parts[0]["text"]
-                    
-                    raise ValueError("Unexpected Gemini response format")
+        logger.info(f"[call_llm] Initializing LLMClient with model: {model}")
+        logger.info(f"[call_llm] API key provided: {'Yes' if api_key else 'No'}")
+        logger.info(f"[call_llm] Prompt length: {len(prompt)} characters")
+        logger.info(f"[call_llm] Max tokens: {max_tokens}")
         
-        else:
-            # LM Studio call
-            payload = {
-                "model": model_name,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": max_tokens,
-                "temperature": 0.7
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(LM_STUDIO_URL, json=payload) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise HTTPException(
-                            status_code=response.status,
-                            detail=f"LM Studio error: {error_text}"
-                        )
-                    
-                    result = await response.json()
-                    
-                    # Extract text from LM Studio response
-                    if "choices" in result and result["choices"]:
-                        return result["choices"][0]["message"]["content"]
-                    
-                    raise ValueError("Unexpected LM Studio response format")
-    
-    except aiohttp.ClientError as e:
-        error_msg = f"LLM service unavailable: {str(e)}"
-        logger.error(f"LLM API error: {error_msg}")
-        logger.error(f"Model: {model}, Provider: {provider}, Model name: {model_name}")
-        raise HTTPException(status_code=503, detail=error_msg)
+        # Initialize LLMClient with test_reporting use_case
+        llm_client = LLMClient(
+            model_name=model,
+            api_key=api_key,
+            use_case='test_reporting'
+        )
+        
+        # Generate response using unified LLMClient
+        response = await llm_client.generate_response(
+            prompt=prompt,
+            temperature=0.7,
+            max_tokens=max_tokens
+        )
+        
+        if not response:
+            raise ValueError("Empty response from LLM")
+        
+        logger.info(f"[call_llm] ✅ Successfully received response (length: {len(response)})")
+        return response
+        
     except Exception as e:
         error_msg = f"LLM error: {type(e).__name__}: {str(e)}"
-        logger.error(f"LLM call error: {error_msg}")
-        logger.error(f"Model: {model}, Provider: {provider}, Model name: {model_name}")
-        logger.error(f"Prompt length: {len(prompt)} characters")
+        logger.error(f"[call_llm] ❌ Error: {error_msg}")
+        logger.error(f"[call_llm] Model: {model}")
+        logger.error(f"[call_llm] Prompt length: {len(prompt)} characters")
         raise HTTPException(status_code=500, detail=error_msg)
 
 
@@ -206,6 +153,53 @@ async def get_available_sessions(request: SessionListRequest):
     
     except Exception as e:
         logger.error(f"Error fetching sessions: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/preview-prompt")
+async def preview_prompt(request: ReportGenerationRequest):
+    """
+    Preview the prompt that will be used for report generation
+    Allows users to review and edit before generating
+    """
+    try:
+        # Fetch session data
+        session_data_list = []
+        for session_id in request.session_ids:
+            session = await test_reporting_service.fetch_session_data(session_id)
+            if session:
+                session_data_list.append(session)
+        
+        if not session_data_list:
+            raise HTTPException(status_code=404, detail="No valid sessions found")
+        
+        # Generate prompt preview
+        if len(request.session_ids) > 1:
+            # Multi-session comparison
+            prompt = test_reporting_service.create_final_synthesis_prompt(
+                sessions=session_data_list,
+                intermediate_summaries=[],  # Empty for preview
+                raw_session_data=session_data_list,
+                analysis_depth=request.analysis_depth
+            )
+        else:
+            # Single session
+            prompt = test_reporting_service.create_single_session_prompt(
+                session_data=session_data_list[0],
+                analysis_depth=request.analysis_depth
+            )
+        
+        return {
+            "success": True,
+            "prompt": prompt,
+            "session_count": len(request.session_ids),
+            "analysis_depth": request.analysis_depth,
+            "prompt_length": len(prompt),
+            "estimated_tokens": len(prompt) // 4  # Rough estimate
+        }
+    
+    except Exception as e:
+        logger.error(f"Error generating prompt preview: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -308,19 +302,25 @@ async def generate_comprehensive_report(request: ReportGenerationRequest):
                 "process_name": session_data.get("process_name", "")
             })
         
-        final_prompt = test_reporting_service.create_final_synthesis_prompt(
-            intermediate_summaries=intermediate_summaries,
-            session_metadata={
-                "session_ids": request.session_ids,
-                "sessions": sessions_metadata,
-                "comparison_mode": len(request.session_ids) > 1
-            },
-            analysis_depth=request.analysis_depth,
-            raw_session_data=all_session_data  # Pass raw data for LLM reference
-        )
+        # Use custom prompt if provided, otherwise generate default prompt
+        if request.custom_prompt:
+            final_prompt = request.custom_prompt
+            logger.info("Using custom user-provided prompt")
+        else:
+            final_prompt = test_reporting_service.create_final_synthesis_prompt(
+                intermediate_summaries=intermediate_summaries,
+                session_metadata={
+                    "session_ids": request.session_ids,
+                    "sessions": sessions_metadata,
+                    "comparison_mode": len(request.session_ids) > 1
+                },
+                analysis_depth=request.analysis_depth,
+                raw_session_data=all_session_data  # Pass raw data for LLM reference
+            )
         
         logger.info(f"Final prompt length: {len(final_prompt)} characters")
-        logger.info(f"Prompt contains {len(all_session_data)} raw session data entries")
+        if not request.custom_prompt:
+            logger.info(f"Prompt contains {len(all_session_data)} raw session data entries")
         
         # Call LLM for final report
         logger.info(f"Calling LLM with model: {request.model}")
@@ -328,35 +328,23 @@ async def generate_comprehensive_report(request: ReportGenerationRequest):
             prompt=final_prompt,
             model=request.model,
             api_key=request.api_key,
-            max_tokens=12000  # Final report can be longer for multiple sessions
+            max_tokens=8000  # Set to Gemini's max output limit (8192)
         )
         
-        # Clean up JSON if it's wrapped in markdown code blocks
+        # Clean up markdown code blocks if present
         cleaned_report = final_report.strip()
-        if cleaned_report.startswith('```json'):
-            # Remove ```json from start and ``` from end
-            cleaned_report = cleaned_report[7:]  # Remove ```json
-            if cleaned_report.endswith('```'):
-                cleaned_report = cleaned_report[:-3]  # Remove ```
-            cleaned_report = cleaned_report.strip()
-        elif cleaned_report.startswith('```'):
-            # Remove ``` from start and end
-            cleaned_report = cleaned_report[3:]
-            if cleaned_report.endswith('```'):
-                cleaned_report = cleaned_report[:-3]
-            cleaned_report = cleaned_report.strip()
+        if cleaned_report.startswith('```'):
+            # Remove markdown code block wrappers
+            lines = cleaned_report.split('\n')
+            if lines[0].startswith('```'):
+                lines = lines[1:]  # Remove first ```
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]  # Remove last ```
+            cleaned_report = '\n'.join(lines).strip()
         
-        # Try to validate JSON
-        try:
-            import json
-            json.loads(cleaned_report)
-            logger.info("✅ LLM response is valid JSON")
-            final_report = cleaned_report
-        except json.JSONDecodeError as e:
-            logger.warning(f"⚠️ LLM response is not valid JSON: {str(e)}")
-            logger.warning(f"First 500 chars: {cleaned_report[:500]}")
-            # Keep original response if JSON parsing fails (might be markdown)
-            final_report = final_report
+        final_report = cleaned_report
+        report_format = "markdown"  # Simple markdown format
+        logger.info("✅ Generated ISTQB/IEEE compliant markdown report")
         
         # Step 4: Save report to database
         # Collect all unique process names from intermediate summaries
@@ -371,7 +359,8 @@ async def generate_comprehensive_report(request: ReportGenerationRequest):
             "model_used": request.model,
             "analysis_depth": request.analysis_depth,
             "chunks_processed": total_chunks,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "report_format": report_format  # markdown format
         }
         
         report_id = await test_reporting_service.save_report(
@@ -380,7 +369,7 @@ async def generate_comprehensive_report(request: ReportGenerationRequest):
             metadata=report_metadata
         )
         
-        logger.info(f"Report generation completed: {report_id}")
+        logger.info(f"Report generation completed: {report_id} (format: {report_format})")
         
         return ReportGenerationResponse(
             success=True,

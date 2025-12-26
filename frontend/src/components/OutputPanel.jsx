@@ -2265,6 +2265,56 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
       );
     }
 
+    // Check for test-closure specific output
+    if (activeTab === 'test-closure' && outputs && outputs[activeTab]) {
+      const testClosureOutput = outputs[activeTab];
+      const isLoading = testClosureOutput.status === 'loading' || testClosureOutput.status === 'running' || testClosureOutput.status === 'processing';
+      
+      return (
+        <div className="space-y-6">
+          <section>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-lg font-medium">Test Closure Report</h3>
+              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                testClosureOutput.status === 'completed' 
+                  ? 'bg-green-100 text-green-800' 
+                  : testClosureOutput.status === 'error'
+                  ? 'bg-red-100 text-red-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}>
+                {testClosureOutput.status === 'completed' ? 'Success' : 
+                 testClosureOutput.status === 'error' ? 'Error' : 'Processing'}
+              </span>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+              <TestReportViewer 
+                output={testClosureOutput.content} 
+                isLoading={isLoading}
+              />
+            </div>
+          </section>
+          
+          <section>
+            <h3 className="text-lg font-medium mb-3">Closure Details</h3>
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 shadow-sm">
+              <div className="text-gray-600">
+                <p><strong>Status:</strong> {testClosureOutput.status}</p>
+                <p><strong>Process:</strong> {testClosureOutput.processType || 'Test Closure'}</p>
+                {testClosureOutput.model && <p><strong>Model:</strong> {testClosureOutput.model}</p>}
+                {testClosureOutput.sessions_analyzed && (
+                  <p><strong>Sessions Analyzed:</strong> {testClosureOutput.sessions_analyzed}</p>
+                )}
+                {testClosureOutput.metrics && (
+                  <p><strong>Metrics Available:</strong> Yes</p>
+                )}
+                <p><strong>Last Updated:</strong> {testClosureOutput.timestamp ? new Date(testClosureOutput.timestamp).toLocaleString() : new Date().toLocaleString()}</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     // Check for test-case-generation specific output
     console.log('[OutputPanel] Checking for test-case-generation output:', {
       activeTab,

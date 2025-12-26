@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { toast } from 'react-hot-toast';
 import { 
   DocumentCheckIcon,
   ArrowPathIcon,
-  CalendarIcon,
   CheckCircleIcon,
   XCircleIcon,
   ClockIcon
@@ -13,25 +12,96 @@ import { clsx } from 'clsx';
 import { useSelector } from 'react-redux';
 import { useModels } from '../../hooks/useModels';
 
+// Process metadata with icons, labels, and colors
+const PROCESS_METADATA = {
+  test_scenario_generation: { 
+    icon: '📝', 
+    label: 'Test Scenarios',
+    shortLabel: 'Scenarios',
+    color: 'blue',
+    bgColor: 'bg-blue-100',
+    textColor: 'text-blue-700'
+  },
+  test_case_generation: { 
+    icon: '🧪', 
+    label: 'Test Cases',
+    shortLabel: 'Cases',
+    color: 'green',
+    bgColor: 'bg-green-100',
+    textColor: 'text-green-700'
+  },
+  test_case_optimization: { 
+    icon: '⚡', 
+    label: 'Test Case Optimization',
+    shortLabel: 'Optimization',
+    color: 'yellow',
+    bgColor: 'bg-yellow-100',
+    textColor: 'text-yellow-700'
+  },
+  test_code_generation: { 
+    icon: '💻', 
+    label: 'Test Code Generation',
+    shortLabel: 'Code Gen',
+    color: 'purple',
+    bgColor: 'bg-purple-100',
+    textColor: 'text-purple-700'
+  },
+  test_execution: { 
+    icon: '🚀', 
+    label: 'Test Execution',
+    shortLabel: 'Execution',
+    color: 'red',
+    bgColor: 'bg-red-100',
+    textColor: 'text-red-700'
+  },
+  code_review: { 
+    icon: '🔍', 
+    label: 'Code Review',
+    shortLabel: 'Review',
+    color: 'indigo',
+    bgColor: 'bg-indigo-100',
+    textColor: 'text-indigo-700'
+  }
+};
+
+// Model metadata for display
+const MODEL_METADATA = {
+  'gemini-2.5-pro': { icon: '🤖', shortName: 'Gemini Pro', color: 'blue' },
+  'gemini-2.5-flash': { icon: '⚡', shortName: 'Gemini Flash', color: 'blue' },
+  'gemini-1.5-pro': { icon: '🤖', shortName: 'Gemini 1.5', color: 'blue' },
+  'llama-3.2-3b-instruct': { icon: '🦙', shortName: 'Llama 3.2', color: 'purple' },
+  'llama3.2:1b': { icon: '🦙', shortName: 'Llama 1B', color: 'purple' },
+  'gpt-4': { icon: '🧠', shortName: 'GPT-4', color: 'green' },
+  'gpt-3.5-turbo': { icon: '💬', shortName: 'GPT-3.5', color: 'green' },
+  'default': { icon: '🔮', shortName: 'AI Model', color: 'gray' }
+};
+
 /**
  * TestClosureForm Component
  * Handles AI-powered test cycle closure report generation
  */
-export default function TestClosureForm({ onComplete, onSetOutput }) {
+export default function TestClosureForm({ onComplete, onSetOutput, onSetFormState }) {
   const { models, loading: modelsLoading } = useModels();
   const apiKeys = useSelector((state) => state.apiKey.apiKeys);
   
   // State management
   const [sessions, setSessions] = useState([]);
   const [selectedSessions, setSelectedSessions] = useState([]);
+  const [expandedSessions, setExpandedSessions] = useState([]); // Track expanded session cards
   const [selectedModel, setSelectedModel] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(false);
   const [fetchingMetrics, setFetchingMetrics] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [metrics, setMetrics] = useState(null);
   const [report, setReport] = useState(null);
+  const hasFetchedRef = useRef(false); // Track if initial fetch has been done
+  
+  // Prompt preview and edit state
+  const [showPromptEditor, setShowPromptEditor] = useState(false);
+  const [promptPreview, setPromptPreview] = useState('');
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
+  const [pendingGeneration, setPendingGeneration] = useState(false);
 
   // Auto-select first available model when models load
   useEffect(() => {
@@ -54,12 +124,8 @@ export default function TestClosureForm({ onComplete, onSetOutput }) {
   const fetchAvailableSessions = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (dateFrom) params.append('date_from', dateFrom);
-      if (dateTo) params.append('date_to', dateTo);
-
       const response = await fetch(
-        `http://localhost:8000/api/test-closure/available-sessions?${params.toString()}`
+        'http://localhost:8000/api/test-closure/available-sessions'
       );
 
       if (!response.ok) {
@@ -69,8 +135,20 @@ export default function TestClosureForm({ onComplete, onSetOutput }) {
       const data = await response.json();
       
       if (data.success) {
-        setSessions(data.sessions || []);
-        toast.success(`Found ${data.total_count} sessions`);
+        // Sort sessions by timestamp or created_at in descending order (newest first)
+        const sortedSessions = (data.sessions || []).sort((a, b) => {
+          // Try timestamp first (from Test Reporting), fallback to created_at (from Test Closure)
+          const dateA = new Date(a.timestamp || a.created_at || 0);
+          const dateB = new Date(b.timestamp || b.created_at || 0);
+          return dateB - dateA; // Descending order (newest first)
+        });
+        
+        setSessions(sortedSessions);
+        // Show toast only once (not on strict mode re-mount)
+        if (!hasFetchedRef.current) {
+          toast.success(`Found ${data.total_count} sessions`);
+          hasFetchedRef.current = true;
+        }
       } else {
         toast.error('Failed to fetch sessions');
       }
@@ -91,6 +169,76 @@ export default function TestClosureForm({ onComplete, onSetOutput }) {
         ? prev.filter(id => id !== sessionId)
         : [...prev, sessionId]
     );
+  };
+
+  /**
+   * Toggle session expand/collapse
+   */
+  const toggleSessionExpand = (sessionId) => {
+    setExpandedSessions(prev => {
+      if (prev.includes(sessionId)) {
+        return prev.filter(id => id !== sessionId);
+      } else {
+        return [...prev, sessionId];
+      }
+    });
+  };
+
+  /**
+   * Get model metadata for display
+   */
+  const getModelMetadata = (modelName) => {
+    if (!modelName) return MODEL_METADATA.default;
+    
+    // Try exact match first
+    if (MODEL_METADATA[modelName]) {
+      return MODEL_METADATA[modelName];
+    }
+    
+    // Try partial match
+    for (const [key, meta] of Object.entries(MODEL_METADATA)) {
+      if (modelName.includes(key) || key.includes(modelName)) {
+        return meta;
+      }
+    }
+    
+    return MODEL_METADATA.default;
+  };
+
+  /**
+   * Get process metadata for display
+   */
+  const getProcessMetadata = (processType) => {
+    return PROCESS_METADATA[processType] || {
+      icon: '❓',
+      label: processType,
+      shortLabel: processType,
+      color: 'gray',
+      bgColor: 'bg-gray-100',
+      textColor: 'text-gray-700'
+    };
+  };
+
+  /**
+   * Format timestamp for display
+   */
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return 'Unknown date';
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) {
+        return 'Invalid date';
+      }
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return 'Invalid date';
+    }
   };
 
   /**
@@ -126,9 +274,7 @@ export default function TestClosureForm({ onComplete, onSetOutput }) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          session_ids: selectedSessions,
-          date_from: dateFrom || null,
-          date_to: dateTo || null
+          session_ids: selectedSessions
         })
       });
 
@@ -154,19 +300,71 @@ export default function TestClosureForm({ onComplete, onSetOutput }) {
   };
 
   /**
-   * Generate AI-powered closure report
+   * Load prompt and show editor
    */
-  const generateClosureReport = async () => {
+  const loadPrompt = async (shouldGenerateAfter = false) => {
+    console.log('[TestClosure] loadPrompt called, shouldGenerateAfter:', shouldGenerateAfter);
+    
     if (selectedSessions.length === 0) {
       toast.error('Please select at least one session');
-      return;
+      return false;
     }
 
-    if (!selectedModel) {
-      toast.error('Please select a model');
-      return;
-    }
+    console.log('[TestClosure] Loading prompt for sessions:', selectedSessions);
+    setIsLoadingPrompt(true);
+    setPendingGeneration(shouldGenerateAfter);
 
+    try {
+      const response = await fetch('http://localhost:8000/api/test-closure/preview-prompt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_ids: selectedSessions
+        })
+      });
+
+      console.log('[TestClosure] Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to load prompt');
+      }
+
+      const data = await response.json();
+      console.log('[TestClosure] Response data:', data);
+
+      if (data.success) {
+        console.log('[TestClosure] Setting prompt, length:', data.prompt?.length);
+        setPromptPreview(data.prompt);
+        setCustomPrompt(data.prompt);
+        setShowPromptEditor(true);
+        console.log('[TestClosure] showPromptEditor set to true');
+        
+        const chunkingNote = data.uses_chunking ? ' (using chunking for large dataset)' : '';
+        toast.success(`Prompt loaded${chunkingNote} - ${data.estimated_tokens} tokens estimated`);
+        return true;
+      } else {
+        toast.error('Failed to load prompt');
+        return false;
+      }
+    } catch (error) {
+      console.error('[TestClosure] Error loading prompt:', error);
+      toast.error(`Error: ${error.message}`);
+      return false;
+    } finally {
+      setIsLoadingPrompt(false);
+      console.log('[TestClosure] loadPrompt finished');
+    }
+  };
+
+  /**
+   * Internal function to actually generate the report (after prompt review)
+   * Defined first because generateClosureReport depends on it
+   */
+  const generateClosureReportInternal = useCallback(async () => {
+    console.log('[TestClosure] generateClosureReportInternal called');
     // Get API key from Redux store based on model type
     let apiKeyToUse = null;
     if (selectedModel.startsWith('gemini')) {
@@ -195,6 +393,7 @@ export default function TestClosureForm({ onComplete, onSetOutput }) {
 ⚙️ **Configuration:**
 - Sessions: ${selectedSessions.length} selected
 - Model: ${models.find(m => m.key === selectedModel)?.name || selectedModel}
+- Custom Prompt: ${customPrompt && customPrompt !== promptPreview ? 'Yes (edited)' : 'No (default)'}
 
 📋 **Selected Sessions:**
 ${sessions.filter(s => selectedSessions.includes(s.session_id)).map(s => `  • ${s.session_id.substring(0, 8)}... (${s.process_count} processes)`).join('\n')}
@@ -232,17 +431,15 @@ This may take a few moments depending on the amount of data.`,
     try {
       const requestBody = {
         session_ids: selectedSessions,
-        date_from: dateFrom || null,
-        date_to: dateTo || null,
         model: selectedModel,
-        api_key: apiKeyToUse
+        api_key: apiKeyToUse,
+        custom_prompt: customPrompt && customPrompt !== promptPreview ? customPrompt : null
       };
       
       console.log('[TestClosure] Sending request to backend:');
       console.log('  - Endpoint:', 'http://localhost:8000/api/test-closure/generate-report');
       console.log('  - Selected Model:', selectedModel);
-      console.log('  - Model Object:', models.find(m => m.key === selectedModel));
-      console.log('  - Request Body:', JSON.stringify(requestBody, null, 2));
+      console.log('  - Using Custom Prompt:', !!requestBody.custom_prompt);
       
       const response = await fetch('http://localhost:8000/api/test-closure/generate-report', {
         method: 'POST',
@@ -351,7 +548,56 @@ This may take a few moments depending on the amount of data.`,
     } finally {
       setGeneratingReport(false);
     }
-  };
+  }, [selectedSessions, selectedModel, customPrompt, promptPreview, apiKeys, models, onSetOutput, onComplete, sessions]);
+
+  /**
+   * Generate AI-powered closure report
+   * Defined after generateClosureReportInternal because it depends on it
+   */
+  const generateClosureReport = useCallback(async () => {
+    console.log('[TestClosure] generateClosureReport called');
+    console.log('[TestClosure] showPromptEditor:', showPromptEditor);
+    console.log('[TestClosure] selectedSessions:', selectedSessions);
+    console.log('[TestClosure] selectedModel:', selectedModel);
+    
+    if (selectedSessions.length === 0) {
+      toast.error('Please select at least one session');
+      return;
+    }
+
+    if (!selectedModel) {
+      toast.error('Please select a model');
+      return;
+    }
+
+    // Show prompt editor first if not already shown
+    if (!showPromptEditor) {
+      console.log('[TestClosure] Showing prompt editor first...');
+      const loaded = await loadPrompt(true);
+      console.log('[TestClosure] loadPrompt returned:', loaded);
+      if (!loaded) {
+        return; // Failed to load prompt
+      }
+      return; // Prompt will be shown, user can then click Continue & Generate
+    }
+
+    // If we're here, prompt is already shown and user clicked Continue & Generate
+    console.log('[TestClosure] Continuing with report generation...');
+    await generateClosureReportInternal();
+  }, [selectedSessions, selectedModel, showPromptEditor, loadPrompt, generateClosureReportInternal]);
+
+  // Track form state for main button - must be after generateClosureReport definition
+  useEffect(() => {
+    const canRun = selectedSessions.length > 0 && selectedModel && !generatingReport;
+    
+    if (onSetFormState) {
+      onSetFormState({
+        canRun,
+        isRunning: generatingReport,
+        handleRun: canRun ? generateClosureReport : null
+      });
+    }
+  }, [selectedSessions, selectedModel, generatingReport, onSetFormState, generateClosureReport]);
 
   /**
    * Download report as markdown file
@@ -373,70 +619,6 @@ This may take a few moments depending on the amount of data.`,
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg p-6 text-white">
-        <div className="flex items-center gap-3">
-          <DocumentCheckIcon className="w-8 h-8" />
-          <div>
-            <h2 className="text-2xl font-bold">Test Closure</h2>
-            <p className="text-purple-100 mt-1">
-              AI-powered test cycle closure report generation
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Date Range Filter */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <CalendarIcon className="w-5 h-5" />
-          Date Range Filter
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              From Date
-            </label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              To Date
-            </label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-          <div className="flex items-end">
-            <button
-              onClick={fetchAvailableSessions}
-              disabled={loading}
-              className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-300 flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <ArrowPathIcon className="w-5 h-5 animate-spin" />
-                  Loading...
-                </>
-              ) : (
-                <>
-                  <ArrowPathIcon className="w-5 h-5" />
-                  Refresh Sessions
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Session Selection */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
@@ -466,45 +648,102 @@ This may take a few moments depending on the amount of data.`,
           </div>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {sessions.map((session) => (
-              <div
-                key={session.session_id}
-                onClick={() => toggleSession(session.session_id)}
-                className={clsx(
-                  'p-4 border rounded-lg cursor-pointer transition-all',
-                  selectedSessions.includes(session.session_id)
-                    ? 'border-purple-500 bg-purple-50'
-                    : 'border-gray-200 hover:border-purple-300'
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedSessions.includes(session.session_id)}
-                      onChange={() => {}}
-                      className="w-5 h-5 text-purple-600 rounded"
-                    />
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        {session.session_id.substring(0, 8)}...
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(session.created_at).toLocaleString()}
-                      </p>
+            {sessions.map((session) => {
+              const isSelected = selectedSessions.includes(session.session_id);
+              const isExpanded = expandedSessions.includes(session.session_id);
+              const shortSessionId = session.session_id.length > 12 
+                ? session.session_id.substring(0, 8)
+                : session.session_id;
+              
+              return (
+                <div
+                  key={session.session_id}
+                  className={clsx(
+                    'border rounded-lg transition-all',
+                    isSelected ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-white'
+                  )}
+                >
+                  {/* Main Card Header */}
+                  <div 
+                    className="p-3 cursor-pointer hover:bg-gray-50"
+                    onClick={() => toggleSession(session.session_id)}
+                  >
+                    <div className="flex items-start space-x-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                        }}
+                        onChange={(e) => {
+                          toggleSession(session.session_id);
+                        }}
+                        className="mt-1 rounded cursor-pointer"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <h4 className="text-sm font-semibold text-gray-900 truncate flex-1" title={session.session_id}>
+                            Session {shortSessionId}
+                          </h4>
+                          <div className="flex items-center gap-2">
+                            <span className={clsx(
+                              'text-xs font-medium px-2 py-1 rounded flex-shrink-0',
+                              session.process_count > 1 ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                            )}>
+                              {session.process_count} {session.process_count === 1 ? 'process' : 'processes'}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSessionExpand(session.session_id);
+                              }}
+                              className="text-gray-500 hover:text-gray-700 p-1"
+                              title={isExpanded ? 'Collapse' : 'Expand details'}
+                            >
+                              {isExpanded ? '▼' : '▶'}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                          <span>📅 {formatTimestamp(session.timestamp || session.created_at)}</span>
+                          <span>•</span>
+                          <span>📋 {session.processes.join(', ')}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-gray-700">
-                      {session.process_count} processes
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {session.processes.join(', ')}
-                    </p>
-                  </div>
+
+                  {/* Expandable Details Section */}
+                  {isExpanded && (
+                    <div className="border-t border-gray-200 bg-gray-50 p-3 space-y-2">
+                      <h5 className="text-xs font-semibold text-gray-700 mb-2">Process Details:</h5>
+                      {session.processes.map((processType, idx) => {
+                        const processMeta = getProcessMetadata(processType);
+                        
+                        return (
+                          <div 
+                            key={idx}
+                            className="bg-white p-2 rounded border border-gray-200 text-xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{processMeta.icon}</span>
+                              <span className="font-medium text-gray-900">{processMeta.label}</span>
+                              <span className={clsx(
+                                'px-2 py-0.5 rounded text-xs font-medium ml-auto',
+                                processMeta.bgColor,
+                                processMeta.textColor
+                              )}>
+                                {processMeta.shortLabel}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -537,11 +776,14 @@ This may take a few moments depending on the amount of data.`,
       </div>
 
       {/* Action Buttons */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          Quick Actions
+        </h3>
         <button
           onClick={calculateMetrics}
           disabled={selectedSessions.length === 0 || fetchingMetrics}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 flex items-center justify-center gap-2 font-medium"
+          className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 flex items-center justify-center gap-2 font-medium"
         >
           {fetchingMetrics ? (
             <>
@@ -555,25 +797,99 @@ This may take a few moments depending on the amount of data.`,
             </>
           )}
         </button>
-
-        <button
-          onClick={generateClosureReport}
-          disabled={selectedSessions.length === 0 || !selectedModel || generatingReport}
-          className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 flex items-center justify-center gap-2 font-medium"
-        >
-          {generatingReport ? (
-            <>
-              <ArrowPathIcon className="w-5 h-5 animate-spin" />
-              Generating AI Report...
-            </>
-          ) : (
-            <>
-              <DocumentCheckIcon className="w-5 h-5" />
-              Generate AI Closure Report
-            </>
-          )}
-        </button>
       </div>
+
+      {/* Loading Prompt Modal */}
+      {isLoadingPrompt && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-8 max-w-md">
+            <div className="flex flex-col items-center">
+              <ArrowPathIcon className="w-12 h-12 text-purple-600 animate-spin mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Loading Prompt...</h3>
+              <p className="text-sm text-gray-500 text-center">
+                Generating prompt with international standards (ISO/IEC/IEEE 29119-3, IEEE 829, ISTQB)
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Prompt Editor Modal */}
+      {showPromptEditor && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <div>
+                <h3 className="text-xl font-semibold text-gray-900">Review & Edit AI Prompt</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Review the prompt generated following <strong>ISO/IEC/IEEE 29119-3</strong>, <strong>IEEE 829</strong>, and <strong>ISTQB</strong> standards
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowPromptEditor(false);
+                  setPendingGeneration(false);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XCircleIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <textarea
+                value={customPrompt}
+                onChange={(e) => setCustomPrompt(e.target.value)}
+                className="w-full h-full min-h-[500px] p-4 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                placeholder="Enter your custom prompt here..."
+              />
+              <div className="mt-2 text-sm text-gray-500 flex items-center justify-between">
+                <span>{customPrompt.length} characters • ~{Math.ceil(customPrompt.length / 4)} tokens (estimated)</span>
+                {customPrompt !== promptPreview && (
+                  <span className="text-purple-600 font-medium">✏️ Modified</span>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-between">
+              <button
+                onClick={() => setCustomPrompt(promptPreview)}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Reset to Original
+              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowPromptEditor(false);
+                    setPendingGeneration(false);
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowPromptEditor(false);
+                    if (pendingGeneration) {
+                      // Continue with generation
+                      setTimeout(() => generateClosureReportInternal(), 100);
+                    } else {
+                      toast.success('Prompt saved. You can generate the report now.');
+                    }
+                  }}
+                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                >
+                  {pendingGeneration ? 'Continue & Generate' : 'Use This Prompt'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Metrics Display */}
       {metrics && (
@@ -703,5 +1019,6 @@ This may take a few moments depending on the amount of data.`,
 
 TestClosureForm.propTypes = {
   onComplete: PropTypes.func,
-  onSetOutput: PropTypes.func
+  onSetOutput: PropTypes.func,
+  onSetFormState: PropTypes.func
 };

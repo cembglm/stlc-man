@@ -96,33 +96,48 @@ class LLMClient:
     }
     
     def __init__(self, model_name=None, api_key=None, use_case=None):
+        # Logger'ı en başta tanımla (hata yakalamada kullanılacak)
+        self.logger = logging.getLogger("LLMClient")
+        
         self.api_url = "http://localhost:1234/v1"
         # Default model kullan veya parametre olarak verilen modeli al
-        self.original_key = model_name  # Original key'i sakla
-        self.model_name = model_name if model_name else "llama-3.2-1b-instruct"
-        self.api_key = api_key  # Gemini API key'i için
-        self.use_case = use_case  # 'code_review', 'test_generation', etc.
-        self.logger = logging.getLogger("LLMClient")
-        self.logger.info(f"LLMClient initialized with model: {self.model_name}, use_case: {use_case}")
+        self.original_key = model_name  # Original key'i sakla (frontend'den gelen key)
         
-        # Gemini model kontrolü
-        self.is_gemini = self._is_gemini_model(self.model_name)
+        # Gemini model kontrolü önce yapılmalı (model_name kullanmadan önce)
+        self.is_gemini = self._is_gemini_model(model_name) if model_name else False
+        
+        # Local modeller için model identifier'ı al, Gemini için direkt kullan
+        if self.is_gemini:
+            self.model_name = model_name
+        else:
+            # Local model için identifier'ı al
+            self.model_name = self.get_model_identifier(model_name) if model_name else "llama-3.2-1b-instruct"
+        
+        self.api_key = api_key  # Gemini API key'i için
+        self.use_case = use_case  # 'code_review', 'test_generation', 'test_reporting', etc.
+        
+        self.logger.info(f"🔧 [LLMClient] Initialized:")
+        self.logger.info(f"   - Original key: {self.original_key}")
+        self.logger.info(f"   - Model name: {self.model_name}")
+        self.logger.info(f"   - Use case: {use_case}")
+        self.logger.info(f"   - Is Gemini: {self.is_gemini}")
+        
         self.is_api_based = self.is_gemini  # Şu an sadece Gemini API tabanlı, gelecekte genişletilebilir
         
         if self.is_gemini:
-            self.logger.info(f"Gemini model detected: {self.model_name}")
+            self.logger.info(f"✨ Gemini model detected: {self.model_name}")
             if not self.api_key:
                 raise ValueError("API key is required for Gemini models")
             # Gemini client'ı başlat
             try:
                 # Gemini API key'i configure et
                 genai.configure(api_key=self.api_key)
-                self.logger.info("Gemini client initialized successfully")
+                self.logger.info("✅ Gemini client initialized successfully")
                 
                 # Rate limiting bilgilerini başlat
                 self._init_rate_limiting()
             except Exception as e:
-                self.logger.error(f"Failed to initialize Gemini client: {e}")
+                self.logger.error(f"❌ Failed to initialize Gemini client: {e}")
                 raise
         
     def _is_gemini_model(self, model_name):
@@ -176,8 +191,8 @@ class LLMClient:
         if not self.is_api_based:
             return  # Local modeller için rate limiting yok
         
-        # Code review, requirement analysis, test planning, environment setup ve test code generation için minimal cooldown uygula
-        if self.use_case in ['code_review', 'requirement_analysis', 'test_planning', 'environment_setup', 'test_code_generation']:
+        # Code review, requirement analysis, test planning, environment setup, test code generation ve test reporting için minimal cooldown uygula
+        if self.use_case in ['code_review', 'requirement_analysis', 'test_planning', 'environment_setup', 'test_code_generation', 'test_reporting']:
             # Single-shot işlemler için sadece minimal bekleme (API stability için)
             minimal_delay = random.uniform(0.5, 2.0)  # 0.5-2 saniye
             use_case_name = self.use_case.replace('_', ' ').title()
@@ -387,15 +402,13 @@ class LLMClient:
         if self.is_gemini:
             return await self._generate_gemini_response(prompt, temperature, max_tokens)
         
-        # LM Studio için mevcut kod (rate limiting yok)
-        # self.model_name yerine get_model_identifier sonucunu kullan
+        # LM Studio için - model_name zaten __init__'de identifier'a çevrildi
         actual_model = self.model_name
-        if hasattr(self, 'original_key'):
-            actual_model = self.get_model_identifier(self.original_key)
-            
+        
+        # LM Studio için doğru mesaj formatı - user role kullanmalıyız
         payload = {
             "model": actual_model,
-            "messages": [{"role": "system", "content": prompt}],
+            "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
             "max_tokens": max_tokens
         }
@@ -405,9 +418,11 @@ class LLMClient:
             self.logger.info(f"Ignoring response_format parameter as LM Studio doesn't support it: {response_format}")
             
         try:
-            self.logger.debug(f"Sending request to LLM API with model: {actual_model}")
-            self.logger.debug(f"Request payload: {payload}")
-            self.logger.info(f"Making POST request to: {self.api_url}/chat/completions")
+            self.logger.info(f"📤 [LM Studio] Sending request to model: {actual_model}")
+            self.logger.debug(f"[LM Studio] Request payload: {payload}")
+            self.logger.info(f"[LM Studio] API URL: {self.api_url}/chat/completions")
+            self.logger.info(f"[LM Studio] Prompt length: {len(prompt)} chars")
+            self.logger.info(f"[LM Studio] Temperature: {temperature}, Max tokens: {max_tokens}")
             
             # Use aiohttp for async requests with extended timeout for complex test case generation
             async with aiohttp.ClientSession() as session:
@@ -416,28 +431,46 @@ class LLMClient:
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=1200)  # 1200 second timeout (20 minutes) for complex test case generation
                 ) as response:
-                    response.raise_for_status()
+                    self.logger.info(f"[LM Studio] Response status: {response.status}")
                     
-                    self.logger.debug(f"Response status code: {response.status}")
+                    # Log response body for debugging if error
+                    if response.status != 200:
+                        error_body = await response.text()
+                        self.logger.error(f"❌ [LM Studio] Error response body: {error_body}")
+                        self.logger.error(f"❌ [LM Studio] Request model: {actual_model}")
+                        self.logger.error(f"❌ [LM Studio] Verify model is loaded in LM Studio")
+                        raise aiohttp.ClientResponseError(
+                            request_info=response.request_info,
+                            history=response.history,
+                            status=response.status,
+                            message=f"LM Studio error: {error_body[:200]}"
+                        )
+                    
                     response_json = await response.json()
-                    self.logger.debug(f"Response JSON keys: {list(response_json.keys())}")
+                    self.logger.debug(f"[LM Studio] Response JSON keys: {list(response_json.keys())}")
                     
                     if "choices" not in response_json or not response_json["choices"]:
-                        self.logger.error(f"Invalid response format: {response_json}")
-                        raise ValueError("Invalid response format from LLM API")
+                        self.logger.error(f"❌ [LM Studio] Invalid response format: {response_json}")
+                        raise ValueError("Invalid response format from LM Studio API")
                     
                     result = response_json["choices"][0]["message"]["content"]
-                    self.logger.info(f"Successfully generated response with model: {actual_model}")
+                    self.logger.info(f"✅ [LM Studio] Successfully generated response (length: {len(result)} chars)")
                     return result
                     
         except asyncio.TimeoutError as e:
-            self.logger.error(f"Timeout error when calling LLM API with model {actual_model}: {str(e)}")
-            raise TimeoutError(f"LLM API request timed out after 1200 seconds (20 minutes)")
+            self.logger.error(f"⏰ [LM Studio] Timeout error with model {actual_model}: {str(e)}")
+            raise TimeoutError(f"LM Studio API request timed out after 1200 seconds (20 minutes)")
+        except aiohttp.ClientResponseError as e:
+            self.logger.error(f"❌ [LM Studio] API Error (Status {e.status}): {str(e)}")
+            self.logger.error(f"❌ [LM Studio] Model: {actual_model}")
+            self.logger.error(f"❌ [LM Studio] Original key: {self.original_key if hasattr(self, 'original_key') else 'N/A'}")
+            self.logger.error(f"💡 [LM Studio] Make sure model '{actual_model}' is loaded in LM Studio")
+            raise
         except aiohttp.ClientError as e:
-            self.logger.error(f"LLM API Error with model {actual_model}: {str(e)}")
+            self.logger.error(f"❌ [LM Studio] Client Error with model {actual_model}: {str(e)}")
             raise
         except Exception as e:
-            self.logger.error(f"Unexpected error with model {actual_model}: {str(e)}")
+            self.logger.error(f"❌ [LM Studio] Unexpected error with model {actual_model}: {str(e)}")
             raise
 
     def _sanitize_prompt_for_gemini(self, prompt):
@@ -511,12 +544,25 @@ class LLMClient:
             if sanitized_prompt != prompt:
                 self.logger.info("🧹 Prompt was sanitized to reduce safety filter risks")
             
-            # Test code generation için özel token ayarları
-            if self.use_case == 'test_code_generation':
-                # Test code generation için Gemini 2.5 Flash'ın full kapasitesini kullan
-                if max_tokens < 90000:
-                    max_tokens = 90000
-                    self.logger.info(f"🔧 Increased max_tokens to {max_tokens} for test code generation (Gemini 2.5 Full Capacity)")
+            # Use case bazlı optimal token limitleri (OUTPUT token limits)
+            use_case_limits = {
+                'test_code_generation': 8000,     # Maksimum kod üretimi
+                'test_reporting': 1000000,        # Maksimum raporlama - garantiye alalım (model kendi limitini uygular)
+                'test_closure': 1000000,          # Maksimum test closure raporlama - garantiye alalım
+                'code_review': 6000,              # Detaylı analiz için
+                'requirement_analysis': 5000,     # Kapsamlı analiz
+                'test_planning': 5000,            # Detaylı planlama
+                'test_case_generation': 4000,     # Test case üretimi
+                'environment_setup': 3000         # Kurulum talimatları
+            }
+            
+            # Eğer bu use case için özel limit varsa uygula
+            if self.use_case in use_case_limits:
+                optimal_limit = use_case_limits[self.use_case]
+                if max_tokens < optimal_limit:
+                    max_tokens = optimal_limit
+                    use_case_name = self.use_case.replace('_', ' ').title()
+                    self.logger.info(f"🔧 Increased max_tokens to {max_tokens} for {use_case_name}")
             
             # Gemini model oluştur
             model = genai.GenerativeModel(self.model_name)

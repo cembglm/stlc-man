@@ -36,6 +36,115 @@ def parse_model_to_provider_info(model_key: str) -> tuple[str, str]:
     else:
         return ("lm_studio", model_key)
 
+async def save_execution_result(
+    process_name: str,
+    model: str,
+    execution_result: Dict[str, Any],
+    test_code: str
+) -> str:
+    """
+    Save test execution result to session_history under processes.test_execution
+    
+    Args:
+        process_name: Test code generation process name
+        model: Model used for execution
+        execution_result: Execution result from MCP server
+        test_code: Test code that was executed
+        
+    Returns:
+        Session ID
+    """
+    try:
+        db = await get_database()
+        collection = db["session_history"]
+        
+        # Generate unique session ID for this execution
+        session_id = f"test-exec-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{process_name.replace(' ', '-')[:20]}"
+        
+        # Parse execution results from terminal output
+        terminal_output = execution_result.get("terminal_output", "")
+        execution_stats = parse_execution_stats(terminal_output)
+        
+        # Create execution record
+        execution_record = {
+            "session_id": session_id,
+            "timestamp": datetime.now().isoformat(),
+            "processes": {
+                "test_execution": {
+                    "status": "completed" if execution_result.get("success") else "failed",
+                    "timestamp": execution_result.get("timestamp", datetime.now().isoformat()),
+                    "process_name": f"Test Execution - {process_name}",
+                    "model_used": model,
+                    "input": {
+                        "code_generation_process_name": process_name,
+                        "model": model,
+                        "test_code_length": len(test_code)
+                    },
+                    "output": {
+                        "success": execution_result.get("success", False),
+                        "terminal_output": terminal_output,
+                        "provider": execution_result.get("provider"),
+                        "model_used": execution_result.get("model_used"),
+                        "execution_results": execution_stats,
+                        "error": execution_result.get("error")
+                    }
+                }
+            }
+        }
+        
+        # Save to database
+        await collection.insert_one(execution_record)
+        
+        logger.info(f"✅ Saved test execution result to session_history: {session_id}")
+        return session_id
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving execution result: {str(e)}")
+        # Don't raise exception, just log error (execution was successful even if save fails)
+        return ""
+
+def parse_execution_stats(terminal_output: str) -> Dict[str, Any]:
+    """
+    Parse execution statistics from terminal output
+    
+    Returns:
+        Dictionary with total_tests, passed, failed, skipped, success_rate
+    """
+    stats = {
+        "total_tests": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0,
+        "success_rate": 0.0
+    }
+    
+    try:
+        # Parse Total Tests
+        total_match = re.search(r'Total Tests:\s*(\d+)', terminal_output)
+        if total_match:
+            stats["total_tests"] = int(total_match.group(1))
+        
+        # Parse Successful
+        passed_match = re.search(r'✅\s*Successful:\s*(\d+)', terminal_output)
+        if passed_match:
+            stats["passed"] = int(passed_match.group(1))
+        
+        # Parse Failed
+        failed_match = re.search(r'❌\s*Failed:\s*(\d+)', terminal_output)
+        if failed_match:
+            stats["failed"] = int(failed_match.group(1))
+        
+        # Calculate success rate
+        if stats["total_tests"] > 0:
+            stats["success_rate"] = round((stats["passed"] / stats["total_tests"]) * 100, 1)
+        
+        logger.info(f"📊 Parsed execution stats: {stats}")
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Error parsing execution stats: {str(e)}")
+    
+    return stats
+
 # MCP Server configuration
 MCP_SERVER_URL = "http://localhost:8001"
 
@@ -536,7 +645,15 @@ async def execute_tests(request: TestExecutionRequest):
         # Get provider info for response
         provider, _ = parse_model_to_provider_info(request.model)
         
-        # Step 3: Return formatted response
+        # Step 3: Save execution results to database
+        await save_execution_result(
+            process_name=request.process_name,
+            model=request.model,
+            execution_result=mcp_result,
+            test_code=test_code
+        )
+        
+        # Step 4: Return formatted response
         return TestExecutionResponse(
             success=mcp_result.get("success", False),
             terminal_output=mcp_result.get("terminal_output", ""),
@@ -747,7 +864,16 @@ async def execute_selected_records(request: SelectedRecordsExecutionRequest) -> 
         # Get provider info for response
         provider, _ = parse_model_to_provider_info(request.model)
         
-        # Step 3: Return formatted response
+        # Step 3: Save execution results to database
+        process_name = f"Selected Records ({len(request.record_ids)} records)"
+        await save_execution_result(
+            process_name=process_name,
+            model=request.model,
+            execution_result=mcp_result,
+            test_code=combined_test_code
+        )
+        
+        # Step 4: Return formatted response
         return TestExecutionResponse(
             success=mcp_result.get("success", False),
             terminal_output=mcp_result.get("terminal_output", ""),
@@ -1184,6 +1310,22 @@ async def execute_selected_tests(request: SelectedTestsExecutionRequest) -> Test
         
         # Get provider info for response
         provider, _ = parse_model_to_provider_info(request.model)
+        
+        # Save batch execution results to database
+        process_name = f"Selected Tests ({len(request.test_ids)} tests)"
+        await save_execution_result(
+            process_name=process_name,
+            model=request.model,
+            execution_result={
+                "success": failed_tests == 0,
+                "terminal_output": combined_output,
+                "provider": provider,
+                "model_used": request.model,
+                "timestamp": datetime.now().isoformat(),
+                "test_results": test_results
+            },
+            test_code=f"Batch execution of {len(request.test_ids)} tests"
+        )
         
         return TestExecutionResponse(
             success=failed_tests == 0,  # Success only if all tests passed

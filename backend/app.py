@@ -21,6 +21,7 @@ from routers.execution_router import router as test_execution_router
 from routers.execution_prompt_router import router as test_execution_prompt_router
 from routers.test_reporting_router import router as test_reporting_router
 from routers.test_reporting_prompt_router import router as test_reporting_prompt_router
+from routers.test_closure_prompt_router import router as test_closure_prompt_router
 from routers.test_closure_router import router as test_closure_router
 # from routers.test_scenario_analytics_router import router as test_scenario_analytics_router
 
@@ -122,6 +123,7 @@ app.include_router(test_execution_prompt_router)  # Test execution prompt router
 app.include_router(test_reporting_router)  # Test reporting router
 app.include_router(test_reporting_prompt_router)  # Test reporting prompt router
 app.include_router(test_closure_router)  # Test closure router
+app.include_router(test_closure_prompt_router)  # Test closure prompt router
 # app.include_router(test_scenario_analytics_router, prefix="/api")  # Test scenario analytics
 
 @app.get("/")

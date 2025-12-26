@@ -11,6 +11,7 @@ from datetime import datetime
 import json
 import re
 from core.database import get_database
+from services.quality_metrics_calculator import quality_calculator
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +22,18 @@ class TestReportingService:
     """
     
     # Process configuration: max items per chunk
+    # Optimized for ~4000 tokens per chunk (≈16000 characters)
     CHUNK_SIZES = {
-        "test_scenario_generation": 20,  # 20 scenarios per chunk
-        "test_case_generation": 50,      # 50 test cases per chunk
-        "test_case_optimization": 30,    # 30 optimized cases per chunk
-        "test_code_generation": 30,      # 30 test codes per chunk
-        "test_execution": 30,            # 30 execution results per chunk
-        "default": 25
+        "test_scenario_generation": 100,  # 100 scenarios per chunk
+        "test_case_generation": 200,      # 200 test cases per chunk
+        "test_case_optimization": 150,    # 150 optimized cases per chunk
+        "test_code_generation": 150,      # 150 test codes per chunk
+        "test_execution": 150,            # 150 execution results per chunk
+        "default": 100
     }
     
-    # Maximum character size per chunk (fallback)
-    MAX_CHUNK_CHARS = 50000
+    # Maximum character size per chunk (≈4000 tokens)
+    MAX_CHUNK_CHARS = 16000
     
     def __init__(self):
         self.db = None
@@ -79,9 +81,10 @@ class TestReportingService:
         # Process and enrich session data
         result = []
         for session in sessions:
-            session_id = session.get("session_id", "unknown")
-            # MongoDB stores timestamp in 'created_at' field
-            created_at = session.get("created_at", "")
+            # Try session_id first, fallback to _id
+            session_id = session.get("session_id") or str(session.get("_id", "unknown"))
+            # MongoDB stores timestamp in either 'created_at' or 'timestamp' field
+            created_at = session.get("created_at") or session.get("timestamp", "")
             processes = session.get("processes", {})
             
             # Filter by process names if specified
@@ -100,11 +103,21 @@ class TestReportingService:
                     count = self._count_process_items(process_name, output)
                     process_summary[process_name] = count
                     
+                    # Get model used from process data (check multiple locations)
+                    model_used = (
+                        process_data.get("model_used") or 
+                        process_data.get("model_name") or 
+                        process_data.get("model") or
+                        process_data.get("used_model") or
+                        process_data.get("input", {}).get("model_name") or
+                        process_data.get("input", {}).get("model")
+                    )
+                    
                     # Collect detailed metadata for each process
                     detail = {
                         "type": process_name,
                         "timestamp": process_data.get("timestamp"),
-                        "model": process_data.get("used_model"),
+                        "model": model_used,  # Can be None
                         "edited_prompt": process_data.get("edited_prompt", False),
                         "item_count": count
                     }
@@ -120,6 +133,31 @@ class TestReportingService:
                         detail.update({
                             "based_on": process_data.get("selected_process_title"),
                             "updated_at": process_data.get("updated_at")
+                        })
+                    elif process_name == "test_code_generation":
+                        # Get process name from different possible locations
+                        input_data = process_data.get("input", {})
+                        detail.update({
+                            "process_name": process_data.get("process_name"),
+                            "code_generation_process_name": process_data.get("code_generation_process_name") or input_data.get("process_title"),
+                            "model_used": process_data.get("model_used") or input_data.get("model_name"),
+                            "framework": process_data.get("output", {}).get("environment_info", {}).get("framework"),
+                            "language": process_data.get("output", {}).get("environment_info", {}).get("language")
+                        })
+                    elif process_name == "test_execution":
+                        # Get execution metadata
+                        input_data = process_data.get("input", {})
+                        output_data = process_data.get("output", {})
+                        exec_results = output_data.get("execution_results", {})
+                        detail.update({
+                            "process_name": process_data.get("process_name"),
+                            "code_generation_process_name": input_data.get("code_generation_process_name"),
+                            "model_used": process_data.get("model_used") or output_data.get("model_used"),
+                            "success": output_data.get("success", False),
+                            "total_tests": exec_results.get("total_tests", 0),
+                            "passed": exec_results.get("passed", 0),
+                            "failed": exec_results.get("failed", 0),
+                            "success_rate": exec_results.get("success_rate", 0.0)
                         })
                     elif process_name == "code_review":
                         detail.update({
@@ -172,30 +210,75 @@ class TestReportingService:
     
     def _count_process_items(self, process_name: str, output: Dict[str, Any]) -> int:
         """Count items in a process output"""
+        logger.info(f"Counting items for process: {process_name}")
+        logger.debug(f"Output keys: {list(output.keys()) if output else 'None'}")
+        
         if process_name == "test_scenario_generation":
-            scenarios = output.get("test_scenarios", [])
+            scenarios = output.get("test_scenarios", {})
+            if isinstance(scenarios, dict):
+                scenarios = scenarios.get("TestScenarios", [])
             return len(scenarios) if isinstance(scenarios, list) else 0
         
         elif process_name == "test_case_generation":
+            # Handle multiple formats
             test_cases = output.get("test_cases", [])
+            if not test_cases:
+                # Try nested format: data.test_case_results
+                data = output.get("data", {})
+                test_case_results = data.get("test_case_results", [])
+                if not test_case_results:
+                    # Try direct format: output.test_case_results
+                    test_case_results = output.get("test_case_results", [])
+                total = sum(len(result.get("test_cases", [])) for result in test_case_results)
+                return total
             return len(test_cases) if isinstance(test_cases, list) else 0
         
         elif process_name == "test_case_optimization":
+            # Try multiple possible keys
             optimized_cases = output.get("optimized_test_cases", [])
+            if not optimized_cases:
+                data = output.get("data", {})
+                optimized_cases = data.get("optimized_results", [])
             return len(optimized_cases) if isinstance(optimized_cases, list) else 0
         
         elif process_name == "test_code_generation":
+            # Try multiple possible paths
             generated_tests = output.get("generated_tests", [])
-            return len(generated_tests) if isinstance(generated_tests, list) else 0
+            if not generated_tests:
+                # Try data.generated_tests path
+                data = output.get("data", {})
+                generated_tests = data.get("generated_tests", [])
+            
+            count = len(generated_tests) if isinstance(generated_tests, list) else 0
+            logger.info(f"test_code_generation count: {count}")
+            return count
         
         elif process_name == "test_execution":
-            # Count from terminal output or results
+            # Try to get execution results
+            execution_results = output.get("execution_results", {})
+            if execution_results:
+                total = execution_results.get("total_tests", 0)
+                if total > 0:
+                    logger.info(f"test_execution count from execution_results: {total}")
+                    return total
+            
+            # Fallback: Count from terminal output
             terminal_output = output.get("terminal_output", "")
             if "Total Tests:" in terminal_output:
                 match = re.search(r'Total Tests: (\d+)', terminal_output)
                 if match:
-                    return int(match.group(1))
-            return 1  # At least one execution
+                    count = int(match.group(1))
+                    logger.info(f"test_execution count from terminal_output: {count}")
+                    return count
+            
+            # Check if we have test_results array
+            test_results = output.get("test_results", [])
+            if isinstance(test_results, list) and test_results:
+                logger.info(f"test_execution count from test_results: {len(test_results)}")
+                return len(test_results)
+            
+            logger.info(f"test_execution: output exists, returning 1")
+            return 1  # At least one execution if output exists
         
         # Default: check if output exists
         return 1 if output else 0
@@ -237,11 +320,20 @@ class TestReportingService:
         for process_name in process_names:
             if process_name in processes_data:
                 process_data = processes_data[process_name]
+                output = process_data.get("output", {})
+                
+                # Calculate objective quality metrics
+                quality_metrics = quality_calculator.calculate_process_quality(
+                    process_name, 
+                    output
+                )
+                
                 selected_data[process_name] = {
                     "input": process_data.get("input", {}),
-                    "output": process_data.get("output", {}),
+                    "output": output,
                     "metadata": process_data.get("metadata", {}),
-                    "timestamp": process_data.get("timestamp", "")
+                    "timestamp": process_data.get("timestamp", ""),
+                    "quality_metrics": quality_metrics  # NEW: Objective quality scores
                 }
         
         return {
@@ -274,17 +366,51 @@ class TestReportingService:
         
         # Process-specific chunking
         if process_name == "test_scenario_generation":
-            scenarios = output.get("test_scenarios", [])
+            scenarios = output.get("test_scenarios", {})
+            if isinstance(scenarios, dict):
+                scenarios = scenarios.get("TestScenarios", [])
             chunks = self._chunk_list(scenarios, chunk_size, "scenarios")
         
         elif process_name == "test_case_generation":
+            # Handle multiple formats
             test_cases = output.get("test_cases", [])
-            chunks = self._chunk_list(test_cases, chunk_size, "test_cases")
+            
+            if not test_cases:
+                # Try nested format: data.test_case_results
+                data = output.get("data", {})
+                test_case_results = data.get("test_case_results", [])
+                if test_case_results:
+                    # Flatten all test cases
+                    all_cases = []
+                    for result in test_case_results:
+                        all_cases.extend(result.get("test_cases", []))
+                    chunks = self._chunk_list(all_cases, chunk_size, "test_cases")
+                else:
+                    # Try direct format: output.test_case_results
+                    test_case_results = output.get("test_case_results", [])
+                    if test_case_results:
+                        all_cases = []
+                        for result in test_case_results:
+                            all_cases.extend(result.get("test_cases", []))
+                        chunks = self._chunk_list(all_cases, chunk_size, "test_cases")
+            else:
+                chunks = self._chunk_list(test_cases, chunk_size, "test_cases")
         
         elif process_name == "test_case_optimization":
+            # Handle both old and new formats
             optimized_cases = output.get("optimized_test_cases", [])
-            before_count = output.get("original_count", 0)
-            after_count = len(optimized_cases) if isinstance(optimized_cases, list) else 0
+            data = output.get("data", {})
+            metadata = output.get("metadata", {})
+            
+            if not optimized_cases:
+                optimized_cases = data.get("optimized_results", [])
+            
+            # Get counts from metadata or calculate
+            before_count = metadata.get("original_count", output.get("original_count", 0))
+            after_count = metadata.get("optimized_count", len(optimized_cases))
+            
+            if before_count == 0 and "total_test_cases" in output:
+                before_count = output.get("total_test_cases", 0)
             
             chunks = self._chunk_list(optimized_cases, chunk_size, "optimized_cases")
             # Add metadata to each chunk
@@ -292,6 +418,7 @@ class TestReportingService:
                 chunk["optimization_metadata"] = {
                     "before_count": before_count,
                     "after_count": after_count,
+                    "reduction_count": before_count - after_count,
                     "reduction_percentage": ((before_count - after_count) / before_count * 100) if before_count > 0 else 0
                 }
         
@@ -629,7 +756,7 @@ Please provide analysis according to the specified analysis level, focusing on t
                 prompt += f"   - Date: {session.get('session_timestamp', 'N/A')}\n"
             
             prompt += """
-You have received BOTH raw session data AND intermediate analysis summaries.
+You have received BOTH raw session data AND intermediate analysis summaries for maximum context.
 
 ---
 
@@ -637,7 +764,7 @@ You have received BOTH raw session data AND intermediate analysis summaries.
 
 """
             
-            # Add raw session data if provided
+            # Add raw session data for detailed analysis
             if raw_session_data:
                 for session_info in raw_session_data:
                     session_id = session_info.get("session_id", "unknown")
@@ -673,27 +800,105 @@ You have received BOTH raw session data AND intermediate analysis summaries.
                                 prompt += f"- Categories: {', '.join(f'{k}({v})' for k, v in categories.items())}\n"
                         
                         elif process_name == "test_case_generation":
+                            # Handle new format
                             test_cases = output.get("test_cases", [])
-                            prompt += f"- Test Cases Generated: {len(test_cases)}\n"
+                            data = output.get("data", {})
+                            
+                            if not test_cases and data:
+                                test_case_results = data.get("test_case_results", [])
+                                all_cases = []
+                                for result in test_case_results:
+                                    all_cases.extend(result.get("test_cases", []))
+                                test_cases = all_cases
+                            
+                            total_cases = len(test_cases)
+                            prompt += f"- Test Cases Generated: {total_cases}\n"
+                            
                             if test_cases and isinstance(test_cases, list):
                                 # Count positive vs negative
-                                positive = sum(1 for tc in test_cases if tc.get("test_type", "").lower() == "positive")
-                                negative = len(test_cases) - positive
+                                positive = 0
+                                negative = 0
+                                for tc in test_cases:
+                                    title = tc.get("Title", "").lower()
+                                    test_type = tc.get("test_type", "").lower()
+                                    if "invalid" in title or "error" in title or "negative" in title or test_type == "negative":
+                                        negative += 1
+                                    else:
+                                        positive += 1
+                                
                                 prompt += f"- Positive/Negative: {positive}/{negative}\n"
+                                ratio = f"{positive/negative:.1f}:1" if negative > 0 else "All positive"
+                                prompt += f"- Test Balance Ratio: {ratio}\n"
+                                
+                                # Count by complexity if available
+                                with_steps = sum(1 for tc in test_cases if tc.get("Steps"))
+                                with_data = sum(1 for tc in test_cases if tc.get("TestData"))
+                                prompt += f"- Cases with Steps: {with_steps}\n"
+                                prompt += f"- Cases with Test Data: {with_data}\n"
                         
                         elif process_name == "test_case_optimization":
-                            unique = len(output.get("unique_test_cases", []))
-                            similar = len(output.get("similar_test_cases", []))
-                            total = output.get("total_test_cases", unique + similar)
-                            reduction = ((similar / total * 100) if total > 0 else 0)
-                            prompt += f"- Original Test Cases: {total}\n"
-                            prompt += f"- Unique Test Cases: {unique}\n"
-                            prompt += f"- Duplicates Removed: {similar}\n"
-                            prompt += f"- Reduction Rate: {reduction:.1f}%\n"
+                            # Handle both new and old formats
+                            data = output.get("data", {})
+                            metadata = output.get("metadata", {})
+                            
+                            # Get optimization results
+                            optimized_results = data.get("optimized_results", [])
+                            unique_cases = output.get("unique_test_cases", [])
+                            similar_cases = output.get("similar_test_cases", [])
+                            
+                            # Use old format if new format not available
+                            if not optimized_results and unique_cases:
+                                optimized_results = unique_cases
+                            
+                            # Get counts
+                            original_count = metadata.get("original_count", output.get("total_test_cases", 0))
+                            optimized_count = metadata.get("optimized_count", len(optimized_results))
+                            
+                            # Old format: total = unique + similar
+                            if original_count == 0 and (unique_cases or similar_cases):
+                                original_count = len(unique_cases) + len(similar_cases)
+                                optimized_count = len(unique_cases)
+                            
+                            # Calculate metrics
+                            removed_count = original_count - optimized_count
+                            reduction_rate = (removed_count / original_count * 100) if original_count > 0 else 0
+                            
+                            prompt += f"\n📊 **Test Case Optimization Metrics:**\n"
+                            prompt += f"- Original Test Cases: {original_count}\n"
+                            
+                            # Old format specifics
+                            if unique_cases or similar_cases:
+                                prompt += f"  - Unique Cases: {len(unique_cases)}\n"
+                                prompt += f"  - Similar/Duplicate Cases: {len(similar_cases)}\n"
+                            
+                            prompt += f"- Optimized (Selected) Test Cases: {optimized_count}\n"
+                            prompt += f"- Test Cases Removed: {removed_count}\n"
+                            prompt += f"- Optimization Rate: {reduction_rate:.1f}%\n"
+                            prompt += f"- Efficiency Gain: {reduction_rate:.1f}% fewer tests needed\n"
+                            
+                            # Add rationale summary if available
+                            if optimized_results:
+                                with_rationale = sum(1 for r in optimized_results if r.get("optimization_rationale"))
+                                if with_rationale > 0:
+                                    prompt += f"- Cases with Rationale: {with_rationale}/{len(optimized_results)}\n"
                         
                         elif process_name == "test_code_generation":
                             tests = output.get("generated_tests", [])
                             prompt += f"- Test Code Files Generated: {len(tests)}\n"
+                        
+                        # Add objective quality metrics
+                        quality_metrics = process_data.get("quality_metrics", {})
+                        if quality_metrics:
+                            prompt += f"\n**Objective Quality Metrics (Calculated):**\n"
+                            prompt += f"- Overall Score: {quality_metrics.get('score', 'N/A')}/10\n"
+                            prompt += f"- Completeness: {quality_metrics.get('completeness', 'N/A')}/10\n"
+                            prompt += f"- Clarity: {quality_metrics.get('clarity', 'N/A')}/10\n"
+                            prompt += f"- Coverage: {quality_metrics.get('coverage', 'N/A')}/10\n"
+                            prompt += f"- Depth: {quality_metrics.get('depth', 'N/A')}/10\n"
+                            
+                            calc_details = quality_metrics.get('calculation_details', {})
+                            if calc_details:
+                                prompt += f"- Calculation Details: {json.dumps(calc_details, indent=2)}\n"
                         
                         # Add model info
                         model_used = metadata.get("model_used", "Unknown")
@@ -725,119 +930,242 @@ The following are AI-generated summaries of the above raw data:
             prompt += """
 ---
 
-## YOUR TASK: Generate Comparison Report
+## YOUR TASK: Generate ISTQB & IEEE 829 Compliant Test Report
 
-Use BOTH the raw data metrics AND the intermediate summaries to create your comprehensive comparison report.
+Use BOTH the raw data metrics AND the intermediate summaries to create your comprehensive test report.
 
-## Required Comparison Report Structure
+**Standards Compliance:**
+- ✅ ISTQB Test Management Standards
+- ✅ IEEE 829-2008 Test Documentation
+- ✅ ISO/IEC/IEEE 29119 Software Testing
 
-Please generate a comprehensive comparison report with the following sections:
+## Required Test Report Structure (IEEE 829 & ISTQB Compliant)
 
-### 📊 Executive Summary
-- Overall comparison overview
-- Key trends across sessions
-- Most significant improvements
-- Critical regressions or issues
-- Recommendation priority
+### 1. 📋 TEST SUMMARY (ISTQB/IEEE 829 Section 1)
 
-### 🔄 Session-by-Session Comparison
+**Report Identification:**
+- Report ID and Version
+- Test sessions analyzed
+- Report generation date
+- Report author/tool
+
+**Test Objectives:**
+- Testing scope and objectives
+- Test completion criteria
+- Overall test mission
+
+**Executive Summary:**
+- Overall test status and completion
+- Key achievements and highlights
+- Critical issues and blockers
+- Go/No-Go recommendation
+
+### 2. 📊 TEST METRICS & COVERAGE (ISTQB Foundation)
+
+**Test Execution Metrics:**
+- Total test cases planned vs executed
+- Test execution progress percentage
+- Pass/Fail/Blocked/Not Run statistics
+- Test efficiency metrics (test execution rate)
+
+**Test Coverage Analysis:**
+- Requirements coverage percentage
+- Code coverage (if applicable)
+- Test scenario coverage
+- Functional area coverage
+- Risk-based coverage assessment
+
+**Trend Analysis:**
+- Test execution trends over time
+- Defect detection trends
+- Coverage improvement trends
+
+### 3. 🐛 DEFECT SUMMARY (IEEE 829 Section 3)
+
+**Defect Statistics:**
+- Total defects found
+- Defects by severity (Critical/High/Medium/Low)
+- Defects by priority
+- Defect detection rate
+- Defect removal efficiency
+
+**Defect Distribution:**
+- Defects by functional area
+- Defects by test phase
+- Root cause analysis summary
+
+**Defect Trends:**
+- Open vs Closed defects
+- Defect aging analysis
+- Fix verification status
+
+### 4. 🎯 TEST COMPLETION CRITERIA (ISTQB Test Manager)
+
+**Entry Criteria Status:**
+- Were all entry criteria met?
+- Deviations and impacts
+
+**Exit Criteria Evaluation:**
+- Test coverage targets achieved
+- Defect closure criteria met
+- Performance criteria satisfied
+- Quality gates passed/failed
+
+**Completion Assessment:**
+- Percentage of exit criteria met
+- Outstanding items preventing completion
+- Risks accepted for release
+
+### 5. 🔄 SESSION-BY-SESSION ANALYSIS
 
 For each session, provide:
-- Session name and timestamp
-- Key metrics and statistics
-- Quality assessment
-- Unique characteristics
+- Session identification and metadata
+- Test objectives and scope
+- Test execution results
+- Key findings and observations
+- Session-specific recommendations
 
-### 📈 Cross-Session Analysis
+### 6. 📈 COMPARATIVE ANALYSIS (Multi-Session)
 
-For each process type, compare:
-- Metric trends (improving/declining/stable)
-- Quality evolution
-- Best practices observed
-- Common patterns and anti-patterns
+**Cross-Session Metrics:**
+- Metric evolution across sessions
+- Performance trends
+- Quality improvements/regressions
+- Best practices identified
 
-### 💡 Insights & Recommendations
+**Process Efficiency:**
+- Test design efficiency
+- Test execution efficiency
+- Defect detection efficiency
+- Process improvement opportunities
 
-Provide:
-- **What Improved:** Highlight positive trends and improvements
-- **What Regressed:** Identify declining metrics or quality issues
-- **What Remained Consistent:** Note stable aspects
-- **Actionable Next Steps:** Specific, prioritized recommendations for future sessions
+### 7. ⚠️ RISK ASSESSMENT (ISTQB Risk-Based Testing)
 
-### 📋 Comparative Metrics Dashboard
+**Product Risks:**
+- Identified quality risks
+- Risk severity and likelihood
+- Risk mitigation status
+- Residual risks
 
-Create comparison tables showing:
-- Session-by-session metrics
-- Process-by-process comparison
-- Trends and deltas
-- Performance scores
+**Project Risks:**
+- Schedule risks
+- Resource risks
+- Technical risks
+- Mitigation strategies
 
-### ⚠️ Risk Assessment
+**Risk-Based Test Coverage:**
+- High-risk areas coverage
+- Risk vs test effort allocation
+- Risk-based prioritization effectiveness
 
-Identify:
-- Cross-session quality concerns
-- Regression risks
-- Process consistency issues
-- Mitigation recommendations
+### 8. 💡 RECOMMENDATIONS & ACTION ITEMS (IEEE 829 Section 8)
+
+**Test Process Improvements:**
+- Process optimization recommendations
+- Tool and automation opportunities
+- Training needs identified
+- Best practices to adopt
+
+**Product Quality Actions:**
+- Critical defects requiring attention
+- Quality improvement areas
+- Performance optimization needs
+- Technical debt items
+
+**Next Steps:**
+- Prioritized action items
+- Ownership and timelines
+- Success criteria
+- Follow-up requirements
+
+### 9. 📊 APPENDICES (IEEE 829)
+
+**Supporting Data:**
+- Detailed test metrics tables
+- Test case execution logs
+- Environment configuration
+- Test data used
+- Tools and versions
 
 ---
 
+**📚 STANDARDS COMPLIANCE TABLE**
+
+Include this table in your report to show which standards were applied:
+
+| Standard | Version/Level | Purpose | Coverage Areas |
+|----------|---------------|---------|----------------|
+| **ISTQB Foundation Level** | Foundation | Basic test reporting concepts and terminology | - Test process methodology<br>- Basic metric definitions<br>- Test completion criteria<br>- Basic quality indicators |
+| **ISTQB Test Manager** | Advanced | Advanced test management and strategic reporting | - Management-level reporting<br>- Risk-based test assessment<br>- Comparative analysis<br>- Trend analysis and forecasting<br>- Resource optimization recommendations |
+| **IEEE 829-2008** | 2008 | Test documentation structure and content standards | - Report section structure (8 main sections)<br>- Test summary format<br>- Metric reporting templates<br>- Appendix and reference management<br>- Formal documentation requirements |
+| **ISO/IEC/IEEE 29119-3** | Part 3 (Test Documentation) | Modern test documentation best practices | - Current documentation approaches<br>- Flexible report structures<br>- Quality assessment metrics<br>- Agile/modern methodology compliance<br>- International compatibility |
+
+---
+
+**Reporting Standards Applied:**
+- 📘 ISTQB Foundation Level (Test Reporting)
+- 📘 ISTQB Test Manager (Advanced Reporting)
+- 📘 IEEE 829-2008 (Test Documentation)
+- 📘 ISO/IEC/IEEE 29119-3 (Test Documentation)
+
+---
+
+## OUTPUT FORMAT REQUIREMENTS
+
+**CRITICAL:** Generate a clean, professional Markdown report following the structure above.
+
 **Formatting Guidelines:**
-- Use clear Markdown formatting
-- Include emojis for visual clarity
-- Use comparison tables extensively
-- Show trends with arrows (↑ ↓ →)
-- Highlight regressions with 🔴 and improvements with 🟢
-- Use bullet points for detailed lists
-- Include session names for clarity
+- Use clear heading hierarchy (##, ###, ####)
+- Include emoji icons for main sections (📋, 📊, 🐛, 🎯, etc.)
+- Create well-formatted tables using Markdown syntax
+- Use bullet points and numbered lists appropriately
+- Add horizontal rules (---) to separate major sections
+- Keep language professional and objective
 
-**Analysis Depth Level: {analysis_depth.upper()}**
-"""
-            if analysis_depth == "summary":
-                prompt += """
-- Provide HIGH-LEVEL overview only
-- Focus on critical findings and trends
-- Keep sections concise (2-3 key points each)
-- Prioritize executive summary and actionable recommendations
-"""
-            elif analysis_depth == "detailed":
-                prompt += """
-- Provide COMPREHENSIVE analysis with supporting data (RECOMMENDED)
-- Include specific examples from each session
-- Balance breadth and depth across all sections
-- Provide detailed metrics and comparisons
-"""
-            elif analysis_depth == "deep":
-                prompt += """
-- Provide IN-DEPTH investigation with extensive insights
-- Include detailed pattern analysis and edge cases
-- Extensive examples and data points
-- Deep dive into quality indicators and trends
-- Comprehensive recommendations with implementation details
+**Start your report with:**
+```
+# 📊 Comprehensive Test Report
+*Standards: ISTQB Foundation/Test Manager, IEEE 829-2008, ISO/IEC/IEEE 29119-3*
+
+---
+```
+
+**Then follow with all sections in order, using the structure outlined above.**
+
+Generate a complete, professionally formatted Markdown document now:
 """
             
-            prompt += """
-**Analysis Focus:**
-- Emphasize differences and changes between sessions
-- Identify patterns and trends
-- Provide data-driven insights
-- Recommend specific actions
-
-Generate the comprehensive comparison report now.
-"""
+            return prompt
+    
+    def create_single_session_prompt(
+        self,
+        session_data: Dict[str, Any],
+        analysis_depth: str = "detailed"
+    ) -> str:
+        """
+        Create prompt for single session analysis
         
-        else:
-            # Single session mode (original logic)
-            # Group summaries by process
-            process_summaries = {}
-            for summary in intermediate_summaries:
-                process = summary.get("process_name", "unknown")
-                if process not in process_summaries:
-                    process_summaries[process] = []
-                process_summaries[process].append(summary.get("summary", ""))
+        Args:
+            session_data: Single session data with processes
+            analysis_depth: Level of analysis detail
             
-            # Build prompt
-            prompt = f"""You are a Senior Test Manager creating a comprehensive STLC report.
+        Returns:
+            Formatted prompt string
+        """
+        session_metadata = session_data.get("metadata", {})
+        raw_session_data = session_data.get("raw_data", [])
+        intermediate_summaries = session_data.get("summaries", [])
+        
+        # Group summaries by process
+        process_summaries = {}
+        for summary in intermediate_summaries:
+            process = summary.get("process_name", "unknown")
+            if process not in process_summaries:
+                process_summaries[process] = []
+            process_summaries[process].append(summary.get("summary", ""))
+        
+        # Build prompt
+        prompt = f"""You are a Senior Test Manager creating a comprehensive STLC report.
 
 **Session Information:**
 - Session ID: {session_metadata.get('session_id', 'N/A')}
@@ -852,41 +1180,81 @@ You have received BOTH raw session data AND intermediate analysis summaries.
 ## RAW SESSION DATA (For Your Reference)
 
 """
+        
+        # Add raw session data if provided (single session)
+        if raw_session_data and len(raw_session_data) > 0:
+            session_info = raw_session_data[0]
+            session_data_inner = session_info.get("data", {})
             
-            # Add raw session data if provided (single session)
-            if raw_session_data and len(raw_session_data) > 0:
-                session_info = raw_session_data[0]
-                session_data = session_info.get("data", {})
+            for process_name, process_data in session_data_inner.get("processes", {}).items():
+                output = process_data.get("output", {})
+                metadata = process_data.get("metadata", {})
                 
-                for process_name, process_data in session_data.get("processes", {}).items():
-                    output = process_data.get("output", {})
-                    metadata = process_data.get("metadata", {})
+                prompt += f"\n### {process_name.replace('_', ' ').title()}\n"
+                
+                # Extract key metrics
+                if process_name == "requirement_analysis":
+                    req_count = len(output.get("requirements", []))
+                    prompt += f"- Requirements Analyzed: {req_count}\n"
                     
-                    prompt += f"\n### {process_name.replace('_', ' ').title()}\n"
+                elif process_name == "test_scenario_generation":
+                    scenarios = output.get("test_scenarios", [])
+                    prompt += f"- Scenarios Generated: {len(scenarios)}\n"
                     
-                    # Extract key metrics
-                    if process_name == "requirement_analysis":
-                        req_count = len(output.get("requirements", []))
-                        prompt += f"- Requirements Analyzed: {req_count}\n"
+                elif process_name == "test_case_generation":
+                    # Handle new format
+                    test_cases = output.get("test_cases", [])
+                    data = output.get("data", {})
+                    
+                    if not test_cases and data:
+                        test_case_results = data.get("test_case_results", [])
+                        all_cases = []
+                        for result in test_case_results:
+                            all_cases.extend(result.get("test_cases", []))
+                        test_cases = all_cases
                         
-                    elif process_name == "test_scenario_generation":
-                        scenarios = output.get("test_scenarios", [])
-                        prompt += f"- Scenarios Generated: {len(scenarios)}\n"
+                        total_cases = len(test_cases)
+                        prompt += f"- Test Cases Generated: {total_cases}\n"
                         
-                    elif process_name == "test_case_generation":
-                        test_cases = output.get("test_cases", [])
-                        prompt += f"- Test Cases Generated: {len(test_cases)}\n"
                         if test_cases and isinstance(test_cases, list):
-                            positive = sum(1 for tc in test_cases if tc.get("test_type", "").lower() == "positive")
-                            negative = len(test_cases) - positive
+                            # Count positive/negative
+                            positive = 0
+                            negative = 0
+                            for tc in test_cases:
+                                title = tc.get("Title", "").lower()
+                                test_type = tc.get("test_type", "").lower()
+                                if any(word in title for word in ["invalid", "error", "negative", "fail"]) or test_type == "negative":
+                                    negative += 1
+                                else:
+                                    positive += 1
+                            
                             prompt += f"- Positive/Negative: {positive}/{negative}\n"
+                            ratio = f"{positive/negative:.1f}:1" if negative > 0 else "All positive"
+                            prompt += f"- Test Balance: {ratio}\n"
                     
                     elif process_name == "test_case_optimization":
-                        unique = len(output.get("unique_test_cases", []))
-                        similar = len(output.get("similar_test_cases", []))
-                        total = output.get("total_test_cases", unique + similar)
-                        reduction = ((similar / total * 100) if total > 0 else 0)
-                        prompt += f"- Original: {total}, Unique: {unique}, Removed: {similar} ({reduction:.1f}% reduction)\n"
+                        # Handle new format
+                        data = output.get("data", {})
+                        metadata = output.get("metadata", {})
+                        
+                        original_count = metadata.get("original_count", output.get("total_test_cases", 0))
+                        optimized_count = metadata.get("optimized_count", 0)
+                        
+                        if optimized_count == 0:
+                            optimized_results = data.get("optimized_results", [])
+                            optimized_count = len(optimized_results)
+                        
+                        # Also try old format
+                        if original_count == 0:
+                            unique = len(output.get("unique_test_cases", []))
+                            similar = len(output.get("similar_test_cases", []))
+                            original_count = unique + similar
+                            optimized_count = unique
+                        
+                        removed = original_count - optimized_count
+                        reduction = (removed / original_count * 100) if original_count > 0 else 0
+                        
+                        prompt += f"- Original: {original_count}, Selected: {optimized_count}, Removed: {removed} ({reduction:.1f}% reduction)\n"
                     
                     elif process_name == "test_code_generation":
                         tests = output.get("generated_tests", [])
@@ -915,60 +1283,245 @@ The following are AI-generated summaries of the above raw data:
             prompt += """
 ---
 
-## YOUR TASK: Generate Executive Report
+## YOUR TASK: Generate ISTQB & IEEE 829 Compliant Test Report
 
-Use BOTH the raw data metrics AND the intermediate summaries to create your comprehensive report.
+Use BOTH the raw data metrics AND the intermediate summaries to create your comprehensive test report.
 
-## Required Report Structure
+**Standards Compliance:**
+- ✅ ISTQB Test Management Standards
+- ✅ IEEE 829-2008 Test Documentation
+- ✅ ISO/IEC/IEEE 29119 Software Testing
 
-Please generate a comprehensive executive report with the following sections:
+## Required Single-Session Test Report Structure
 
-### 📊 Executive Summary
-- Overall test quality score (X/10)
-- Key achievements across all processes
-- Critical issues that need immediate attention
-- High-level statistics
+### 1. 📋 TEST SUMMARY (IEEE 829 Section 1)
 
-### 📈 Process Breakdown
+**Report Identification:**
+- Session ID and date
+- Test objectives
+- Testing scope
+- Report status
 
-For each analyzed process, provide:
-- Key metrics and statistics
+**Executive Summary:**
+- Overall test completion status
+- Key achievements
+- Critical findings
+- Test effectiveness assessment
+
+### 2. 📊 TEST METRICS & RESULTS (ISTQB Foundation)
+
+**Test Execution Metrics:**
+- Total test artifacts created
+- Quality scores per process
+- Efficiency metrics
+- Coverage statistics
+
+**Process-Specific Results:**
+For each STLC process analyzed:
+- Process objectives achieved
+- Quantitative metrics
 - Quality assessment
-- Strengths and weaknesses
-- Notable findings
+- Effectiveness rating
 
-### 💡 Insights & Recommendations
+### 3. 🎯 QUALITY ASSESSMENT (ISTQB)
 
-Provide:
-- **What Went Well:** Highlight successful aspects
-- **What Needs Improvement:** Identify gaps and issues
-- **Actionable Next Steps:** Specific, prioritized recommendations
+**Objective Quality Metrics:**
+- Completeness score (0-10)
+- Clarity and documentation (0-10)
+- Coverage adequacy (0-10)
+- Overall quality rating (0-10)
 
-### 📋 Metrics Dashboard
+**Quality Indicators:**
+- Test artifact quality
+- Process adherence
+- Best practices compliance
+- Areas of excellence
 
-Create a summary table with key metrics across all processes:
-- Coverage metrics
-- Quality scores
-- Efficiency indicators
-- Success rates
+### 4. 📈 PROCESS BREAKDOWN
 
-### ⚠️ Risk Assessment
+For each analyzed STLC process:
+- **Process Name & Scope**
+- **Key Deliverables**
+- **Quantitative Metrics**
+- **Quality Evaluation**
+- **Strengths Identified**
+- **Improvement Areas**
+- **Process Recommendations**
 
-Identify:
-- Critical risks in the testing process
-- Quality concerns
-- Process gaps
-- Mitigation recommendations
+### 5. ⚠️ RISK ASSESSMENT (ISTQB Risk-Based Testing)
+
+**Identified Risks:**
+- Quality risks
+- Coverage gaps
+- Process weaknesses
+- Technical concerns
+
+**Risk Mitigation:**
+- Recommended actions
+- Priority levels
+- Resource requirements
+- Expected outcomes
+
+### 6. 💡 RECOMMENDATIONS & ACTION ITEMS (IEEE 829)
+
+**Immediate Actions (High Priority):**
+- Critical improvements needed
+- Quick wins available
+- Blocker resolutions
+
+**Short-Term Improvements:**
+- Process enhancements
+- Quality improvements
+- Tool/automation needs
+
+**Long-Term Strategic Actions:**
+- Process maturity improvements
+- Capability building
+- Best practice adoption
+
+### 7. 📊 METRICS DASHBOARD
+
+**Summary Table:**
+| Process | Artifacts | Quality Score | Coverage | Status |
+|---------|-----------|--------------|----------|---------|
+| ...     | ...       | .../10       | ...%     | ✅/⚠️   |
+
+**Trend Indicators:**
+- Process efficiency trends
+- Quality evolution
+- Coverage progression
+
+### 8. 📋 APPENDICES (IEEE 829)
+
+**Supporting Documentation:**
+- Detailed metrics
+- Test artifacts summary
+- Environment details
+- Model and tool information
 
 ---
 
+**Reporting Standards Applied:**
+- 📘 ISTQB Foundation Level (Test Reporting)
+- 📘 IEEE 829-2008 (Test Documentation)
+- 📘 ISO/IEC/IEEE 29119-3 (Test Documentation)
+
+---
+
+## OUTPUT FORMAT: Structured JSON
+
+Please provide the report in the following JSON structure:
+
+```json
+{
+  "report_metadata": {
+    "report_id": "string",
+    "session_id": "string",
+    "generation_date": "ISO date",
+    "standards_applied": ["ISTQB", "IEEE 829", "ISO/IEC/IEEE 29119"],
+    "analysis_depth": "string"
+  },
+  "sections": {
+    "test_summary": {
+      "title": "TEST SUMMARY",
+      "icon": "📋",
+      "content": "markdown content...",
+      "key_metrics": {
+        "overall_quality": number,
+        "completion_status": "string"
+      }
+    },
+    "test_metrics": {
+      "title": "TEST METRICS & RESULTS",
+      "icon": "📊",
+      "content": "markdown content..."
+    },
+    "quality_assessment": {
+      "title": "QUALITY ASSESSMENT",
+      "icon": "🎯",
+      "content": "markdown content...",
+      "scores": {
+        "completeness": number,
+        "clarity": number,
+        "coverage": number,
+        "overall": number
+      }
+    },
+    "process_breakdown": {
+      "title": "PROCESS BREAKDOWN",
+      "icon": "📈",
+      "content": "markdown content..."
+    },
+    "risk_assessment": {
+      "title": "RISK ASSESSMENT",
+      "icon": "⚠️",
+      "content": "markdown content..."
+    },
+    "recommendations": {
+      "title": "RECOMMENDATIONS & ACTION ITEMS",
+      "icon": "💡",
+      "content": "markdown content..."
+    },
+    "metrics_dashboard": {
+      "title": "METRICS DASHBOARD",
+      "icon": "📊",
+      "content": "markdown content..."
+    },
+    "appendices": {
+      "title": "APPENDICES",
+      "icon": "📋",
+      "content": "markdown content..."
+    }
+  },
+  "full_report_markdown": "Complete markdown version for fallback..."
+---
+
+**Reporting Standards Applied:**
+- 📘 ISTQB Foundation Level (Test Reporting)
+- 📘 IEEE 829-2008 (Test Documentation)
+- 📘 ISO/IEC/IEEE 29119-3 (Test Documentation)
+
+---
+
+**📚 STANDARDS COMPLIANCE TABLE**
+
+Include this table in your report (in Appendices section) to show which standards were applied:
+
+| Standard | Version/Level | Purpose | Coverage Areas |
+|----------|---------------|---------|----------------|
+| **ISTQB Foundation Level** | Foundation | Basic test reporting concepts and terminology | - Test process methodology<br>- Basic metric definitions<br>- Test completion criteria<br>- Basic quality indicators |
+| **ISTQB Test Manager** | Advanced | Advanced test management and strategic reporting | - Management-level reporting<br>- Risk-based test assessment<br>- Comparative analysis<br>- Trend analysis and forecasting<br>- Resource optimization recommendations |
+| **IEEE 829-2008** | 2008 | Test documentation structure and content standards | - Report section structure (8 main sections)<br>- Test summary format<br>- Metric reporting templates<br>- Appendix and reference management<br>- Formal documentation requirements |
+| **ISO/IEC/IEEE 29119-3** | Part 3 (Test Documentation) | Modern test documentation best practices | - Current documentation approaches<br>- Flexible report structures<br>- Quality assessment metrics<br>- Agile/modern methodology compliance<br>- International compatibility |
+
+---
+
+## OUTPUT FORMAT REQUIREMENTS
+
+**CRITICAL:** Generate a clean, professional Markdown report following the structure above.
+
 **Formatting Guidelines:**
-- Use clear Markdown formatting
-- Include emojis for visual clarity
-- Use tables for metrics
+- Use clear heading hierarchy (##, ###, ####)
+- Include emoji icons for main sections (📋, 📊, 🎯, etc.)
+- Create well-formatted tables using Markdown syntax
+- Use bullet points and numbered lists appropriately
+- Add horizontal rules (---) to separate major sections
+- Use professional Markdown formatting
+- Include quantitative metrics and scores
+- Use standardized terminology
+- Provide visual tables and comparisons
+- Reference applicable standards
 - Use bullet points for lists
 - Highlight critical items with ⚠️ or 🔴
 - Highlight positive items with ✅ or 🟢
+
+**Start your report with:**
+```
+# 📊 Test Session Report
+*Standards: ISTQB Foundation, IEEE 829-2008, ISO/IEC/IEEE 29119-3*
+
+---
+```
 
 **Analysis Depth Level: {analysis_depth.upper()}**
 """
@@ -1032,11 +1585,31 @@ Generate the comprehensive report now.
             "session_ids": session_ids  # Store all related session IDs
         }
         
-        # Update all related session documents
+        # Prepare process data for test_reporting
+        process_data = {
+            "status": "completed",
+            "timestamp": datetime.now().isoformat(),
+            "process_name": f"Test Reporting - {len(session_ids)} session(s)",
+            "model_used": metadata.get("model"),
+            "input": {
+                "session_ids": session_ids,
+                "analysis_depth": metadata.get("analysis_depth"),
+                "process_names": metadata.get("process_names", [])
+            },
+            "output": {
+                "success": True,
+                "report_id": report_id,
+                "report_content": report_content,
+                "generated_at": datetime.now().isoformat(),
+                "metadata": metadata
+            }
+        }
+        
+        # Update all related session documents - save to processes.test_reporting
         for session_id in session_ids:
             await collection.update_one(
                 {"session_id": session_id},
-                {"$push": {"reports": report_data}}
+                {"$set": {"processes.test_reporting": process_data}}
             )
         
         logger.info(f"Report saved: {report_id} for {len(session_ids)} session(s)")

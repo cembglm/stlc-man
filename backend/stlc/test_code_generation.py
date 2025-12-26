@@ -112,10 +112,14 @@ async def generate_test_code(
     files: List[UploadFile] = File(...),
     model: Optional[str] = Form("llama3.2:3b"),
     api_key: Optional[str] = Form(None),
-    session_id: Optional[str] = Form(None)
+    session_id: Optional[str] = Form(None),
+    environment_name: Optional[str] = Form(None),
+    output_format: Optional[str] = Form("JSON"),
+    custom_prompt: Optional[str] = Form(None)
 ):
     """
     Legacy endpoint for test code generation (backward compatibility)
+    Now supports all parameters from /run endpoint
     """
     try:
         if not files:
@@ -127,10 +131,16 @@ async def generate_test_code(
         if not environment_session_id:
             raise HTTPException(status_code=400, detail="Environment session ID is required")
         
+        # Validate environment_name is provided
+        if not environment_name or environment_name.strip() == "":
+            raise HTTPException(status_code=400, detail="Test Code Generation Process Name is required")
+        
         logger.info(f"Generating test code for process: {process_title}")
         logger.info(f"Using environment session: {environment_session_id}")
         logger.info(f"Uploaded files count: {len(files)}")
         logger.info(f"Using model: {model}")
+        logger.info(f"Environment name: {environment_name}")
+        logger.info(f"Output format: {output_format}")
         logger.info(f"API key provided: {'Yes' if api_key else 'No'}")
         if api_key:
             logger.info(f"API key preview: {api_key[:15]}...")
@@ -142,7 +152,10 @@ async def generate_test_code(
             source_files=files,
             model_name=model,
             api_key=api_key,
-            session_id=session_id
+            session_id=session_id,
+            environment_name=environment_name,
+            output_format=output_format,
+            custom_prompt=custom_prompt
         )
         
         return result
