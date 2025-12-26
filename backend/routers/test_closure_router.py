@@ -39,6 +39,7 @@ class ClosureReportRequest(BaseModel):
     date_to: Optional[str] = None
     model: str  # e.g., "llama3.2:3b", "gemini-2.0-flash-exp"
     api_key: Optional[str] = None  # Required for Gemini
+    custom_prompt: Optional[str] = None  # Optional custom prompt override
 
 
 class ClosureMetricsResponse(BaseModel):
@@ -310,23 +311,23 @@ async def get_closure_metrics(request: SessionFilterRequest):
         )
 
 
-@router.post("/generate-report", response_model=ClosureReportResponse)
-async def generate_closure_report(request: ClosureReportRequest):
+@router.post("/preview-prompt")
+async def preview_closure_prompt(request: SessionFilterRequest):
     """
-    Generate AI-powered test closure report
+    Preview the AI prompt that would be generated for test closure report
+    WITHOUT actually calling the LLM or generating the report
     
-    Steps:
-    1. Aggregate metrics from sessions
-    2. Generate AI prompt with metrics
-    3. Call LLM to generate comprehensive report
-    4. Return report with metadata
+    This allows users to:
+    - See what prompt will be used
+    - Edit the prompt before generating the report
+    - Understand what data will be analyzed
+    
+    Returns the generated prompt, metrics summary, and metadata
     """
     try:
-        logger.info(f"[TestClosure] Generating report for sessions: {request.session_ids}")
-        logger.info(f"[TestClosure] Using model: {request.model}")
-        logger.info(f"[TestClosure] Request object: session_ids={request.session_ids}, model={request.model}, api_key={'***' if request.api_key else None}")
+        logger.info(f"[TestClosure] Previewing prompt for sessions: {request.session_ids}")
         
-        # Step 1: Generate metrics and prompt
+        # Generate metrics and prompt
         result = await test_closure_service.generate_closure_report(
             session_ids=request.session_ids,
             date_from=request.date_from,
@@ -334,16 +335,92 @@ async def generate_closure_report(request: ClosureReportRequest):
         )
         
         if not result["success"]:
-            return ClosureReportResponse(
-                success=False,
-                error=result.get("error", "Failed to generate closure data")
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("error", "Failed to generate prompt preview")
             )
         
-        metrics = result["metrics"]
         prompt = result["prompt"]
+        metrics = result["metrics"]
         
-        logger.info(f"[TestClosure] Metrics aggregated. Calling LLM...")
-        logger.info(f"[TestClosure] Prompt length: {len(prompt)} characters")
+        # Calculate prompt statistics
+        prompt_length = len(prompt)
+        estimated_tokens = prompt_length // 4  # Rough estimation: 1 token ≈ 4 characters
+        
+        # Check if chunking was used
+        uses_chunking = test_closure_service._should_chunk_data(metrics)
+        
+        return {
+            "success": True,
+            "prompt": prompt,
+            "sessions_analyzed": result["sessions_analyzed"],
+            "prompt_length": prompt_length,
+            "estimated_tokens": estimated_tokens,
+            "uses_chunking": uses_chunking,
+            "metrics_summary": {
+                "total_sessions": metrics["total_sessions"],
+                "test_scenarios": metrics["test_scenarios"]["total"],
+                "test_cases": metrics["test_cases"]["total_generated"],
+                "test_execution": metrics["test_execution"]["total_executed"],
+                "pass_rate": metrics["test_execution"]["pass_rate"],
+                "defects": metrics["defects"]["total"]
+            },
+            "message": "Prompt preview generated successfully. You can edit this prompt before generating the report."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error previewing closure prompt: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to preview prompt: {str(e)}"
+        )
+
+
+@router.post("/generate-report", response_model=ClosureReportResponse)
+async def generate_closure_report(request: ClosureReportRequest):
+    """
+    Generate AI-powered test closure report
+    
+    Supports custom prompt override for user-edited prompts
+    
+    Steps:
+    1. Aggregate metrics from sessions (if custom_prompt not provided)
+    2. Use custom_prompt OR generate AI prompt with metrics
+    3. Call LLM to generate comprehensive report
+    4. Return report with metadata
+    """
+    try:
+        logger.info(f"[TestClosure] Generating report for sessions: {request.session_ids}")
+        logger.info(f"[TestClosure] Using model: {request.model}")
+        logger.info(f"[TestClosure] Custom prompt provided: {bool(request.custom_prompt)}")
+        
+        # Determine which prompt to use
+        if request.custom_prompt:
+            # User provided custom edited prompt
+            prompt = request.custom_prompt
+            metrics = None  # Metrics not needed when using custom prompt
+            logger.info(f"[TestClosure] Using custom prompt (length: {len(prompt)} characters)")
+        else:
+            # Generate default prompt with metrics
+            result = await test_closure_service.generate_closure_report(
+                session_ids=request.session_ids,
+                date_from=request.date_from,
+                date_to=request.date_to
+            )
+            
+            if not result["success"]:
+                return ClosureReportResponse(
+                    success=False,
+                    error=result.get("error", "Failed to generate closure data")
+                )
+            
+            metrics = result["metrics"]
+            prompt = result["prompt"]
+            logger.info(f"[TestClosure] Using generated prompt (length: {len(prompt)} characters)")
+        
+        logger.info(f"[TestClosure] Calling LLM with prompt...")
         
         # Step 2: Call LLM to generate report
         provider, model_name = parse_model_to_provider_info(request.model)
@@ -407,9 +484,13 @@ async def get_available_sessions(
             processes = session.get("processes", {})
             process_names = list(processes.keys())
             
+            # Support both timestamp and created_at fields for consistency
+            session_timestamp = session.get("timestamp") or session.get("created_at")
+            
             session_list.append({
                 "session_id": session.get("session_id"),
-                "created_at": session.get("created_at"),
+                "timestamp": session_timestamp,  # Primary field
+                "created_at": session_timestamp,  # Fallback for compatibility
                 "process_count": len(process_names),
                 "processes": process_names
             })

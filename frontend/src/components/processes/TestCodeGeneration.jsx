@@ -285,6 +285,18 @@ const TestCodeGeneration = ({
           formData.append('files', formDataObj.selected_file.file, formDataObj.selected_file.name);
         }
         
+        console.log('🚀 Test Code Generation - Sending API request...');
+        console.log('📦 FormData contents:');
+        for (let pair of formData.entries()) {
+          if (pair[0] === 'api_key') {
+            console.log(`  ${pair[0]}: ${pair[1] ? pair[1].substring(0, 10) + '...' : 'NOT SET'}`);
+          } else if (pair[0] === 'files') {
+            console.log(`  ${pair[0]}: ${pair[1].name} (${pair[1].size} bytes)`);
+          } else {
+            console.log(`  ${pair[0]}: ${pair[1]}`);
+          }
+        }
+        
         // Call the test code generation API (no timeout - let backend handle long operations)
         const response = await api.post('/api/processes/test-code-generation/generate', formData, {
           headers: {
@@ -292,8 +304,13 @@ const TestCodeGeneration = ({
           }
         });
         
+        console.log('✅ Test Code Generation - Response received:', response.data);
+        console.log('✅ Response success field:', response.data?.success);
+        
         if (response.data.success) {
             toast.success(`Test codes generated successfully! Generated ${response.data.generated_count} test cases.`);
+            
+            console.log('🎯 Test Code Generation - Full response data:', response.data);
             
             // Prepare formatted result for display
             const formattedResult = {
@@ -311,14 +328,19 @@ const TestCodeGeneration = ({
               environment_info: response.data.environment_info || {}
             };
             
+            console.log('🎯 Test Code Generation - Formatted result:', formattedResult);
+            
             // Set output for display in OutputPanel
-            onSetOutput('test-code-generation', {
+            const outputData = {
               type: 'test-code-generation',
               result: formattedResult,
               status: 'success',
               sessionId: sessionId,
               timestamp: new Date().toISOString()
-            });
+            };
+            
+            console.log('🎯 Test Code Generation - Calling onSetOutput with:', outputData);
+            onSetOutput('test-code-generation', outputData);
           }
       } catch (err) {
         console.error('Error executing test code generation:', err);

@@ -18,7 +18,19 @@ class TestClosureService:
     """
     Service for generating AI-powered test closure reports
     Aggregates data from all STLC processes and creates comprehensive closure analysis
+    Includes chunking support for large datasets
     """
+    
+    # Chunk sizes for large data aggregation
+    CHUNK_SIZES = {
+        "test_scenarios": 50,
+        "test_cases": 100,
+        "test_execution": 50,
+        "defects": 30,
+        "default": 50
+    }
+    
+    MAX_CHUNK_CHARS = 80000  # Maximum characters per chunk
     
     def __init__(self):
         self.db = None
@@ -27,6 +39,89 @@ class TestClosureService:
         """Initialize database connection"""
         if self.db is None:
             self.db = await get_database()
+    
+    def _should_chunk_data(self, metrics: Dict[str, Any]) -> bool:
+        """
+        Determine if data should be chunked based on size
+        
+        Args:
+            metrics: Aggregated metrics dictionary
+            
+        Returns:
+            True if chunking is needed, False otherwise
+        """
+        # Check total sessions
+        if metrics.get("total_sessions", 0) > 10:
+            return True
+        
+        # Check test scenarios count
+        if metrics.get("test_scenarios", {}).get("total", 0) > self.CHUNK_SIZES["test_scenarios"]:
+            return True
+        
+        # Check test cases count
+        if metrics.get("test_cases", {}).get("total_generated", 0) > self.CHUNK_SIZES["test_cases"]:
+            return True
+        
+        # Check test execution count
+        if metrics.get("test_execution", {}).get("total_executed", 0) > self.CHUNK_SIZES["test_execution"]:
+            return True
+        
+        # Check failed tests (potential defects)
+        if len(metrics.get("defects", {}).get("from_failed_tests", [])) > self.CHUNK_SIZES["defects"]:
+            return True
+        
+        return False
+    
+    def _create_chunked_summary(self, metrics: Dict[str, Any]) -> str:
+        """
+        Create a summarized version of metrics for chunked data
+        
+        Args:
+            metrics: Full metrics dictionary
+            
+        Returns:
+            Summarized text suitable for AI processing
+        """
+        summary = f"""# CHUNKED DATA SUMMARY (Large Dataset)
+        
+**Note**: Due to the large volume of data, detailed information has been aggregated and summarized.
+
+## Overview
+- Total Sessions: {metrics['total_sessions']}
+- Date Range: {metrics['date_range']['start']} to {metrics['date_range']['end']}
+- Models Used: {', '.join(metrics['models_used'])}
+
+## Test Scenarios Summary
+- Total Scenarios: {metrics['test_scenarios']['total']}
+- Top Categories: {', '.join(list(metrics['test_scenarios']['by_category'].keys())[:5])}
+- Top Types: {', '.join(list(metrics['test_scenarios']['by_type'].keys())[:5])}
+
+## Test Cases Summary
+- Total Generated: {metrics['test_cases']['total_generated']}
+- Total Optimized: {metrics['test_cases']['total_optimized']}
+- Optimization Rate: {metrics['test_cases']['optimization_rate']}%
+
+## Test Execution Summary
+- Total Executed: {metrics['test_execution']['total_executed']}
+- Passed: {metrics['test_execution']['passed']} ({metrics['test_execution']['pass_rate']}%)
+- Failed: {metrics['test_execution']['failed']}
+- Skipped: {metrics['test_execution']['skipped']}
+
+## Defect Summary
+- Total Defects: {metrics['defects']['total']}
+- Critical: {metrics['defects']['critical']}
+- Major: {metrics['defects']['major']}
+- Minor: {metrics['defects']['minor']}
+- Sample Failed Tests: {len(metrics['defects']['from_failed_tests'][:10])} shown out of {len(metrics['defects']['from_failed_tests'])} total
+
+**Analysis Focus**: This large-scale test cycle requires high-level analysis focusing on:
+1. Overall trends and patterns across {metrics['total_sessions']} sessions
+2. Statistical significance of pass rate ({metrics['test_execution']['pass_rate']}%)
+3. Defect clustering and criticality assessment
+4. Coverage and optimization effectiveness at scale
+5. Resource utilization and efficiency metrics
+"""
+        return summary
     
     async def fetch_sessions_for_closure(
         self,
@@ -327,7 +422,8 @@ class TestClosureService:
     
     def generate_closure_prompt(self, metrics: Dict[str, Any]) -> str:
         """
-        Generate AI prompt for test closure report generation
+        Generate AI prompt for test closure report with standards compliance
+        Includes intelligent chunking for large datasets
         
         Args:
             metrics: Aggregated test metrics
@@ -335,7 +431,101 @@ class TestClosureService:
         Returns:
             Formatted prompt string
         """
-        prompt = f"""You are an ISTQB-certified Test Manager generating a comprehensive Test Closure Report.
+        # Check if data should be chunked
+        use_chunking = self._should_chunk_data(metrics)
+        
+        if use_chunking:
+            logger.info(f"[TestClosure] Large dataset detected, using chunked summary approach")
+            data_summary = self._create_chunked_summary(metrics)
+        else:
+            logger.info(f"[TestClosure] Standard dataset size, using full detail approach")
+            data_summary = f"""# TEST EXECUTION SUMMARY (IEEE 829-2008 Aligned)
+
+## Test Scenarios (ISTQB Test Design)
+- Total Scenarios Generated: {metrics['test_scenarios']['total']}
+- Scenarios by Type: {json.dumps(metrics['test_scenarios']['by_type'], indent=2)}
+- Scenarios by Category: {json.dumps(metrics['test_scenarios']['by_category'], indent=2)}
+
+## Test Cases (ISTQB Foundation - Test Design Techniques)
+- Total Test Cases Generated: {metrics['test_cases']['total_generated']}
+- Total Test Cases Optimized: {metrics['test_cases']['total_optimized']}
+- Optimization Rate: {metrics['test_cases']['optimization_rate']}%
+
+## Test Execution Results (IEEE 829 Test Summary Report)
+- Total Tests Executed: {metrics['test_execution']['total_executed']}
+- Passed: {metrics['test_execution']['passed']} ({metrics['test_execution']['pass_rate']}%)
+- Failed: {metrics['test_execution']['failed']}
+- Skipped: {metrics['test_execution']['skipped']}
+
+## Coverage Analysis (ISTQB Test Manager - Coverage Criteria)
+- Scenario Coverage: {metrics['coverage']['scenario_coverage']}%
+- Requirement Coverage: {metrics['coverage']['requirement_coverage']}%
+
+## Defect Summary (ISTQB Defect Management)
+- Total Defects Identified: {metrics['defects']['total']}
+- Critical: {metrics['defects']['critical']}
+- Major: {metrics['defects']['major']}
+- Minor: {metrics['defects']['minor']}
+
+# FAILED TESTS (Potential Defects)
+{json.dumps(metrics['defects']['from_failed_tests'][:10], indent=2)}
+"""
+        
+        prompt = f"""You are an ISTQB-certified Test Manager generating a comprehensive Test Closure Report aligned with international testing standards.
+
+# INTERNATIONAL TESTING STANDARDS COMPLIANCE
+
+This Test Closure Report is generated in full compliance with the following globally recognized testing standards and best practices:
+
+## Primary Standards Framework
+
+### 1. **ISO/IEC/IEEE 29119-3:2013** - Software Testing Standard (Part 3: Test Documentation)
+   - **Scope**: International standard for test documentation templates and formats
+   - **Application**: Test Closure Report structure, content organization, and quality criteria
+   - **Reference**: ISO/IEC/IEEE 29119-3:2013(E) Section 8 - Test Completion Report Template
+   - **URL**: https://www.iso.org/standard/56736.html
+
+### 2. **IEEE 829-2008** - Standard for Software and System Test Documentation
+   - **Scope**: IEEE standard for software test documentation (superseded by IEEE 29119 but still widely referenced)
+   - **Application**: Test Summary Report format, metrics definition, and anomaly reporting
+   - **Reference**: IEEE Std 829-2008 Section 9 - Test Summary Report
+   - **URL**: https://standards.ieee.org/standard/829-2008.html
+
+### 3. **ISTQB Foundation Level Syllabus v4.0 (2023)**
+   - **Scope**: International Software Testing Qualifications Board - Foundation certification
+   - **Application**: Fundamental testing principles, test design techniques, and test process best practices
+   - **Reference**: ISTQB-CTFL Syllabus v4.0 - Chapters 4 (Test Analysis & Design) and 5 (Managing Testing)
+   - **URL**: https://www.istqb.org/certifications/certified-tester-foundation-level
+
+### 4. **ISTQB Test Manager (Advanced Level) 2012**
+   - **Scope**: Advanced certification for test managers and test leads
+   - **Application**: Test planning, monitoring, control, reporting, and risk-based testing
+   - **Reference**: ISTQB-CTAL-TM Syllabus 2012 - Chapters on Test Process Improvement and Metrics
+   - **URL**: https://www.istqb.org/certifications/test-manager
+
+## Supplementary References
+
+### 5. **ISTQB Agile Tester Extension**
+   - **Application**: Agile testing principles where applicable
+   - **URL**: https://www.istqb.org/certifications/agile-tester
+
+### 6. **ISO 25010:2011** - Systems and software Quality Requirements and Evaluation (SQuaRE)
+   - **Application**: Quality characteristics and software quality model
+   - **URL**: https://www.iso.org/standard/35733.html
+
+---
+
+## Standards Alignment Table
+
+| Standard | Version | Purpose | Report Sections Aligned |
+|----------|---------|---------|-------------------------|
+| **ISO/IEC/IEEE 29119-3** | 2013 | Test Documentation | All sections (Overall structure) |
+| **IEEE 829** | 2008 | Test Summary Report | Executive Summary, Test Execution Analysis, Defect Analysis |
+| **ISTQB Foundation** | v4.0 (2023) | Testing Fundamentals | Test Scenarios, Test Cases, Coverage Metrics |
+| **ISTQB Test Manager** | 2012 | Test Management | Quality Assessment, Exit Criteria, Recommendations |
+| **ISO 25010** | 2011 | Quality Model | Quality Assessment, Production Readiness |
+
+---
 
 # TEST CYCLE INFORMATION
 - Total Sessions Analyzed: {metrics['total_sessions']}
@@ -343,28 +533,39 @@ class TestClosureService:
 - Date Range: {metrics['date_range']['start']} to {metrics['date_range']['end']}
 - Models Used: {', '.join(metrics['models_used'])}
 
-# TEST EXECUTION SUMMARY
-## Test Scenarios
+{data_summary}
+
+---
+
+# YOUR TASK: Generate Standards-Compliant Test Closure Report
+
+Generate a comprehensive Test Closure Report following the **ISO/IEC/IEEE 29119-3 Test Completion Report Template** with the following sections:
+- Date Range: {metrics['date_range']['start']} to {metrics['date_range']['end']}
+- Models Used: {', '.join(metrics['models_used'])}
+
+# TEST EXECUTION SUMMARY (IEEE 829-2008 Aligned)
+
+## Test Scenarios (ISTQB Test Design)
 - Total Scenarios Generated: {metrics['test_scenarios']['total']}
 - Scenarios by Type: {json.dumps(metrics['test_scenarios']['by_type'], indent=2)}
 - Scenarios by Category: {json.dumps(metrics['test_scenarios']['by_category'], indent=2)}
 
-## Test Cases
+## Test Cases (ISTQB Foundation - Test Design Techniques)
 - Total Test Cases Generated: {metrics['test_cases']['total_generated']}
 - Total Test Cases Optimized: {metrics['test_cases']['total_optimized']}
 - Optimization Rate: {metrics['test_cases']['optimization_rate']}%
 
-## Test Execution Results
+## Test Execution Results (IEEE 829 Test Summary Report)
 - Total Tests Executed: {metrics['test_execution']['total_executed']}
 - Passed: {metrics['test_execution']['passed']} ({metrics['test_execution']['pass_rate']}%)
 - Failed: {metrics['test_execution']['failed']}
 - Skipped: {metrics['test_execution']['skipped']}
 
-## Coverage Analysis
+## Coverage Analysis (ISTQB Test Manager - Coverage Criteria)
 - Scenario Coverage: {metrics['coverage']['scenario_coverage']}%
 - Requirement Coverage: {metrics['coverage']['requirement_coverage']}%
 
-## Defect Summary
+## Defect Summary (ISTQB Defect Management)
 - Total Defects Identified: {metrics['defects']['total']}
 - Critical: {metrics['defects']['critical']}
 - Major: {metrics['defects']['major']}
@@ -373,45 +574,94 @@ class TestClosureService:
 # FAILED TESTS (Potential Defects)
 {json.dumps(metrics['defects']['from_failed_tests'][:10], indent=2)}
 
-# YOUR TASK
-Generate a comprehensive Test Closure Report with the following sections:
+---
 
-1. **Executive Summary** (2-3 paragraphs)
+# YOUR TASK
+Generate a comprehensive Test Closure Report following **ISO/IEC/IEEE 29119-3** Test Closure Report template with the following sections:
+
+## 1. Executive Summary (IEEE 829 - Test Summary Report)
    - Overall test cycle assessment
    - Key achievements and challenges
    - Final recommendation (Ready for Production / Needs More Testing)
+   - Alignment with project quality objectives
 
-2. **Test Execution Analysis** (detailed)
-   - Analysis of test scenario and case generation
-   - Test optimization effectiveness
-   - Execution results interpretation
-   - Coverage assessment
+## 2. Test Execution Analysis (ISTQB Test Manager - Monitoring & Control)
+   - Analysis of test scenario and case generation effectiveness
+   - Test optimization effectiveness and ROI
+   - Execution results interpretation with trend analysis
+   - Coverage assessment against requirements
 
-3. **Quality Assessment** (critical analysis)
-   - Pass rate analysis (Is {metrics['test_execution']['pass_rate']}% acceptable?)
-   - Defect severity analysis
-   - Risk areas identified
-   - Quality gates status
+## 3. Quality Assessment (ISTQB Foundation - Test Metrics)
+   - Pass rate analysis (Is {metrics['test_execution']['pass_rate']}% acceptable for production?)
+   - Defect severity analysis and impact assessment
+   - Risk areas identified with mitigation strategies
+   - Quality gates status (Entry/Exit criteria from ISTQB)
 
-4. **Lessons Learned** (insights)
+## 4. Defect Analysis (IEEE 829 - Anomaly Report Summary)
+   - Critical defects requiring immediate attention
+   - Root cause analysis of major failures
+   - Defect trends and patterns observed
+   - Regression risks assessment
+
+## 5. Coverage & Completeness (ISO/IEC/IEEE 29119-3)
+   - Requirements coverage analysis
+   - Test scenario coverage completeness
+   - Untested areas and gaps (if any)
+   - Traceability matrix summary
+
+## 6. Lessons Learned (ISTQB Test Manager - Process Improvement)
    - What went well in this test cycle
-   - Challenges encountered
-   - Areas for improvement in future cycles
-
-5. **Recommendations** (actionable)
-   - Immediate actions required (if any defects)
+   - Challenges encountered and how they were addressed
    - Process improvements for next cycle
-   - Tool/automation suggestions
-   - Training or resource needs
+   - Testing efficiency observations
 
-6. **Test Closure Criteria** (checklist)
-   - Exit criteria met? (Yes/No with explanation)
-   - Outstanding issues and risks
-   - Sign-off recommendation
+## 7. Recommendations (Actionable)
+   - Immediate actions required (defect fixes, retesting)
+   - Process improvements aligned with ISTQB best practices
+   - Tool/automation enhancement suggestions
+   - Training or resource needs identification
 
-Please provide a well-structured, professional report suitable for stakeholders.
-Use markdown formatting for better readability.
-Be analytical and provide insights, not just data repetition.
+## 8. Test Closure Criteria (IEEE 829 Exit Criteria)
+   - Exit criteria met? (Yes/No with detailed explanation)
+   - Outstanding issues and residual risks
+   - Sign-off recommendation with justification
+   - Production readiness assessment
+
+---
+
+**IMPORTANT GUIDELINES FOR REPORT GENERATION:**
+
+1. **Standards Compliance**:
+   - Structure the report according to ISO/IEC/IEEE 29119-3 Test Completion Report template
+   - Reference specific standards where applicable (e.g., "According to ISTQB Foundation Level v4.0...")
+   - Include standard identifiers in section headings where relevant
+
+2. **Professional Quality**:
+   - Use clear, professional language suitable for stakeholders and management
+   - Apply proper markdown formatting with clear headings, tables, and bullet points
+   - Maintain consistency with IEEE 829 documentation style
+
+3. **Analytical Depth**:
+   - Provide insights and analysis based on standards and best practices, not just data repetition
+   - Interpret metrics in context of industry benchmarks and quality standards
+   - Connect findings to relevant standard requirements (ISO 25010 quality characteristics)
+
+4. **Global References**:
+   - Cite specific standard sections when making recommendations (e.g., "Per IEEE 829 Section 9.2...")
+   - Reference ISTQB best practices for test process improvements
+   - Include ISO/IEC/IEEE 29119 guidelines for quality gates and exit criteria
+
+5. **Actionable Outputs**:
+   - Provide concrete, actionable recommendations aligned with international best practices
+   - Prioritize actions based on risk and standard compliance requirements
+   - Ensure all recommendations are traceable to specific standards or quality frameworks
+
+6. **Compliance Documentation**:
+   - Explicitly state which standard requirements are met or not met
+   - Document any deviations from standard practices with justification
+   - Include references to quality models (ISO 25010) for production readiness assessment
+
+**Expected Output Format**: Professional, standards-compliant markdown report with clear structure, analytical insights, and actionable recommendations suitable for formal test closure documentation.
 """
         return prompt
     

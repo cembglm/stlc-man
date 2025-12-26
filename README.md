@@ -8,6 +8,23 @@ This repository presents a comprehensive full-stack application designed to auto
 
 Software Testing Life Cycle (STLC) represents a critical phase in software development, encompassing systematic processes from requirement analysis to test closure. Traditional STLC implementation faces challenges including manual effort redundancy, inconsistent documentation standards, and suboptimal resource allocation. This project addresses these challenges through AI-driven automation, implementing industry standards including ISTQB (International Software Testing Qualifications Board) methodologies and IEEE testing frameworks.
 
+### Key Innovation: Objective Quality Metrics
+
+This system implements **objective, data-driven quality assessment** for all STLC phases. Unlike traditional subjective evaluations, quality scores are calculated using mathematical formulas based on quantitative data, ensuring:
+
+- **Reproducibility:** Same input always produces same output
+- **Objectivity:** No subjective LLM interpretation
+- **Academic Defensibility:** Based on ISTQB, ISO 25010, and IEEE 829 standards
+- **Traceability:** Every score has documented calculation methodology
+
+Quality is measured across four dimensions (1-10 scale):
+1. **Completeness** - Percentage of required elements present
+2. **Clarity** - Documentation quality and structure
+3. **Coverage** - Breadth and diversity of testing approach
+4. **Depth** - Level of detail and thoroughness
+
+See [Quality Metrics Documentation](docs/QUALITY_METRICS.md) for detailed formulas and academic basis.
+
 ## 2. System Architecture
 
 ### 2.1 STLC Module Specifications

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import { 
   DocumentChartBarIcon, 
@@ -46,7 +46,8 @@ const PROCESS_METADATA = {
     shortLabel: 'Code Gen',
     color: 'purple',
     bgColor: 'bg-purple-100',
-    textColor: 'text-purple-700'
+    textColor: 'text-purple-700',
+    fields: ['code_generation_process_name', 'model_used', 'framework', 'language']
   },
   test_execution: { 
     icon: '🚀', 
@@ -54,7 +55,8 @@ const PROCESS_METADATA = {
     shortLabel: 'Execution',
     color: 'red',
     bgColor: 'bg-red-100',
-    textColor: 'text-red-700'
+    textColor: 'text-red-700',
+    fields: ['code_generation_process_name', 'model_used', 'success', 'total_tests', 'passed', 'failed', 'success_rate']
   },
   code_review: { 
     icon: '🔍', 
@@ -134,6 +136,7 @@ export default function TestReportingForm({
   const [expandedSessions, setExpandedSessions] = useState([]); // NEW: Track expanded session cards
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const hasFetchedRef = useRef(false); // Track if initial fetch has been done
   const [generationProgress, setGenerationProgress] = useState({
     status: 'idle', // idle | fetching | chunking | analyzing | synthesizing | completed | error
     currentProcess: '',
@@ -141,6 +144,12 @@ export default function TestReportingForm({
     totalChunks: 0,
     message: ''
   });
+  
+  // Prompt preview and editing
+  const [showPromptEditor, setShowPromptEditor] = useState(false);
+  const [promptPreview, setPromptPreview] = useState('');
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
 
   // Auto-select first available LOCAL model when models load (prefer LM Studio over Gemini)
   useEffect(() => {
@@ -172,8 +181,19 @@ export default function TestReportingForm({
       const data = await response.json();
 
       if (data.success) {
-        setAvailableSessions(data.sessions || []);
-        toast.success(`Found ${data.sessions.length} sessions`);
+        // Sort sessions by timestamp in descending order (newest first)
+        const sortedSessions = (data.sessions || []).sort((a, b) => {
+          const dateA = new Date(a.timestamp || 0);
+          const dateB = new Date(b.timestamp || 0);
+          return dateB - dateA; // Descending order (newest first)
+        });
+        
+        setAvailableSessions(sortedSessions);
+        // Show toast only once (not on strict mode re-mount)
+        if (!hasFetchedRef.current) {
+          toast.success(`Found ${sortedSessions.length} sessions`);
+          hasFetchedRef.current = true;
+        }
       } else {
         toast.error('Failed to load sessions');
       }
@@ -278,6 +298,50 @@ export default function TestReportingForm({
   // Get selected sessions data
   const selectedSessionsData = availableSessions.filter(s => selectedSessions.includes(s.session_id));
 
+  // Preview prompt before generating
+  const previewPrompt = async () => {
+    if (selectedSessions.length === 0) {
+      toast.error('Please select at least one session');
+      return;
+    }
+
+    const selectedModelInfo = availableModels.find(m => m.key === selectedModel);
+    let apiKey = null;
+    
+    if (selectedModelInfo?.type === 'api' && selectedModel.startsWith('gemini')) {
+      apiKey = apiKeys.google;
+    }
+
+    setIsLoadingPrompt(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/test-reporting/preview-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_ids: selectedSessions,
+          model: selectedModel,
+          api_key: apiKey,
+          analysis_depth: analysisDepth
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to preview prompt: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setPromptPreview(result.prompt);
+      setCustomPrompt(result.prompt);
+      setShowPromptEditor(true);
+      toast.success(`Prompt loaded (${result.estimated_tokens} tokens estimated)`);
+    } catch (error) {
+      console.error('Preview prompt error:', error);
+      toast.error(`Failed to preview prompt: ${error.message}`);
+    } finally {
+      setIsLoadingPrompt(false);
+    }
+  };
+
   // Generate report
   const generateReport = async () => {
     // Validation
@@ -339,13 +403,15 @@ This may take a few moments depending on the amount of data and selected analysi
         session_ids: selectedSessions, // Changed to array
         model: selectedModel,
         analysis_depth: analysisDepth,
-        ...(apiKey ? { api_key: apiKey } : {})
+        ...(apiKey ? { api_key: apiKey } : {}),
+        ...(customPrompt && customPrompt !== promptPreview ? { custom_prompt: customPrompt } : {})
       };
 
       console.log('[TestReporting] Sending request:', requestBody);
       console.log('[TestReporting] Selected model state:', selectedModel);
       console.log('[TestReporting] Selected model info:', selectedModelInfo);
       console.log('[TestReporting] API key provided:', apiKey ? 'Yes' : 'No');
+      console.log('[TestReporting] Custom prompt:', customPrompt ? 'Yes' : 'No');
 
       const response = await fetch('http://localhost:8000/api/test-reporting/generate-report', {
         method: 'POST',
@@ -581,10 +647,14 @@ Please ensure the backend services are running:
                         <input
                           type="checkbox"
                           checked={isSelected}
-                          onChange={() => {}}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onChange={(e) => {
+                            toggleSession(session.session_id);
+                          }}
                           disabled={isGenerating}
-                          className="mt-1 rounded"
-                          onClick={(e) => e.stopPropagation()}
+                          className="mt-1 rounded cursor-pointer"
                         />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2 mb-1">
@@ -686,6 +756,31 @@ Please ensure the backend services are running:
                                 )}
                                 {detail.based_on && (
                                   <div>🔗 Based on: <span className="font-medium">{detail.based_on}</span></div>
+                                )}
+                                {detail.code_generation_process_name && (
+                                  <div>🔗 Code Gen Process: <span className="font-medium">{detail.code_generation_process_name}</span></div>
+                                )}
+                                {detail.framework && (
+                                  <div>🔧 Framework: <span className="font-medium">{detail.framework}</span></div>
+                                )}
+                                {detail.language && (
+                                  <div>💬 Language: <span className="font-medium">{detail.language}</span></div>
+                                )}
+                                {detail.success !== undefined && (
+                                  <div>
+                                    {detail.success ? '✅' : '❌'} Status: 
+                                    <span className={clsx('font-medium ml-1', detail.success ? 'text-green-600' : 'text-red-600')}>
+                                      {detail.success ? 'Success' : 'Failed'}
+                                    </span>
+                                  </div>
+                                )}
+                                {detail.total_tests !== undefined && (
+                                  <div>
+                                    📊 Tests: <span className="font-medium">{detail.passed || 0}/{detail.total_tests}</span>
+                                    {detail.success_rate !== undefined && (
+                                      <span className="ml-2">({(detail.success_rate * 100).toFixed(1)}%)</span>
+                                    )}
+                                  </div>
                                 )}
                                 {detail.updated_at && (
                                   <div>🔄 Updated: <span className="font-medium">{formatTimestamp(detail.updated_at)}</span></div>
@@ -839,6 +934,56 @@ Please ensure the backend services are running:
                     Current: {generationProgress.currentProcess}
                   </p>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Prompt Editor Modal */}
+      {showPromptEditor && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 className="text-xl font-bold text-gray-900">Edit Prompt</h3>
+              <button
+                onClick={() => setShowPromptEditor(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <textarea
+                value={customPrompt}
+                onChange={(e) => setCustomPrompt(e.target.value)}
+                className="w-full h-full min-h-[500px] p-4 border border-gray-300 rounded-lg font-mono text-sm"
+                placeholder="Edit the prompt here..."
+              />
+            </div>
+            <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
+              <div className="text-sm text-gray-600">
+                {customPrompt.length} characters • ~{Math.ceil(customPrompt.length / 4)} tokens (estimated)
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setCustomPrompt(promptPreview);
+                    toast.success('Prompt reset to original');
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+                >
+                  Reset
+                </button>
+                <button
+                  onClick={() => {
+                    setShowPromptEditor(false);
+                    toast.success('Prompt saved');
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Use This Prompt
+                </button>
               </div>
             </div>
           </div>

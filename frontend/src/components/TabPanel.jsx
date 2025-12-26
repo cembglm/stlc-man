@@ -159,8 +159,10 @@ export default function TabPanel({
       activeTab !== 'test-case-optimization' && // Test Case Optimization kendi prompt'unu yönetir
       !processPrompts[activeTab]
     ) {
-      // Code review, requirement-analysis, test-planning, environment-setup, test-execution, test-reporting ve test-closure için yeni endpoint ve veri yapısı
-      if (activeTab === 'code-review' || activeTab === 'requirement-analysis' || activeTab === 'test-planning' || activeTab === 'environment-setup' || activeTab === 'test-execution' || activeTab === 'test-reporting' || activeTab === 'test-closure') {
+      // Code review, requirement-analysis, test-planning, environment-setup, test-execution, test-reporting, test-closure için endpoint
+      if (activeTab === 'code-review' || activeTab === 'requirement-analysis' || activeTab === 'test-planning' || 
+          activeTab === 'environment-setup' || activeTab === 'test-execution' || 
+          activeTab === 'test-reporting' || activeTab === 'test-closure') {
         let endpoint;
         if (activeTab === 'code-review') {
           endpoint = 'http://localhost:8000/api/prompts/code-review';
@@ -573,11 +575,11 @@ Important:
                   onSetOutput={onSetOutput} // Pass the new onSetOutput handler
                   sessionId={sessionId} // Pass global sessionId to forms
                   onFormStateChange={processId === 'test-scenario-generation' ? setTestScenarioFormState : undefined}
+                  onSetFormState={processId === 'test-closure' ? setTestClosureFormState : undefined}
                   onTestCaseGeneration={
                     processId === 'test-case-generation' ? setTestCaseFormState : 
                     processId === 'test-execution' ? setTestExecutionFormState : 
                     processId === 'test-reporting' ? setTestReportingFormState :
-                    processId === 'test-closure' ? setTestClosureFormState :
                     undefined
                   }
                   onTestCaseOptimization={processId === 'test-case-optimization' ? handleTestCaseOptimizationStateChange : undefined}
@@ -631,15 +633,24 @@ Important:
     } else if (processId === 'test-case-optimization' && testCaseOptimizationFormState.prompt) {
       promptText = testCaseOptimizationFormState.prompt;
     } else {
+      // For all other processes including test-reporting and test-closure, use MongoDB prompt
       promptText = currentPrompt?.prompt_text || currentPrompt?.content || process?.defaultPrompt || '';
     }
     
     const isDisabled = pipelineStatus[processId] === 'running';
 
-    // Debug logging only for test-scenario-generation
+    // Debug logging for test-scenario-generation and test-closure
     if (processId === 'test-scenario-generation') {
       console.log('[TabPanel] renderPromptSection for test-scenario-generation:', {
         currentPrompt,
+        promptTextLength: promptText?.length || 0,
+        hasPromptText: !!promptText
+      });
+    }
+    
+    if (processId === 'test-closure') {
+      console.log('[TabPanel] renderPromptSection for test-closure:', {
+        testClosureFormState,
         promptTextLength: promptText?.length || 0,
         hasPromptText: !!promptText
       });
@@ -950,6 +961,19 @@ Important:
                       return;
                     }
                     
+                    // Special handling for Test Closure
+                    if (activeTab === 'test-closure') {
+                      console.log('[TabPanel] Test Closure button clicked');
+                      console.log('[TabPanel] testClosureFormState:', testClosureFormState);
+                      if (testClosureFormState.handleRun && typeof testClosureFormState.handleRun === 'function') {
+                        console.log('[TabPanel] Calling testClosureFormState.handleRun()');
+                        testClosureFormState.handleRun();
+                      } else {
+                        console.warn('[TabPanel] handleRun is not available or not a function');
+                      }
+                      return;
+                    }
+                    
                     // Special handling for Test Code Generation
                     if (activeTab === 'test-code-generation') {
                       onRun(activeTab);
@@ -982,7 +1006,8 @@ Important:
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
                   (activeTab === 'test-execution' && (!testExecutionFormState.canRun || testExecutionFormState.isRunning)) ||
                   (activeTab === 'test-reporting' && (!testReportingFormState.canRun || testReportingFormState.isRunning)) ||
-                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-execution' && activeTab !== 'test-reporting' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
+                  (activeTab === 'test-closure' && (!testClosureFormState.canRun || testClosureFormState.isRunning)) ||
+                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-execution' && activeTab !== 'test-reporting' && activeTab !== 'test-closure' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
                 }
                 className={clsx(
                   "w-full py-3 px-4 rounded-md text-white font-medium transition-colors shadow-sm flex items-center justify-center",
@@ -991,7 +1016,8 @@ Important:
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
                   (activeTab === 'test-execution' && (!testExecutionFormState.canRun || testExecutionFormState.isRunning)) ||
-                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-execution' && activeTab !== 'test-code-generation' && pipelineStatus[activeTab] === 'running')
+                  (activeTab === 'test-closure' && (!testClosureFormState.canRun || testClosureFormState.isRunning)) ||
+                  (activeTab !== 'pipeline' && activeTab !== 'test-scenario-generation' && activeTab !== 'test-case-generation' && activeTab !== 'test-case-optimization' && activeTab !== 'test-execution' && activeTab !== 'test-code-generation' && activeTab !== 'test-closure' && pipelineStatus[activeTab] === 'running')
                     ? "bg-gray-300 cursor-not-allowed" 
                     : "bg-indigo-600 hover:bg-indigo-700"
                 )}
@@ -1058,6 +1084,18 @@ Important:
                   )
                 ) : activeTab === 'test-reporting' ? (
                   testReportingFormState.isRunning ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 0 1 4 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Generating Report...
+                    </>
+                  ) : (
+                    'Generate Report'
+                  )
+                ) : activeTab === 'test-closure' ? (
+                  testClosureFormState.isRunning ? (
                     <>
                       <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>

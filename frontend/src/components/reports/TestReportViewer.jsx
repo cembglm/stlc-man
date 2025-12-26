@@ -1,397 +1,401 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import { 
+  ChevronDownIcon, 
+  ChevronRightIcon, 
+  ArrowDownTrayIcon, 
+  DocumentTextIcon 
+} from '@heroicons/react/24/outline';
 
 /**
- * TestReportViewer - Renders test reports in JSON or Markdown format
- * Supports structured JSON with interactive components
+ * TestReportViewer - Interactive, collapsible markdown renderer for ISTQB/IEEE test reports
  */
 const TestReportViewer = ({ output, isLoading }) => {
-  const [parsedReport, setParsedReport] = React.useState(null);
-  const [parseError, setParseError] = React.useState(null);
-  const [expandedSessions, setExpandedSessions] = React.useState({});
-  const [expandedProcesses, setExpandedProcesses] = React.useState({});
-
-  React.useEffect(() => {
-    if (!output || isLoading) {
-      setParsedReport(null);
-      setParseError(null);
-      return;
+  const [error, setError] = React.useState(null);
+  const [expandedSections, setExpandedSections] = React.useState({});
+  const [viewMode, setViewMode] = React.useState('sections'); // 'sections' or 'full'
+  
+  // Clean output: remove code block wrappers
+  const cleanOutput = React.useMemo(() => {
+    if (!output) return '';
+    
+    let cleaned = output.trim();
+    // Remove ```markdown or ```json wrappers
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:markdown|json)?\n?/, '').replace(/\n?```$/, '');
     }
+    
+    return cleaned;
+  }, [output]);
 
-    try {
-      // Try to parse as JSON
-      const parsed = JSON.parse(output);
-      setParsedReport(parsed);
-      setParseError(null);
+  // Parse report into sections based on ## headings
+  const reportSections = React.useMemo(() => {
+    if (!cleanOutput) return [];
+    
+    const lines = cleanOutput.split('\n');
+    const sections = [];
+    let currentSection = null;
+    
+    lines.forEach((line, index) => {
+      // Detect main sections (## headings with optional emoji/numbering)
+      const mainHeadingMatch = line.match(/^##\s+(?:\d+\.\s*)?(?:[📋📊🐛🎯⚠️💡📈📉✅❌🔍🚀📝]+\s*)?(.+)/);
       
-      // Auto-expand first session
-      if (parsed.sessions && parsed.sessions.length > 0) {
-        setExpandedSessions({ 0: true });
+      if (mainHeadingMatch) {
+        // Save previous section
+        if (currentSection) {
+          sections.push(currentSection);
+        }
+        
+        // Start new section
+        currentSection = {
+          title: mainHeadingMatch[1].trim(),
+          content: [line],
+          startLine: index,
+          icon: line.match(/[📋📊🐛🎯⚠️💡📈📉✅❌🔍🚀📝]/)?.[0] || '📄'
+        };
+      } else if (currentSection) {
+        currentSection.content.push(line);
+      } else {
+        // Content before first section (header, title, etc.)
+        if (!sections.length || sections[0].title !== '__header__') {
+          sections.unshift({
+            title: '__header__',
+            content: [line],
+            startLine: 0,
+            icon: '📄'
+          });
+        } else {
+          sections[0].content.push(line);
+        }
       }
-    } catch (err) {
-      // Not JSON, will render as markdown
-      setParsedReport(null);
-      setParseError(null);
+    });
+    
+    // Add last section
+    if (currentSection) {
+      sections.push(currentSection);
     }
-  }, [output, isLoading]);
+    
+    // Convert content arrays to strings
+    return sections.map(section => ({
+      ...section,
+      content: section.content.join('\n')
+    }));
+  }, [cleanOutput]);
 
-  const toggleSession = (index) => {
-    setExpandedSessions(prev => ({ ...prev, [index]: !prev[index] }));
+  // Toggle section expansion
+  const toggleSection = (index) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
   };
 
-  const toggleProcess = (sessionIndex, processIndex) => {
-    const key = `${sessionIndex}-${processIndex}`;
-    setExpandedProcesses(prev => ({ ...prev, [key]: !prev[key] }));
+  // Expand all sections
+  const expandAll = () => {
+    const allExpanded = {};
+    reportSections.forEach((_, index) => {
+      allExpanded[index] = true;
+    });
+    setExpandedSections(allExpanded);
   };
 
-  const getStatusColor = (status) => {
-    const colors = {
-      excellent: 'bg-green-100 text-green-800 border-green-300',
-      good: 'bg-blue-100 text-blue-800 border-blue-300',
-      review: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-      critical: 'bg-red-100 text-red-800 border-red-300'
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800 border-gray-300';
+  // Collapse all sections
+  const collapseAll = () => {
+    setExpandedSections({});
   };
 
-  const getTrendIcon = (trend) => {
-    if (trend === 'up') return '📈';
-    if (trend === 'down') return '📉';
-    return '➡️';
+  // Download report as markdown file
+  const downloadReport = () => {
+    const blob = new Blob([cleanOutput], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `test-report-${new Date().toISOString().split('T')[0]}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
-  const getRiskColor = (severity) => {
-    const colors = {
-      high: 'bg-red-50 border-l-4 border-red-500',
-      medium: 'bg-yellow-50 border-l-4 border-yellow-500',
-      low: 'bg-blue-50 border-l-4 border-blue-500'
-    };
-    return colors[severity] || 'bg-gray-50 border-l-4 border-gray-500';
-  };
-
-  // Render JSON structured report
-  if (parsedReport) {
+  if (error) {
     return (
-      <div className="test-report-json">
-        {/* Executive Summary */}
-        <div className="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg p-6 mb-6 border border-indigo-200">
-          <h2 className="text-2xl font-bold text-indigo-900 mb-4">📊 Executive Summary</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div className="bg-white rounded-lg p-4 shadow-sm">
-              <div className="text-sm text-gray-600">Sessions Analyzed</div>
-              <div className="text-3xl font-bold text-indigo-600">{parsedReport.executiveSummary.sessionsAnalyzed}</div>
-            </div>
-            <div className="bg-white rounded-lg p-4 shadow-sm">
-              <div className="text-sm text-gray-600">Processes Count</div>
-              <div className="text-3xl font-bold text-blue-600">{parsedReport.executiveSummary.processesCount}</div>
-            </div>
-            <div className="bg-white rounded-lg p-4 shadow-sm">
-              <div className="text-sm text-gray-600">Overall Quality</div>
-              <div className="text-3xl font-bold text-green-600">{parsedReport.executiveSummary.overallQuality}/10</div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg p-4 shadow-sm">
-            <div className="text-sm font-semibold text-gray-700 mb-2">Quality Justification</div>
-            <p className="text-gray-700">{parsedReport.executiveSummary.qualityJustification}</p>
-          </div>
-          <div className="bg-indigo-100 rounded-lg p-4 mt-4">
-            <div className="flex items-start">
-              <span className="text-2xl mr-3">💡</span>
-              <div>
-                <div className="text-sm font-semibold text-indigo-900 mb-1">Critical Insight</div>
-                <p className="text-indigo-800">{parsedReport.executiveSummary.criticalInsight}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Overall Metrics */}
-        {parsedReport.metrics && (
-          <div className="bg-white rounded-lg p-6 mb-6 border border-gray-200 shadow-sm">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">📈 Overall Metrics</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center p-3 bg-gray-50 rounded">
-                <div className="text-sm text-gray-600">Total Artifacts</div>
-                <div className="text-2xl font-bold text-gray-900">{parsedReport.metrics.totalArtifacts}</div>
-              </div>
-              <div className="text-center p-3 bg-gray-50 rounded">
-                <div className="text-sm text-gray-600">Average Quality</div>
-                <div className="text-2xl font-bold text-gray-900">{parsedReport.metrics.averageQuality}/10</div>
-              </div>
-              <div className="text-center p-3 bg-gray-50 rounded">
-                <div className="text-sm text-gray-600">Coverage Rate</div>
-                <div className="text-2xl font-bold text-gray-900">{parsedReport.metrics.coverageRate}</div>
-              </div>
-              <div className="text-center p-3 bg-gray-50 rounded">
-                <div className="text-sm text-gray-600">Total Processes</div>
-                <div className="text-2xl font-bold text-gray-900">{parsedReport.metrics.totalProcesses}</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Sessions */}
-        <div className="mb-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">🎯 Session Details</h2>
-          {parsedReport.sessions?.map((session, sessionIndex) => (
-            <div key={sessionIndex} className="bg-white rounded-lg border border-gray-200 shadow-sm mb-4">
-              <div 
-                className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                onClick={() => toggleSession(sessionIndex)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <span className="text-2xl">{expandedSessions[sessionIndex] ? '📂' : '📁'}</span>
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">{session.sessionName}</h3>
-                      <div className="text-sm text-gray-500">{session.timestamp}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(session.status)}`}>
-                      {session.status.toUpperCase()}
-                    </span>
-                    <span className="text-lg font-bold text-gray-700">{session.qualityScore}/10</span>
-                  </div>
-                </div>
-              </div>
-
-              {expandedSessions[sessionIndex] && (
-                <div className="border-t border-gray-200 p-4 bg-gray-50">
-                  {session.processes?.map((process, processIndex) => {
-                    const processKey = `${sessionIndex}-${processIndex}`;
-                    return (
-                      <div key={processIndex} className="bg-white rounded-lg border border-gray-200 mb-3 overflow-hidden">
-                        <div 
-                          className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
-                          onClick={() => toggleProcess(sessionIndex, processIndex)}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-2">
-                              <span>{expandedProcesses[processKey] ? '🔽' : '▶️'}</span>
-                              <span className="font-semibold text-gray-900">{process.processName}</span>
-                              <span className="text-sm text-gray-500">({process.modelUsed})</span>
-                            </div>
-                            <span className="text-sm font-bold text-blue-600">Quality: {process.quality.score}/10</span>
-                          </div>
-                        </div>
-
-                        {expandedProcesses[processKey] && (
-                          <div className="border-t border-gray-200 p-4 bg-gray-50 space-y-4">
-                            {/* Metrics */}
-                            {process.metrics && process.metrics.length > 0 && (
-                              <div>
-                                <h4 className="font-semibold text-gray-900 mb-2">📊 Metrics</h4>
-                                <div className="space-y-2">
-                                  {process.metrics.map((metric, idx) => (
-                                    <div key={idx} className="flex items-center justify-between bg-white p-3 rounded border border-gray-200">
-                                      <div className="flex items-center space-x-2">
-                                        <span>{getTrendIcon(metric.trend)}</span>
-                                        <span className="font-medium text-gray-800">{metric.name}:</span>
-                                        <span className="text-gray-700">{metric.value}</span>
-                                      </div>
-                                      {metric.notes && (
-                                        <span className="text-sm text-gray-500 italic">{metric.notes}</span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Quality Breakdown */}
-                            {process.quality && (
-                              <div>
-                                <h4 className="font-semibold text-gray-900 mb-2">⭐ Quality Assessment</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                  <div className="bg-white p-2 rounded text-center border border-gray-200">
-                                    <div className="text-xs text-gray-600">Completeness</div>
-                                    <div className="text-lg font-bold text-blue-600">{process.quality.completeness}/10</div>
-                                  </div>
-                                  <div className="bg-white p-2 rounded text-center border border-gray-200">
-                                    <div className="text-xs text-gray-600">Clarity</div>
-                                    <div className="text-lg font-bold text-blue-600">{process.quality.clarity}/10</div>
-                                  </div>
-                                  <div className="bg-white p-2 rounded text-center border border-gray-200">
-                                    <div className="text-xs text-gray-600">Coverage</div>
-                                    <div className="text-lg font-bold text-blue-600">{process.quality.coverage}/10</div>
-                                  </div>
-                                  <div className="bg-white p-2 rounded text-center border border-gray-200">
-                                    <div className="text-xs text-gray-600">Depth</div>
-                                    <div className="text-lg font-bold text-blue-600">{process.quality.depth}/10</div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Strengths & Weaknesses */}
-                            <div className="grid md:grid-cols-2 gap-4">
-                              {process.strengths && process.strengths.length > 0 && (
-                                <div>
-                                  <h4 className="font-semibold text-green-700 mb-2">✅ Strengths</h4>
-                                  <ul className="space-y-1">
-                                    {process.strengths.map((strength, idx) => (
-                                      <li key={idx} className="text-sm text-gray-700 flex items-start">
-                                        <span className="text-green-500 mr-2">•</span>
-                                        <span>{strength}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                              {process.weaknesses && process.weaknesses.length > 0 && (
-                                <div>
-                                  <h4 className="font-semibold text-orange-700 mb-2">⚠️ Weaknesses</h4>
-                                  <ul className="space-y-1">
-                                    {process.weaknesses.map((weakness, idx) => (
-                                      <li key={idx} className="text-sm text-gray-700 flex items-start">
-                                        <span className="text-orange-500 mr-2">•</span>
-                                        <span>{weakness}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Cross Session Analysis */}
-        {parsedReport.crossSessionAnalysis && (
-          <div className="bg-white rounded-lg p-6 mb-6 border border-gray-200 shadow-sm">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">📊 Cross-Session Analysis</h2>
-            
-            {/* Trends */}
-            {parsedReport.crossSessionAnalysis.trends && (
-              <div className="mb-4">
-                <h3 className="font-semibold text-gray-900 mb-3">📈 Trends</h3>
-                <div className="space-y-3">
-                  {parsedReport.crossSessionAnalysis.trends.map((trend, idx) => (
-                    <div key={idx} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center space-x-2">
-                          <span>{getTrendIcon(trend.trend)}</span>
-                          <span className="font-semibold text-gray-900">{trend.metric}</span>
-                        </div>
-                        <span className="text-lg font-bold text-blue-600">{trend.change}</span>
-                      </div>
-                      <p className="text-sm text-gray-700 italic">{trend.insight}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Session Comparison Table */}
-            {parsedReport.crossSessionAnalysis.comparison && (
-              <div className="mb-4">
-                <h3 className="font-semibold text-gray-900 mb-3">📋 Session Comparison</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="border border-gray-300 px-4 py-2 text-left">Session</th>
-                        <th className="border border-gray-300 px-4 py-2 text-center">Quality</th>
-                        <th className="border border-gray-300 px-4 py-2 text-center">Coverage</th>
-                        <th className="border border-gray-300 px-4 py-2 text-center">Issues</th>
-                        <th className="border border-gray-300 px-4 py-2 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {parsedReport.crossSessionAnalysis.comparison.map((comp, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          <td className="border border-gray-300 px-4 py-2 font-medium">{comp.sessionName}</td>
-                          <td className="border border-gray-300 px-4 py-2 text-center font-bold text-blue-600">{comp.quality}</td>
-                          <td className="border border-gray-300 px-4 py-2 text-center">{comp.coverage}</td>
-                          <td className="border border-gray-300 px-4 py-2 text-center">{comp.issuesFound}</td>
-                          <td className="border border-gray-300 px-4 py-2 text-center">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(comp.status)}`}>
-                              {comp.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Risks */}
-        {parsedReport.risks && (
-          <div className="bg-white rounded-lg p-6 mb-6 border border-gray-200 shadow-sm">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">⚠️ Risk Assessment</h2>
-            {['high', 'medium', 'low'].map(severity => (
-              parsedReport.risks[severity] && parsedReport.risks[severity].length > 0 && (
-                <div key={severity} className="mb-4">
-                  <h3 className="font-semibold text-gray-900 mb-2 capitalize">{severity} Priority Risks</h3>
-                  <div className="space-y-2">
-                    {parsedReport.risks[severity].map((risk, idx) => (
-                      <div key={idx} className={`p-4 rounded-lg ${getRiskColor(severity)}`}>
-                        <div className="font-semibold text-gray-900 mb-1">{risk.issue}</div>
-                        <div className="text-sm text-gray-700 mb-2">Impact: {risk.impact}</div>
-                        <div className="text-sm text-gray-600 italic">Mitigation: {risk.mitigation}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            ))}
-          </div>
-        )}
-
-        {/* Recommendations */}
-        {parsedReport.recommendations && (
-          <div className="bg-white rounded-lg p-6 mb-6 border border-gray-200 shadow-sm">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">💡 Recommendations</h2>
-            {['immediate', 'shortTerm', 'longTerm'].map(timeframe => (
-              parsedReport.recommendations[timeframe] && parsedReport.recommendations[timeframe].length > 0 && (
-                <div key={timeframe} className="mb-4">
-                  <h3 className="font-semibold text-gray-900 mb-2">
-                    {timeframe === 'immediate' ? '🔴 Immediate Actions' : 
-                     timeframe === 'shortTerm' ? '🟡 Short-term Actions' : 
-                     '🟢 Long-term Actions'}
-                  </h3>
-                  <div className="space-y-2">
-                    {parsedReport.recommendations[timeframe].map((rec, idx) => (
-                      <div key={idx} className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="font-semibold text-gray-900">{rec.action}</div>
-                            <div className="text-sm text-gray-600 mt-1">Expected Outcome: {rec.outcome}</div>
-                          </div>
-                          <span className="ml-3 px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm font-medium">
-                            P{rec.priority}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            ))}
-          </div>
-        )}
+      <div className="bg-red-50 border border-red-200 rounded-lg p-6 m-4">
+        <h3 className="text-lg font-semibold text-red-800 mb-2">⚠️ Rendering Error</h3>
+        <p className="text-red-700 mb-4">{error.message}</p>
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm text-red-600 hover:text-red-800">Show raw content</summary>
+          <pre className="mt-2 p-4 bg-white rounded border border-red-200 text-xs overflow-x-auto max-h-96">
+            {cleanOutput.substring(0, 2000)}...
+          </pre>
+        </details>
       </div>
     );
   }
 
-  // Fallback to markdown rendering
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Generating test report...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!output) {
+    return (
+      <div className="text-center p-12 text-gray-500">
+        No report generated yet. Select sessions and generate a report.
+      </div>
+    );
+  }
+
+  // Render sectioned view
+  const renderSectionedView = () => {
+    return (
+      <div className="space-y-3">
+        {reportSections.map((section, index) => {
+          // Skip rendering internal header section separately
+          if (section.title === '__header__') {
+            return (
+              <div key={index} className="mb-6">
+                <div className="prose prose-blue prose-lg max-w-none">
+                  <ReactMarkdown components={markdownComponents}>
+                    {section.content}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            );
+          }
+
+          const isExpanded = expandedSections[index];
+
+          return (
+            <div 
+              key={index} 
+              className="border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow"
+            >
+              {/* Section Header - Clickable */}
+              <button
+                onClick={() => toggleSection(index)}
+                className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{section.icon}</span>
+                  <h3 className="text-lg font-semibold text-gray-800">{section.title}</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 mr-2">
+                    {isExpanded ? 'Collapse' : 'Expand'}
+                  </span>
+                  {isExpanded ? (
+                    <ChevronDownIcon className="w-5 h-5 text-gray-600" />
+                  ) : (
+                    <ChevronRightIcon className="w-5 h-5 text-gray-600" />
+                  )}
+                </div>
+              </button>
+
+              {/* Section Content - Collapsible */}
+              {isExpanded && (
+                <div className="p-6 border-t border-gray-200 bg-white">
+                  <div className="prose prose-blue prose-lg max-w-none">
+                    <ReactMarkdown components={markdownComponents}>
+                      {section.content}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Render full view
+  const renderFullView = () => {
+    return (
+      <div className="prose prose-blue prose-lg max-w-none">
+        <ErrorBoundary onError={setError}>
+          <ReactMarkdown components={markdownComponents}>
+            {cleanOutput}
+          </ReactMarkdown>
+        </ErrorBoundary>
+      </div>
+    );
+  };
+
+  // Markdown component configuration
+  const markdownComponents = {
+    // Custom table styling
+    table: ({ node, ...props }) => (
+      <div className="overflow-x-auto my-6">
+        <table className="min-w-full divide-y divide-gray-300 border border-gray-300 shadow-sm" {...props} />
+      </div>
+    ),
+    thead: ({ node, ...props }) => (
+      <thead className="bg-gray-50" {...props} />
+    ),
+    th: ({ node, ...props }) => (
+      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 border-b-2 border-gray-300" {...props} />
+    ),
+    td: ({ node, ...props }) => (
+      <td className="px-4 py-3 text-sm text-gray-700 border-b border-gray-200" {...props} />
+    ),
+    // Custom code block styling
+    code: ({ node, inline, ...props }) => (
+      inline 
+        ? <code className="bg-gray-100 text-red-600 px-1.5 py-0.5 rounded text-sm font-mono" {...props} />
+        : <code className="block bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm font-mono" {...props} />
+    ),
+    // Custom heading styling with better spacing
+    h1: ({ node, ...props }) => (
+      <h1 className="text-3xl font-bold text-gray-900 mt-8 mb-4 pb-2 border-b-2 border-blue-600" {...props} />
+    ),
+    h2: ({ node, ...props }) => (
+      <h2 className="text-2xl font-bold text-gray-800 mt-8 mb-3 pb-2 border-b border-gray-300" {...props} />
+    ),
+    h3: ({ node, ...props }) => (
+      <h3 className="text-xl font-semibold text-gray-800 mt-6 mb-2" {...props} />
+    ),
+    h4: ({ node, ...props }) => (
+      <h4 className="text-lg font-semibold text-gray-700 mt-4 mb-2" {...props} />
+    ),
+    // Custom list styling
+    ul: ({ node, ...props }) => (
+      <ul className="list-disc list-inside space-y-1 my-4" {...props} />
+    ),
+    ol: ({ node, ...props }) => (
+      <ol className="list-decimal list-inside space-y-1 my-4" {...props} />
+    ),
+    // Custom blockquote
+    blockquote: ({ node, ...props }) => (
+      <blockquote className="border-l-4 border-blue-500 pl-4 py-2 my-4 bg-blue-50 italic text-gray-700" {...props} />
+    ),
+    // Horizontal rule
+    hr: ({ node, ...props }) => (
+      <hr className="my-8 border-t-2 border-gray-300" {...props} />
+    ),
+  };
+
   return (
-    <div className="test-report-markdown-compact">
-      <ReactMarkdown>{output || ''}</ReactMarkdown>
+    <div className="test-report-viewer bg-white">
+      {/* Standards Badge Header */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 mb-6 rounded-t-lg">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/20 text-white">
+              📘 ISTQB Foundation
+            </span>
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/20 text-white">
+              📘 ISTQB Test Manager
+            </span>
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/20 text-white">
+              📘 IEEE 829-2008
+            </span>
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/20 text-white">
+              📘 ISO/IEC/IEEE 29119-3
+            </span>
+          </div>
+          
+          {/* View Controls */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={downloadReport}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/20 text-white hover:bg-white/30 transition-colors"
+              title="Download report as Markdown"
+            >
+              <ArrowDownTrayIcon className="w-4 h-4" />
+              Download
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* View Mode Toggle & Section Controls */}
+      <div className="px-6 mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setViewMode('sections')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              viewMode === 'sections'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            <DocumentTextIcon className="w-4 h-4" />
+            Sections View
+          </button>
+          <button
+            onClick={() => setViewMode('full')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              viewMode === 'full'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            <DocumentTextIcon className="w-4 h-4" />
+            Full View
+          </button>
+        </div>
+
+        {viewMode === 'sections' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={expandAll}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+            >
+              Expand All
+            </button>
+            <button
+              onClick={collapseAll}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors"
+            >
+              Collapse All
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Report Content */}
+      <div className="px-6 pb-6">
+        {viewMode === 'sections' ? renderSectionedView() : renderFullView()}
+      </div>
     </div>
   );
 };
+
+// Simple error boundary component
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Markdown rendering error:', error, errorInfo);
+    if (this.props.onError) {
+      this.props.onError(error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-yellow-800">⚠️ Error rendering markdown. Please check the report format.</p>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 export default TestReportViewer;
