@@ -130,17 +130,27 @@ export default function FileUpload({
       {managedFiles.length > 0 && (
         <div className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Uploaded Files</h3>
-          <div className="space-y-4">
+          <p className="text-sm text-gray-600 mb-4">
+            ℹ️ Go to <strong>Pipeline</strong> tab to map files to processes
+          </p>
+          <div className="space-y-3">
             {managedFiles.map((file) => (
-              <div key={file.id} className="p-4 rounded-lg border border-gray-200">
+              <div key={file.id} className="p-4 rounded-lg border border-gray-200 bg-gray-50">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-medium">{file.name}</span>
-                    <span className="ml-2 text-sm text-gray-500">({file.type})</span>
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium text-gray-900">{file.name}</span>
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800">
+                        {file.type}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {file.size ? `${(file.size / 1024).toFixed(1)} KB` : 'Unknown size'}
+                    </p>
                   </div>
                   <button
                     onClick={() => onFileDelete(file.id)}
-                    className="text-red-600 hover:text-red-800"
+                    className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
                   >
                     Delete
                   </button>
