@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Toaster } from 'react-hot-toast';
 import Header from './components/Header';
 import TabPanel from './components/TabPanel';
 import { processes } from './data/processes';
@@ -674,8 +675,8 @@ function AppContents() {
 	};
 
 	// Pipeline başlatma fonksiyonu
-	const handleStartPipeline = async () => {
-		console.log('[App] Starting pipeline');
+	const handleStartPipeline = async (pipelineConfigs = null) => {
+		console.log('[App] Starting pipeline with configs:', pipelineConfigs);
 		
 		// Seçilen süreçleri sırayla çalıştır
 		const selectedProcessIds = Array.from(selectedProcesses);
@@ -700,13 +701,22 @@ function AppContents() {
 					[processId]: 'running'
 				}));
 				
-				// Süreç için dosyaları belirle
-				const relevantFiles = managedFiles.filter(file => 
-					fileProcessMappings[file.id]?.includes(processId)
-				);
-				
-				// Süreç çalıştırma fonksiyonunu çağır ve sonuçları bekle
-				await handleProcessRun(processId, relevantFiles);
+				// Config varsa kullan, yoksa mevcut mantığı kullan
+				if (pipelineConfigs && pipelineConfigs[processId]) {
+					const config = pipelineConfigs[processId];
+					console.log(`[App] Using saved configuration for ${processId}:`, config);
+					
+					// Kaydedilmiş config ile çalıştır
+					await handleRunProcessWithConfig(processId, config);
+				} else {
+					// Süreç için dosyaları belirle (eski mantık)
+					const relevantFiles = managedFiles.filter(file => 
+						fileProcessMappings[file.id]?.includes(processId)
+					);
+					
+					// Süreç çalıştırma fonksiyonunu çağır ve sonuçları bekle
+					await handleProcessRun(processId, relevantFiles);
+				}
 				
 				// Kısa bir bekleme süresi ekle
 				await new Promise(resolve => setTimeout(resolve, 500));
@@ -743,7 +753,8 @@ function AppContents() {
 	const handleRun = (processId, config) => {
 		if (!processId) {
 			// processId yoksa pipeline çalıştır
-			handleStartPipeline();
+			// config parametresi pipelineConfigs objesi olabilir
+			handleStartPipeline(config);
 		} else if (config) {
 			// Config verilmişse (form'dan gelen çağrılar için)
 			handleRunProcessWithConfig(processId, config);
@@ -1106,6 +1117,31 @@ function AppContents() {
 
 	return (
 		<div className="min-h-screen flex flex-col">
+			<Toaster
+				position="top-right"
+				toastOptions={{
+					duration: 4000,
+					style: {
+						background: '#fff',
+						color: '#333',
+						boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+						borderRadius: '0.5rem',
+						padding: '1rem'
+					},
+					success: {
+						iconTheme: {
+							primary: '#10b981',
+							secondary: '#fff',
+						},
+					},
+					error: {
+						iconTheme: {
+							primary: '#ef4444',
+							secondary: '#fff',
+						},
+					},
+				}}
+			/>
 			<Header />
 			<div className="flex-1 flex flex-col overflow-hidden">
 				{validationError && (

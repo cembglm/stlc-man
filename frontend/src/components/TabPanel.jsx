@@ -16,6 +16,9 @@ import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
 import EnvironmentSetupForm from './processes/EnvironmentSetupForm';
 import ApiSettingsModal from './ApiSettingsModal';
+import PipelineConfigItem from './PipelineConfigItem';
+import PipelineFileSelector from './PipelineFileSelector';
+import { usePipelineConfig } from '../hooks/usePipelineConfig';
 
 export default function TabPanel({
   processes,
@@ -55,6 +58,19 @@ export default function TabPanel({
   const [tempPrompt, setTempPrompt] = useState('');
   const [showHelp, setShowHelp] = useState(false);
   const [isApiSettingsOpen, setIsApiSettingsOpen] = useState(false);
+  
+  // Pipeline configuration hook
+  const {
+    pipelineConfigs,
+    saveProcessConfig,
+    getProcessConfig,
+    isProcessConfigured,
+    validatePipelineConfigs,
+    getBackendConfig
+  } = usePipelineConfig();
+  
+  // Pipeline expanded states - hangi process'lerin expand olduğunu takip eder
+  const [expandedProcesses, setExpandedProcesses] = useState({});
   
   // Test Scenario Generation form state tracking for main button
   const [testScenarioFormState, setTestScenarioFormState] = useState({
@@ -799,6 +815,7 @@ Important:
                       }
                       setActiveTab(tab.id);
                     }}
+                    data-tab={tab.id}
                     className={clsx(
                       'text-sm font-medium whitespace-nowrap transition-colors',
                       activeTab === tab.id
@@ -869,32 +886,132 @@ Important:
               />
             ) : activeTab === 'pipeline' ? (
               <div className="space-y-4">
-                {processes
-                  .filter(p => selectedProcesses.has(p.id))
-                  .map((process, index) => (
-                    <div key={process.id} className="border rounded-lg p-4">
+                {/* Pipeline File Selection & Mapping - EN ÜSTTE */}
+                <PipelineFileSelector
+                  managedFiles={managedFiles}
+                  fileProcessMappings={fileProcessMappings}
+                  selectedProcesses={selectedProcesses}
+                  processes={processes}
+                  onFileProcessMapping={onFileProcessMapping}
+                  onFileDelete={onFileDelete}
+                  onFileUpload={onFileUpload}
+                />
+
+                {/* Pipeline Validation Summary */}
+                {(() => {
+                  const validation = validatePipelineConfigs(selectedProcesses);
+                  return validation.totalCount > 0 && (
+                    <div className={clsx(
+                      'p-4 rounded-lg border',
+                      validation.allConfigured ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'
+                    )}>
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-gray-500">{index + 1}.</span>
-                          <h3 className="font-medium">{process.name}</h3>
-                          {/* Auto etiketi pipeline görünümü için - yeni eklendi */}
-                          {processOrigins[process.id] === 'auto' && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                              Auto
-                            </span>
-                          )}
+                        <div>
+                          <h4 className={clsx(
+                            'font-medium',
+                            validation.allConfigured ? 'text-green-800' : 'text-yellow-800'
+                          )}>
+                            Pipeline Configuration Status
+                          </h4>
+                          <p className={clsx(
+                            'text-sm mt-1',
+                            validation.allConfigured ? 'text-green-600' : 'text-yellow-600'
+                          )}>
+                            {validation.configuredCount} of {validation.totalCount} processes configured
+                          </p>
                         </div>
-                        <span className={clsx(
-                          'text-sm px-2 py-1 rounded-full',
-                          pipelineStatus[process.id] === 'completed' ? 'bg-green-100 text-green-800' :
-                          pipelineStatus[process.id] === 'running' ? 'bg-blue-100 text-blue-800' :
-                          'bg-gray-100 text-gray-800'
-                        )}>
-                          {pipelineStatus[process.id] || 'Pending'}
-                        </span>
+                        {!validation.allConfigured && (
+                          <div className="text-sm text-yellow-600">
+                            Configure all processes before running pipeline
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  );
+                })()}
+
+                {/* Pipeline Configuration Items */}
+                {processes
+                  .filter(p => selectedProcesses.has(p.id))
+                  .map((process, index) => {
+                    const ProcessFormComponent = ProcessFormComponents[process.id];
+                    const isConfigured = isProcessConfigured(process.id);
+                    const config = getProcessConfig(process.id);
+                    const isExpanded = expandedProcesses[process.id] || false;
+                    
+                    return (
+                      <PipelineConfigItem
+                        key={process.id}
+                        process={process}
+                        isSelected={true}
+                        isConfigured={isConfigured}
+                        isExpanded={isExpanded}
+                        onToggleExpand={(expanded) => {
+                          setExpandedProcesses(prev => ({
+                            ...prev,
+                            [process.id]: expanded
+                          }));
+                        }}
+                        onToggleSelect={(selected) => {
+                          // Pipeline'da artık seçim yapılamaz, checkbox devre dışı
+                        }}
+                        onSaveConfig={() => {
+                          // Her process için kendi state'inden config'i al ve kaydet
+                          // Bu kısım her form component için özel olmalı
+                          const currentConfig = {
+                            // Process-specific config'i buraya ekle
+                            processId: process.id,
+                            aiModel: aiModels[process.id],
+                            prompt: processPrompts[process.id],
+                            environmentName: environmentNames[process.id],
+                            outputFormat: outputFormats[process.id],
+                            files: managedFiles.filter(file => 
+                              fileProcessMappings[file.id]?.includes(process.id)
+                            )
+                          };
+                          
+                          saveProcessConfig(process.id, currentConfig);
+                          alert(`Configuration saved for ${process.name}!`);
+                        }}
+                        config={config}
+                        pipelineStatus={pipelineStatus[process.id]}
+                        processOrigin={processOrigins[process.id]}
+                      >
+                        {/* Form Component Render - Her process'in kendi formu */}
+                        {ProcessFormComponent && (
+                          <ProcessFormComponent
+                            process={process}
+                            processFiles={processFiles}
+                            onFileUpload={onFileUpload}
+                            onPromptUpdate={onPromptUpdate}
+                            onAIModelUpdate={onAIModelUpdate}
+                            onEnvironmentNameUpdate={onEnvironmentNameUpdate}
+                            onOutputFormatUpdate={onOutputFormatUpdate}
+                            processPrompts={processPrompts}
+                            aiModels={aiModels}
+                            environmentNames={environmentNames}
+                            outputFormats={outputFormats}
+                            managedFiles={managedFiles}
+                            fileProcessMappings={fileProcessMappings}
+                            onFileProcessMapping={onFileProcessMapping}
+                            sessionId={sessionId}
+                            onRun={onRun}
+                            onFormStateChange={
+                              process.id === 'test-scenario-generation' ? setTestScenarioFormState :
+                              process.id === 'test-case-generation' ? setTestCaseFormState :
+                              process.id === 'test-case-optimization' ? handleTestCaseOptimizationStateChange :
+                              process.id === 'test-execution' ? setTestExecutionFormState :
+                              process.id === 'test-reporting' ? setTestReportingFormState :
+                              process.id === 'test-closure' ? setTestClosureFormState :
+                              undefined
+                            }
+                            // Pipeline mode - form'un Run butonunu gizlemek için
+                            pipelineMode={true}
+                          />
+                        )}
+                      </PipelineConfigItem>
+                    );
+                  })}
 
                 {validationError && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
@@ -996,11 +1113,56 @@ Important:
                       onRun(activeTab);
                     }
                   } else {
-                    onRun();
+                    // PIPELINE MODE - Validate configurations before running
+                    const validation = validatePipelineConfigs(selectedProcesses);
+                    
+                    if (!validation.allConfigured) {
+                      const missingNames = validation.missingConfigs.map(id => 
+                        processes.find(p => p.id === id)?.name || id
+                      ).join(', ');
+                      
+                      alert(`Please configure all processes before running the pipeline.\n\nMissing configurations:\n${missingNames}`);
+                      return;
+                    }
+                    
+                    // Validate file mappings
+                    const unmappedFiles = managedFiles.filter(file => 
+                      !fileProcessMappings[file.id] || fileProcessMappings[file.id].length === 0
+                    );
+                    
+                    if (unmappedFiles.length > 0) {
+                      const unmappedNames = unmappedFiles.map(f => f.name).join(', ');
+                      const proceed = confirm(
+                        `⚠️ Warning: ${unmappedFiles.length} file(s) are not mapped to any process:\n\n${unmappedNames}\n\nDo you want to continue anyway?`
+                      );
+                      if (!proceed) return;
+                    }
+                    
+                    // Check if processes have required files
+                    const processesWithoutFiles = Array.from(selectedProcesses).filter(processId => {
+                      const processFiles = managedFiles.filter(file => 
+                        fileProcessMappings[file.id]?.includes(processId)
+                      );
+                      return processFiles.length === 0;
+                    });
+                    
+                    if (processesWithoutFiles.length > 0) {
+                      const processNames = processesWithoutFiles.map(id => 
+                        processes.find(p => p.id === id)?.name || id
+                      ).join(', ');
+                      
+                      alert(`❌ Cannot run pipeline!\n\nThe following processes have no files mapped:\n${processNames}\n\nPlease map files to all processes in the File Selection & Mapping section above.`);
+                      return;
+                    }
+                    
+                    // All configured and validated, run pipeline with saved configs
+                    console.log('[TabPanel] Starting pipeline with configurations:', pipelineConfigs);
+                    onRun(null, pipelineConfigs);
                   }
                 }}
                 disabled={
                   (activeTab === 'pipeline' && selectedProcesses.size === 0) ||
+                  (activeTab === 'pipeline' && !validatePipelineConfigs(selectedProcesses).allConfigured) ||
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
@@ -1012,6 +1174,7 @@ Important:
                 className={clsx(
                   "w-full py-3 px-4 rounded-md text-white font-medium transition-colors shadow-sm flex items-center justify-center",
                   (activeTab === 'pipeline' && selectedProcesses.size === 0) || 
+                  (activeTab === 'pipeline' && !validatePipelineConfigs(selectedProcesses).allConfigured) ||
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
