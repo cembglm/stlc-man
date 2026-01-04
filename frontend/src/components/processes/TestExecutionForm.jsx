@@ -91,6 +91,12 @@ export default function TestExecutionForm({
   const [individualTests, setIndividualTests] = useState([]);
   const [selectedTests, setSelectedTests] = useState([]);
   const [isLoadingTests, setIsLoadingTests] = useState(false);
+  
+  // Docker execution states
+  const [executionMode, setExecutionMode] = useState('standard'); // 'standard' or 'docker'
+  const [dockerAvailable, setDockerAvailable] = useState(false);
+  const [additionalPackages, setAdditionalPackages] = useState('');
+  const [dockerTimeout, setDockerTimeout] = useState(300);
 
   // Model info hook kullanımı
   const modelInfo = useModelInfo(selectedModel);
@@ -221,6 +227,118 @@ export default function TestExecutionForm({
       toast.error('Failed to load process names');
     }
   }, []);
+
+  // Check Docker status
+  const checkDockerStatus = useCallback(async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/docker-execution/status');
+      const data = await response.json();
+      setDockerAvailable(data.docker_available);
+    } catch (error) {
+      console.error('Error checking Docker status:', error);
+      setDockerAvailable(false);
+    }
+  }, []);
+
+  // Execute in Docker
+  const executeInDocker = async () => {
+    if (selectedTests.length === 0) {
+      toast.error('Please select at least one test to execute');
+      return;
+    }
+
+    if (!dockerAvailable) {
+      toast.error('Docker is not available. Please start Docker Desktop.');
+      return;
+    }
+
+    setIsExecuting(true);
+
+    const loadingOutput = {
+      status: 'running',
+      content: `🐳 **Executing ${selectedTests.length} Test${selectedTests.length > 1 ? 's' : ''} in Docker Container**
+
+⚙️ **Configuration:**
+- Execution Mode: Docker Container (Isolated Environment)
+- Language: Python
+- Additional Packages: ${additionalPackages || 'None'}
+- Timeout: ${dockerTimeout}s
+- Process: ${selectedProcessName}
+
+🔒 **Isolation Benefits:**
+✅ Tests run in isolated container environment
+✅ No interference with host system
+✅ Reproducible execution environment
+✅ Automatic cleanup after execution
+
+⏳ Preparing Docker container and executing tests...`,
+      timestamp: new Date().toISOString(),
+      processType: 'Docker Test Execution'
+    };
+
+    if (onSetOutput) {
+      onSetOutput('test-execution', loadingOutput);
+    }
+
+    try {
+      const response = await fetch('http://localhost:8000/api/docker-execution/execute-from-process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          process_name: selectedProcessName,
+          language: 'python',
+          additional_packages: additionalPackages.split(',').map(p => p.trim()).filter(p => p),
+          timeout: dockerTimeout
+        })
+      });
+
+      const result = await response.json();
+
+      const output = {
+        status: result.success ? 'success' : 'error',
+        content: `🐳 **Docker Execution ${result.success ? 'Completed' : 'Failed'}**
+
+**Exit Code:** ${result.exit_code}
+
+**Output:**
+\`\`\`
+${result.output}
+\`\`\`
+
+${result.error ? `**Error:**\n${result.error}` : ''}
+
+**Execution Time:** ${result.execution_time}`,
+        timestamp: new Date().toISOString(),
+        processType: 'Docker Test Execution'
+      };
+
+      if (onSetOutput) {
+        onSetOutput('test-execution', output);
+      }
+
+      if (result.success) {
+        toast.success('Docker execution completed successfully!');
+      } else {
+        toast.error('Docker execution failed');
+      }
+    } catch (error) {
+      console.error('Docker execution error:', error);
+      const errorOutput = {
+        status: 'error',
+        content: `❌ **Docker Execution Error**\n\n${error.message}`,
+        timestamp: new Date().toISOString(),
+        processType: 'Docker Test Execution'
+      };
+      
+      if (onSetOutput) {
+        onSetOutput('test-execution', errorOutput);
+      }
+      
+      toast.error('Docker execution failed');
+    } finally {
+      setIsExecuting(false);
+    }
+  };
 
 
 
@@ -534,6 +652,7 @@ ${result.error || 'Unknown error occurred'}
   useEffect(() => {
     fetchProcessNames();
     checkMcpStatus();
+    checkDockerStatus();
   }, []); // Remove functions from dependency array since they have empty deps
 
   // Update TabPanel form state to enable/disable Run Process button
@@ -543,10 +662,10 @@ ${result.error || 'Unknown error occurred'}
       onTestCaseGeneration({
         canRun,
         isRunning: isExecuting,
-        handleRun: canRun ? executeTests : null
+        handleRun: canRun ? (executionMode === 'docker' ? executeInDocker : executeTests) : null
       });
     }
-  }, [onTestCaseGeneration, selectedTests, selectedProcessName, isExecuting]);
+  }, [onTestCaseGeneration, selectedTests, selectedProcessName, isExecuting, executionMode]);
 
 
 
@@ -686,6 +805,84 @@ ${result.error || 'Unknown error occurred'}
                 </ul>
               </div>
             )}
+
+            {/* Execution Mode Selection */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Execution Mode
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setExecutionMode('standard')}
+                  className={clsx(
+                    'flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors',
+                    executionMode === 'standard'
+                      ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                  )}
+                >
+                  Standard
+                </button>
+                <button
+                  onClick={() => setExecutionMode('docker')}
+                  disabled={!dockerAvailable}
+                  className={clsx(
+                    'flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors',
+                    executionMode === 'docker'
+                      ? 'bg-blue-50 border-blue-500 text-blue-700'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50',
+                    !dockerAvailable && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  🐳 Docker
+                </button>
+              </div>
+              {executionMode === 'docker' && (
+                <div className="mt-3 space-y-2">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className={clsx(
+                        'w-2 h-2 rounded-full',
+                        dockerAvailable ? 'bg-green-500' : 'bg-red-500'
+                      )} />
+                      <span className="text-xs font-medium text-blue-900">
+                        Docker: {dockerAvailable ? 'Available' : 'Not Available'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-blue-800">
+                      Tests will run in isolated Docker containers
+                    </p>
+                  </div>
+                  
+                  {dockerAvailable && (
+                    <>
+                      <input
+                        type="text"
+                        value={additionalPackages}
+                        onChange={(e) => setAdditionalPackages(e.target.value)}
+                        placeholder="numpy,pandas,requests"
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <p className="text-xs text-gray-500">
+                        Additional Python packages (comma-separated)
+                      </p>
+                      
+                      <input
+                        type="number"
+                        value={dockerTimeout}
+                        onChange={(e) => setDockerTimeout(parseInt(e.target.value))}
+                        min="30"
+                        max="600"
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <p className="text-xs text-gray-500">
+                        Timeout (seconds): 30-600
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

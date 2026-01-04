@@ -16,3 +16,4 @@ google-generativeai
 google-genai
 aiohttp
 motor
+docker
