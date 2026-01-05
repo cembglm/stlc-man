@@ -5,7 +5,8 @@ import {
   ChevronRightIcon, 
   CheckCircleIcon,
   ExclamationCircleIcon,
-  BookmarkIcon
+  BookmarkIcon,
+  SparklesIcon
 } from '@heroicons/react/24/outline';
 
 /**
@@ -25,7 +26,8 @@ export default function PipelineConfigItem({
   config,
   pipelineStatus,
   children,
-  processOrigin = 'manual'
+  processOrigin = 'manual',
+  isUsingGlobalAI = false
 }) {
   const [localExpanded, setLocalExpanded] = useState(isExpanded);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -122,6 +124,14 @@ export default function PipelineConfigItem({
               {processOrigin === 'auto' && (
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                   Auto
+                </span>
+              )}
+              
+              {/* Global AI Badge */}
+              {isUsingGlobalAI && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                  <SparklesIcon className="h-3 w-3 mr-1" />
+                  Global AI
                 </span>
               )}
               
