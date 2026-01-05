@@ -18,6 +18,7 @@ import EnvironmentSetupForm from './processes/EnvironmentSetupForm';
 import ApiSettingsModal from './ApiSettingsModal';
 import PipelineConfigItem from './PipelineConfigItem';
 import PipelineFileSelector from './PipelineFileSelector';
+import GlobalAIConfig from './GlobalAIConfig';
 import { usePipelineConfig } from '../hooks/usePipelineConfig';
 
 export default function TabPanel({
@@ -62,11 +63,14 @@ export default function TabPanel({
   // Pipeline configuration hook
   const {
     pipelineConfigs,
+    globalAIConfig,
     saveProcessConfig,
     getProcessConfig,
     isProcessConfigured,
     validatePipelineConfigs,
-    getBackendConfig
+    getBackendConfig,
+    applyGlobalAIToAll,
+    isUsingGlobalAI
   } = usePipelineConfig();
   
   // Pipeline expanded states - hangi process'lerin expand olduğunu takip eder
@@ -897,6 +901,12 @@ Important:
                   onFileUpload={onFileUpload}
                 />
 
+                {/* Global AI Configuration - PipelineFileSelector'dan hemen sonra */}
+                <GlobalAIConfig
+                  selectedProcesses={selectedProcesses}
+                  onApplyToAll={(config) => applyGlobalAIToAll(selectedProcesses, config)}
+                />
+
                 {/* Pipeline Validation Summary */}
                 {(() => {
                   const validation = validatePipelineConfigs(selectedProcesses);
@@ -976,6 +986,7 @@ Important:
                         config={config}
                         pipelineStatus={pipelineStatus[process.id]}
                         processOrigin={processOrigins[process.id]}
+                        isUsingGlobalAI={isUsingGlobalAI(process.id)}
                       >
                         {/* Form Component Render - Her process'in kendi formu */}
                         {ProcessFormComponent && (

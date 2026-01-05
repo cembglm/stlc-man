@@ -10,6 +10,57 @@ export function usePipelineConfig() {
   // Her process için yapılandırma durumu
   const [pipelineConfigs, setPipelineConfigs] = useState({});
   
+  // Global AI configuration state
+  const [globalAIConfig, setGlobalAIConfig] = useState(null);
+  
+  /**
+   * Global AI configuration'ı kaydet
+   * @param {object} config - Global AI config (aiModel, temperature, topP, maxTokens)
+   */
+  const saveGlobalAIConfig = useCallback((config) => {
+    setGlobalAIConfig(config);
+    console.log('[usePipelineConfig] Global AI config saved:', config);
+  }, []);
+  
+  /**
+   * Global AI configuration'ı tüm seçili process'lere uygula
+   * @param {Set} selectedProcesses - Seçili process ID'leri
+   * @param {object} config - Global AI config
+   */
+  const applyGlobalAIToAll = useCallback((selectedProcesses, config) => {
+    const processArray = Array.from(selectedProcesses);
+    
+    setPipelineConfigs(prev => {
+      const updated = { ...prev };
+      
+      processArray.forEach(processId => {
+        updated[processId] = {
+          ...(updated[processId] || {}),
+          aiModel: config.aiModel,
+          temperature: config.temperature,
+          topP: config.topP,
+          maxTokens: config.maxTokens,
+          usingGlobalAI: true,
+          isConfigured: updated[processId]?.isConfigured || false
+        };
+      });
+      
+      return updated;
+    });
+    
+    saveGlobalAIConfig(config);
+    console.log(`[usePipelineConfig] Global AI config applied to ${processArray.length} processes`);
+  }, [saveGlobalAIConfig]);
+  
+  /**
+   * Bir process'in global AI kullanıp kullanmadığını kontrol et
+   * @param {string} processId - Process ID
+   * @returns {boolean} Global AI kullanıyor mu?
+   */
+  const isUsingGlobalAI = useCallback((processId) => {
+    return pipelineConfigs[processId]?.usingGlobalAI === true;
+  }, [pipelineConfigs]);
+  
   /**
    * Bir process için konfigürasyonu kaydet
    * @param {string} processId - Process ID (örn: 'test-scenario-generation')
@@ -21,7 +72,9 @@ export function usePipelineConfig() {
       [processId]: {
         ...config,
         isConfigured: true,
-        configuredAt: new Date().toISOString()
+        configuredAt: new Date().toISOString(),
+        // Eğer kullanıcı manuel AI ayarları yaptıysa, global AI bayrağını kaldır
+        usingGlobalAI: config.aiModel ? false : (prev[processId]?.usingGlobalAI || false)
       }
     }));
     console.log(`[usePipelineConfig] Configuration saved for ${processId}:`, config);
@@ -114,12 +167,16 @@ export function usePipelineConfig() {
   
   return {
     pipelineConfigs,
+    globalAIConfig,
     saveProcessConfig,
     getProcessConfig,
     isProcessConfigured,
     clearProcessConfig,
     clearAllConfigs,
     validatePipelineConfigs,
-    getBackendConfig
+    getBackendConfig,
+    saveGlobalAIConfig,
+    applyGlobalAIToAll,
+    isUsingGlobalAI
   };
 }
