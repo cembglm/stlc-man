@@ -10,7 +10,7 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        logging.FileHandler('test_planning_service.log')
+        logging.StreamHandler()  # Console'a loglama
     ]
 )
 
