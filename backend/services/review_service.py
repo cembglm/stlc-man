@@ -11,7 +11,7 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        logging.FileHandler('review_service.log')  # Dosyaya yazdırma
+        logging.StreamHandler()  # Console'a loglama
     ]
 )
 
