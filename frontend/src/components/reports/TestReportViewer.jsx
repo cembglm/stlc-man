@@ -15,11 +15,57 @@ const TestReportViewer = ({ output, isLoading }) => {
   const [expandedSections, setExpandedSections] = React.useState({});
   const [viewMode, setViewMode] = React.useState('sections'); // 'sections' or 'full'
   
-  // Clean output: remove code block wrappers
+  // Clean output: remove code block wrappers and handle JSON responses
   const cleanOutput = React.useMemo(() => {
     if (!output) return '';
     
     let cleaned = output.trim();
+    
+    // Check if output is JSON format - convert to markdown
+    if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+      try {
+        const jsonData = JSON.parse(cleaned);
+        
+        // Try to extract markdown from common JSON fields
+        if (jsonData.full_report_markdown) {
+          cleaned = jsonData.full_report_markdown;
+        } else if (jsonData.report_content) {
+          cleaned = jsonData.report_content;
+        } else if (jsonData.markdown) {
+          cleaned = jsonData.markdown;
+        } else if (jsonData.sections) {
+          // Convert sections object to markdown with proper headers
+          const sections = jsonData.sections;
+          const markdownParts = [];
+          
+          for (const [key, section] of Object.entries(sections)) {
+            if (section && typeof section === 'object') {
+              const title = section.title || key.replace(/_/g, ' ').toUpperCase();
+              const icon = section.icon || '📋';
+              let content = section.content || '';
+              
+              // Remove duplicate header from content if present
+              // Content often starts with: # 📋 TEST SUMMARY
+              const contentLines = content.split('\n');
+              if (contentLines.length > 0 && contentLines[0].trim().startsWith('#')) {
+                // Remove first line if it's a header (duplicate)
+                content = contentLines.slice(1).join('\n').trim();
+              }
+              
+              // Create proper markdown section with ## header
+              markdownParts.push(`## ${icon} ${title}\n\n${content}`);
+            }
+          }
+          
+          cleaned = markdownParts.join('\n\n');
+          console.log('✅ Converted JSON sections to markdown:', markdownParts.length, 'sections');
+        }
+      } catch (e) {
+        console.warn('⚠️ Failed to parse JSON output, using as-is:', e.message);
+        // Continue with original text
+      }
+    }
+    
     // Remove ```markdown or ```json wrappers
     if (cleaned.startsWith('```')) {
       cleaned = cleaned.replace(/^```(?:markdown|json)?\n?/, '').replace(/\n?```$/, '');
@@ -35,50 +81,65 @@ const TestReportViewer = ({ output, isLoading }) => {
     const lines = cleanOutput.split('\n');
     const sections = [];
     let currentSection = null;
+    let headerContent = []; // Store content before first section
     
     lines.forEach((line, index) => {
       // Detect main sections (## headings with optional emoji/numbering)
-      const mainHeadingMatch = line.match(/^##\s+(?:\d+\.\s*)?(?:[📋📊🐛🎯⚠️💡📈📉✅❌🔍🚀📝]+\s*)?(.+)/);
+      // Pattern: ## [emoji] [number.] TITLE or ## TITLE
+      const mainHeadingMatch = line.match(/^##\s+(?:[📋📊🐛🎯⚠️💡📈📉✅❌🔍🚀📝🔄🏆📘💻⚡🧪]+\s*)?(?:\d+\.\s*)?(.+)/);
       
       if (mainHeadingMatch) {
         // Save previous section
         if (currentSection) {
           sections.push(currentSection);
+        } else if (headerContent.length > 0) {
+          // Save header content before first section
+          sections.push({
+            title: '__header__',
+            content: headerContent.join('\n'),
+            startLine: 0,
+            icon: '📄',
+            isHeader: true
+          });
+          headerContent = [];
         }
+        
+        // Extract icon from the line if present
+        const iconMatch = line.match(/^##\s+([📋📊🐛🎯⚠️💡📈📉✅❌🔍🚀📝🔄🏆📘💻⚡🧪]+)/);
         
         // Start new section
         currentSection = {
           title: mainHeadingMatch[1].trim(),
           content: [line],
           startLine: index,
-          icon: line.match(/[📋📊🐛🎯⚠️💡📈📉✅❌🔍🚀📝]/)?.[0] || '📄'
+          icon: iconMatch ? iconMatch[1] : '📄'
         };
       } else if (currentSection) {
         currentSection.content.push(line);
       } else {
         // Content before first section (header, title, etc.)
-        if (!sections.length || sections[0].title !== '__header__') {
-          sections.unshift({
-            title: '__header__',
-            content: [line],
-            startLine: 0,
-            icon: '📄'
-          });
-        } else {
-          sections[0].content.push(line);
-        }
+        headerContent.push(line);
       }
     });
     
     // Add last section
     if (currentSection) {
       sections.push(currentSection);
+    } else if (headerContent.length > 0) {
+      // If no sections found, treat everything as header
+      sections.push({
+        title: '__header__',
+        content: headerContent.join('\n'),
+        startLine: 0,
+        icon: '📄',
+        isHeader: true
+      });
     }
     
     // Convert content arrays to strings
     return sections.map(section => ({
       ...section,
-      content: section.content.join('\n')
+      content: Array.isArray(section.content) ? section.content.join('\n') : section.content
     }));
   }, [cleanOutput]);
 
@@ -106,11 +167,57 @@ const TestReportViewer = ({ output, isLoading }) => {
 
   // Download report as markdown file
   const downloadReport = () => {
-    const blob = new Blob([cleanOutput], { type: 'text/markdown' });
+    // Add metadata header to the report
+    const reportDate = new Date().toISOString().split('T')[0];
+    const reportTime = new Date().toLocaleTimeString();
+    
+    const enhancedReport = `<!--
+================================================================================
+STLC Manager - Test Report
+================================================================================
+Generated: ${reportDate} ${reportTime}
+Standards Compliance:
+  - ISTQB Foundation Level & Test Manager
+  - IEEE 829-2008 Test Documentation
+  - ISO/IEC/IEEE 29119-3 Software Testing
+================================================================================
+-->
+
+${cleanOutput}
+
+---
+
+## 📄 Document Information
+
+**Report Metadata:**
+- Document Type: ISTQB & IEEE 829 Compliant Test Report
+- Generated By: STLC Manager AI System
+- Generation Date: ${reportDate}
+- Generation Time: ${reportTime}
+- Format: Markdown
+- Standards: ISTQB Foundation/Test Manager, IEEE 829-2008, ISO/IEC/IEEE 29119-3
+
+**Usage:**
+- This report can be viewed in any Markdown viewer
+- Recommended viewers: VS Code, Typora, GitHub, GitLab
+- Can be converted to PDF using pandoc or similar tools
+- Tables and formatting are best viewed in Markdown-compatible viewers
+
+**Standards References:**
+- [ISTQB](https://www.istqb.org/) - International Software Testing Qualifications Board
+- [IEEE 829-2008](https://standards.ieee.org/) - IEEE Standard for Software Test Documentation
+- [ISO/IEC/IEEE 29119](https://www.iso.org/) - Software Testing Standards
+
+---
+
+*End of Report*
+`;
+    
+    const blob = new Blob([enhancedReport], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `test-report-${new Date().toISOString().split('T')[0]}.md`;
+    a.download = `STLC-Test-Report-${reportDate}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -156,10 +263,10 @@ const TestReportViewer = ({ output, isLoading }) => {
     return (
       <div className="space-y-3">
         {reportSections.map((section, index) => {
-          // Skip rendering internal header section separately
-          if (section.title === '__header__') {
+          // Skip rendering internal header section separately - it's shown at the top
+          if (section.title === '__header__' || section.isHeader) {
             return (
-              <div key={index} className="mb-6">
+              <div key={index} className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 border-2 border-blue-200">
                 <div className="prose prose-blue prose-lg max-w-none">
                   <ReactMarkdown components={markdownComponents}>
                     {section.content}
@@ -174,32 +281,34 @@ const TestReportViewer = ({ output, isLoading }) => {
           return (
             <div 
               key={index} 
-              className="border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow"
+              className="border-2 border-gray-300 rounded-xl overflow-hidden bg-white shadow-md hover:shadow-lg transition-all duration-200"
             >
               {/* Section Header - Clickable */}
               <button
                 onClick={() => toggleSection(index)}
-                className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 transition-colors text-left"
+                className="w-full flex items-center justify-between p-5 bg-gradient-to-r from-gray-50 via-white to-gray-50 hover:from-blue-50 hover:via-blue-50/50 hover:to-blue-50 transition-all duration-200 text-left border-b-2 border-gray-200"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl">{section.icon}</span>
-                  <h3 className="text-lg font-semibold text-gray-800">{section.title}</h3>
+                  <span className="text-3xl">{section.icon}</span>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-800">{section.title}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {isExpanded ? 'Click to collapse' : 'Click to expand'}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 mr-2">
-                    {isExpanded ? 'Collapse' : 'Expand'}
-                  </span>
                   {isExpanded ? (
-                    <ChevronDownIcon className="w-5 h-5 text-gray-600" />
+                    <ChevronDownIcon className="w-6 h-6 text-blue-600 font-bold" />
                   ) : (
-                    <ChevronRightIcon className="w-5 h-5 text-gray-600" />
+                    <ChevronRightIcon className="w-6 h-6 text-gray-400" />
                   )}
                 </div>
               </button>
 
               {/* Section Content - Collapsible */}
               {isExpanded && (
-                <div className="p-6 border-t border-gray-200 bg-white">
+                <div className="p-6 bg-white">
                   <div className="prose prose-blue prose-lg max-w-none">
                     <ReactMarkdown components={markdownComponents}>
                       {section.content}
@@ -264,10 +373,10 @@ const TestReportViewer = ({ output, isLoading }) => {
       <h4 className="text-lg font-semibold text-gray-700 mt-4 mb-2" {...props} />
     ),
     // Custom list styling
-    ul: ({ node, ...props }) => (
+    ul: ({ node, ordered, ...props }) => (
       <ul className="list-disc list-inside space-y-1 my-4" {...props} />
     ),
-    ol: ({ node, ...props }) => (
+    ol: ({ node, ordered, ...props }) => (
       <ol className="list-decimal list-inside space-y-1 my-4" {...props} />
     ),
     // Custom blockquote
@@ -281,21 +390,31 @@ const TestReportViewer = ({ output, isLoading }) => {
   };
 
   return (
-    <div className="test-report-viewer bg-white">
+    <div className="test-report-viewer bg-white rounded-lg shadow-lg">
       {/* Standards Badge Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 mb-6 rounded-t-lg">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 px-6 py-5 mb-0 rounded-t-lg border-b-4 border-yellow-400">
+        <div className="mb-3">
+          <h2 className="text-2xl font-bold text-white mb-1 flex items-center gap-2">
+            📊 STLC Test Report
+            <span className="text-sm font-normal bg-white/20 px-2 py-1 rounded">Professional Standards Compliant</span>
+          </h2>
+          <p className="text-blue-100 text-sm">
+            Generated using international software testing standards and best practices
+          </p>
+        </div>
+        
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/20 text-white">
-              📘 ISTQB Foundation
+            <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-white/90 text-blue-700 border-2 border-white shadow-sm">
+              📘 ISTQB Foundation Level
             </span>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/20 text-white">
-              📘 ISTQB Test Manager
+            <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-white/90 text-indigo-700 border-2 border-white shadow-sm">
+              📘 ISTQB Test Manager (Advanced)
             </span>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/20 text-white">
+            <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-white/90 text-purple-700 border-2 border-white shadow-sm">
               📘 IEEE 829-2008
             </span>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white/20 text-white">
+            <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-white/90 text-pink-700 border-2 border-white shadow-sm">
               📘 ISO/IEC/IEEE 29119-3
             </span>
           </div>
@@ -304,14 +423,30 @@ const TestReportViewer = ({ output, isLoading }) => {
           <div className="flex items-center gap-2">
             <button
               onClick={downloadReport}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/20 text-white hover:bg-white/30 transition-colors"
-              title="Download report as Markdown"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-white text-blue-700 hover:bg-blue-50 transition-colors shadow-md border-2 border-white"
+              title="Download report as Markdown file"
             >
               <ArrowDownTrayIcon className="w-4 h-4" />
-              Download
+              Download Report
             </button>
           </div>
         </div>
+      </div>
+      
+      {/* Standards Info Panel */}
+      <div className="bg-blue-50 border-b-2 border-blue-200 px-6 py-3">
+        <details className="group">
+          <summary className="cursor-pointer text-sm font-medium text-blue-900 hover:text-blue-700 flex items-center gap-2">
+            <span className="text-blue-600 group-open:rotate-90 transition-transform">▶</span>
+            About Testing Standards Used in This Report
+          </summary>
+          <div className="mt-3 pl-6 text-sm text-blue-800 space-y-2">
+            <p><strong>ISTQB Foundation Level:</strong> Provides basic testing terminology, test process methodology, and fundamental quality metrics.</p>
+            <p><strong>ISTQB Test Manager:</strong> Advanced test management techniques including risk-based testing, strategic analysis, and resource optimization.</p>
+            <p><strong>IEEE 829-2008:</strong> International standard for software test documentation structure, ensuring comprehensive and consistent reporting.</p>
+            <p><strong>ISO/IEC/IEEE 29119-3:</strong> Modern test documentation best practices, quality assessment metrics, and agile methodology compliance.</p>
+          </div>
+        </details>
       </div>
 
       {/* View Mode Toggle & Section Controls */}

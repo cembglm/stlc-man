@@ -151,77 +151,30 @@ class TestCodeGenerationService:
     
     def get_unique_test_cases_by_process_title(self, process_title: str) -> List[Dict[str, Any]]:
         """
-        Process title'a göre optimize edilmiş unique test case'leri getirir
+        Process name'e göre unique test case'leri session_history'den getirir
+        Path: session_history->processes->test_case_optimization->output->unique_test_cases
         """
         try:
-            # Test case optimization sonuçlarından unique test case'leri al
-            optimization_collection = self.db["test_case_optimizations"]
+            # Session history'den process_name'e göre test case'leri al
+            query = {
+                "processes.test_case_optimization.process_name": process_title
+            }
             
-            optimization_result = optimization_collection.find_one(
-                {"process_title": process_title}
-            )
+            session = self.session_collection.find_one(query)
             
-            if optimization_result and optimization_result.get("optimization_results"):
-                unique_cases = optimization_result["optimization_results"].get("unique_test_cases", [])
-                logger.info(f"Found {len(unique_cases)} unique test cases for process: {process_title}")
+            if session:
+                test_case_optimization = session.get("processes", {}).get("test_case_optimization", {})
+                output = test_case_optimization.get("output", {})
+                unique_cases = output.get("unique_test_cases", [])
+                
+                logger.info(f"Found {len(unique_cases)} unique test cases for process '{process_title}' from session_history")
                 return unique_cases
-            
-            # Fallback: session_history'den direkt test case'leri çek
-            logger.info(f"No optimization results found, trying direct test cases for: {process_title}")
-            return self._get_test_cases_from_session_history(process_title)
+            else:
+                logger.warning(f"No session found for process name: {process_title}")
+                return []
             
         except Exception as e:
             logger.error(f"Error getting unique test cases: {str(e)}")
-            return []
-    
-    def _get_test_cases_from_session_history(self, process_title: str) -> List[Dict[str, Any]]:
-        """
-        Session history'den test case'leri direkt çeker (fallback)
-        """
-        try:
-            pipeline = [
-                {
-                    "$match": {
-                        "$or": [
-                            {"processes.test_case_generation.output.data.test_case_results.metadata.selected_process_title": process_title},
-                            {"processes.test_scenario_generation.process_title": process_title}
-                        ]
-                    }
-                },
-                {
-                    "$project": {
-                        "test_case_results": "$processes.test_case_generation.output.data.test_case_results",
-                        "scenarios": "$processes.test_scenario_generation.output.test_scenarios.TestScenarios"
-                    }
-                }
-            ]
-            
-            results = list(self.session_collection.aggregate(pipeline))
-            test_cases = []
-            
-            for result in results:
-                # Test case generation sonuçlarından al
-                test_case_results = result.get("test_case_results", [])
-                for tcr in test_case_results:
-                    cases = tcr.get("test_cases", [])
-                    test_cases.extend(cases)
-                
-                # Test scenario generation sonuçlarından al
-                scenarios = result.get("scenarios", [])
-                for scenario in scenarios:
-                    test_cases.append({
-                        "TestCaseID": scenario.get("ScenarioID", ""),
-                        "Title": scenario.get("Title", ""),
-                        "Description": scenario.get("Description", ""),
-                        "Objective": scenario.get("Objective", ""),
-                        "Category": scenario.get("Category", "")
-                    })
-            
-            logger.info(f"Found {len(test_cases)} test cases from session history")
-            return test_cases
-            
-        except Exception as e:
-            logger.error(f"Error getting test cases from session history: {str(e)}")
             return []
     
     async def analyze_source_code(self, source_files: List, model_name: str = None, api_key: str = None) -> Dict[str, Any]:
@@ -326,9 +279,13 @@ class TestCodeGenerationService:
                                 session_id: str = None,
                                 environment_name: str = None,
                                 output_format: str = "JSON",
-                                api_key: str = None) -> Dict[str, Any]:
+                                api_key: str = None,
+                                max_test_cases: int = None) -> Dict[str, Any]:
         """
         Ana test code generation fonksiyonu
+        
+        Args:
+            max_test_cases: Optional limit on number of test cases to process (for batch processing)
         """
         try:
             # Validate required environment_name
@@ -345,6 +302,7 @@ class TestCodeGenerationService:
             logger.info(f"  - environment_name: {environment_name}")
             logger.info(f"  - model_name: {model_name}")
             logger.info(f"  - api_key provided: {'Yes' if api_key else 'No'}")
+            logger.info(f"  - max_test_cases: {max_test_cases if max_test_cases else 'unlimited'}")
             
             # 1. Environment setup bilgilerini al
             environment_setups = self.get_environment_setups()
@@ -361,6 +319,12 @@ class TestCodeGenerationService:
             unique_test_cases = self.get_unique_test_cases_by_process_title(process_title)
             if not unique_test_cases:
                 return {"success": False, "error": "No unique test cases found for this process"}
+            
+            # Apply max_test_cases limit if specified
+            if max_test_cases and max_test_cases > 0:
+                original_count = len(unique_test_cases)
+                unique_test_cases = unique_test_cases[:max_test_cases]
+                logger.info(f"⚠️ Limited test cases from {original_count} to {len(unique_test_cases)} due to max_test_cases limit")
             
             # 3. Source code'u analiz et
             code_analysis = await self.analyze_source_code(source_files, model_name, api_key)
@@ -810,18 +774,48 @@ Return ONLY the executable test code, no explanations or markdown formatting.
         except Exception as e:
             logger.error(f"Error saving test generation results: {str(e)}")
 
-    def get_available_process_titles(self) -> List[str]:
+    def get_available_process_titles(self) -> List[Dict[str, Any]]:
         """
-        Test case optimization'dan mevcut process title'ları getirir
+        Session history'den test case optimization process name'leri getirir
+        Her process için unique test case sayısını da içerir
+        Path: session_history->processes->test_case_optimization->process_name
         """
         try:
-            optimization_collection = self.db["test_case_optimizations"]
+            # Session history'den process name ve unique test case sayılarını al
+            pipeline = [
+                {
+                    "$match": {
+                        "processes.test_case_optimization": {"$exists": True}
+                    }
+                },
+                {
+                    "$project": {
+                        "process_name": "$processes.test_case_optimization.process_name",
+                        "unique_test_cases_count": {
+                            "$size": {
+                                "$ifNull": ["$processes.test_case_optimization.output.unique_test_cases", []]
+                            }
+                        }
+                    }
+                },
+                {
+                    "$sort": {"process_name": 1}
+                }
+            ]
             
-            # Unique process title'ları al
-            process_titles = optimization_collection.distinct("process_title")
+            results = list(self.session_collection.aggregate(pipeline))
             
-            logger.info(f"Found {len(process_titles)} available process titles")
-            return sorted(process_titles)
+            # Process name ve count bilgilerini dict olarak döndür
+            process_info = [
+                {
+                    "process_name": r["process_name"],
+                    "test_case_count": r["unique_test_cases_count"]
+                }
+                for r in results if r.get("process_name")
+            ]
+            
+            logger.info(f"Found {len(process_info)} available process names with test case counts from session_history")
+            return process_info
             
         except Exception as e:
             logger.error(f"Error getting available process titles: {str(e)}")

@@ -2269,9 +2269,94 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
     if (activeTab === 'test-closure' && outputs && outputs[activeTab]) {
       const testClosureOutput = outputs[activeTab];
       const isLoading = testClosureOutput.status === 'loading' || testClosureOutput.status === 'running' || testClosureOutput.status === 'processing';
+      const qualityEval = testClosureOutput.quality_evaluation;
       
       return (
         <div className="space-y-6">
+          {/* Quality Metrics Section - Show prominently if available */}
+          {qualityEval && testClosureOutput.status === 'completed' && (
+            <section>
+              <h3 className="text-lg font-medium mb-3">📊 Closure Report Quality Assessment</h3>
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+                {/* Overall Score Banner */}
+                <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-4 mb-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600 mb-1">Overall Quality Score</p>
+                      <p className="text-3xl font-bold text-purple-900">
+                        {(qualityEval.overall_score * 100).toFixed(1)}%
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Based on ISO/IEC/IEEE 29119-3, IEEE 829, ISTQB standards
+                      </p>
+                    </div>
+                    <div className="w-32 h-32">
+                      <svg viewBox="0 0 100 100" className="transform -rotate-90">
+                        <circle
+                          cx="50"
+                          cy="50"
+                          r="40"
+                          fill="none"
+                          stroke="#e5e7eb"
+                          strokeWidth="8"
+                        />
+                        <circle
+                          cx="50"
+                          cy="50"
+                          r="40"
+                          fill="none"
+                          stroke="#8b5cf6"
+                          strokeWidth="8"
+                          strokeDasharray={`${qualityEval.overall_score * 251.2} 251.2`}
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quality Dimensions Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                    <p className="text-xs text-blue-600 font-medium mb-1">📋 Completeness</p>
+                    <p className="text-xl font-bold text-blue-900">
+                      {(qualityEval.completeness * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="bg-green-50 rounded-lg p-3 border border-green-200">
+                    <p className="text-xs text-green-600 font-medium mb-1">🎯 Coverage</p>
+                    <p className="text-xl font-bold text-green-900">
+                      {(qualityEval.coverage * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-200">
+                    <p className="text-xs text-yellow-600 font-medium mb-1">✨ Clarity</p>
+                    <p className="text-xl font-bold text-yellow-900">
+                      {(qualityEval.clarity * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                    <p className="text-xs text-purple-600 font-medium mb-1">🔬 Depth</p>
+                    <p className="text-xl font-bold text-purple-900">
+                      {(qualityEval.depth * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="bg-red-50 rounded-lg p-3 border border-red-200">
+                    <p className="text-xs text-red-600 font-medium mb-1">✓ Consistency</p>
+                    <p className="text-xl font-bold text-red-900">
+                      {(qualityEval.consistency * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+
+                {/* Methodology Info */}
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                  ℹ️ <strong>For Academic Research:</strong> These metrics use a deterministic, model-agnostic methodology suitable for academic studies. All scores are reproducible and standards-based.
+                </div>
+              </div>
+            </section>
+          )}
+
           <section>
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-lg font-medium">Test Closure Report</h3>
@@ -2306,6 +2391,9 @@ export default function OutputPanel({ output, outputs, activeTab, processes, out
                 )}
                 {testClosureOutput.metrics && (
                   <p><strong>Metrics Available:</strong> Yes</p>
+                )}
+                {qualityEval && (
+                  <p><strong>Quality Score:</strong> {(qualityEval.overall_score * 100).toFixed(1)}%</p>
                 )}
                 <p><strong>Last Updated:</strong> {testClosureOutput.timestamp ? new Date(testClosureOutput.timestamp).toLocaleString() : new Date().toLocaleString()}</p>
               </div>

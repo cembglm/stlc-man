@@ -6,6 +6,11 @@ Handles test code execution via AI providers (LM Studio and Gemini)
 Protocol: JSON-RPC 2.0
 """
 
+# Windows multiprocessing için terminal size hatası düzeltmesi
+import os
+os.environ.setdefault('COLUMNS', '80')
+os.environ.setdefault('LINES', '24')
+
 import asyncio
 import json
 import logging
@@ -17,7 +22,6 @@ import google.generativeai as genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
-import os
 from dotenv import load_dotenv
 
 # Load environment variables

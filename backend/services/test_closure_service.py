@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 from core.database import get_database
+from services.report_quality_evaluator import ReportQualityEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +229,12 @@ class TestClosureService:
             # Update date range
             created_at = session.get("created_at")
             if created_at:
+                # Normalize created_at to string for consistent comparison
+                if isinstance(created_at, datetime):
+                    created_at = created_at.isoformat()
+                elif not isinstance(created_at, str):
+                    created_at = str(created_at)
+                
                 if not metrics["date_range"]["start"] or created_at < metrics["date_range"]["start"]:
                     metrics["date_range"]["start"] = created_at
                 if not metrics["date_range"]["end"] or created_at > metrics["date_range"]["end"]:
@@ -272,9 +279,14 @@ class TestClosureService:
                 if model:
                     metrics["models_used"].add(model)
                 
-                # Count test cases
-                data = output.get("data", {})
-                test_case_results = data.get("test_case_results", [])
+                # Count test cases - support multiple data structures
+                # Structure 1: output['test_case_results'] (direct)
+                test_case_results = output.get("test_case_results", [])
+                
+                # Structure 2: output['data']['test_case_results'] (nested in data)
+                if not test_case_results:
+                    data = output.get("data", {})
+                    test_case_results = data.get("test_case_results", [])
                 
                 for result in test_case_results:
                     test_cases = result.get("test_cases", [])
@@ -680,7 +692,7 @@ Generate a comprehensive Test Closure Report following **ISO/IEC/IEEE 29119-3** 
             date_to: End date filter
             
         Returns:
-            Dictionary containing metrics and AI prompt
+            Dictionary containing metrics, AI prompt, and session data (for quality evaluation)
         """
         # Fetch sessions
         sessions = await self.fetch_sessions_for_closure(
@@ -694,7 +706,8 @@ Generate a comprehensive Test Closure Report following **ISO/IEC/IEEE 29119-3** 
                 "success": False,
                 "error": "No sessions found for the specified criteria",
                 "metrics": None,
-                "prompt": None
+                "prompt": None,
+                "all_session_data": []
             }
         
         # Aggregate metrics
@@ -707,8 +720,228 @@ Generate a comprehensive Test Closure Report following **ISO/IEC/IEEE 29119-3** 
             "success": True,
             "metrics": metrics,
             "prompt": prompt,
-            "sessions_analyzed": len(sessions)
+            "sessions_analyzed": len(sessions),
+            "all_session_data": sessions  # Return sessions for quality evaluation
         }
+    
+    def evaluate_closure_report_quality(
+        self,
+        report_content: str,
+        metrics: Dict[str, Any] = None,
+        all_session_data: List[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Evaluate the quality of a generated test closure report using deterministic metrics
+        
+        This method uses the same evaluation methodology as Test Reporting:
+        "Controlled, Model-Agnostic, and Fully Deterministic Evaluation Methodology 
+        for LLM-Generated Test Reports and Test Closure"
+        
+        Note: Unlike Test Reporting, Test Closure focuses on high-level closure decision
+        and does NOT calculate process-level quality metrics (those are in Test Reporting).
+        
+        Quality Dimensions (0-1 normalized scale):
+        1. Completeness: Presence of required closure sections
+        2. Coverage: Faithfulness to aggregated test data
+        3. Clarity: Statistical readability and ambiguity
+        4. Depth: Analytical vs descriptive content
+        5. Consistency: Numeric constraint validation
+        
+        Args:
+            report_content: The LLM-generated closure report (markdown format)
+            metrics: Aggregated test metrics (ground truth data)
+            all_session_data: List of session documents (same as Test Reporting)
+            
+        Returns:
+            Dictionary containing:
+            - overall_score: Weighted overall quality score (0-1)
+            - completeness: Section completeness score (0-1)
+            - coverage: Data coverage score (0-1)
+            - clarity: Clarity score (0-1)
+            - depth: Analysis depth score (0-1)
+            - consistency: Numeric consistency score (0-1)
+            - calculation_details: Detailed metrics breakdown
+        """
+        # Initialize evaluator with equal weights (same as Test Reporting)
+        # All dimensions are equally important for academic objectivity
+        evaluator = ReportQualityEvaluator(weights={
+            "completeness": 0.20,  # Equal: All closure sections must be present
+            "coverage": 0.20,      # Equal: Coverage of test data
+            "clarity": 0.20,       # Equal: Must be clear for stakeholders
+            "depth": 0.20,         # Equal: Deep analysis and decision rationale required
+            "consistency": 0.20    # Equal: Numeric accuracy
+        })
+        
+        # Prepare execution data from session data (SAME as Test Reporting)
+        execution_data = {}
+        if all_session_data and len(all_session_data) > 0:
+            first_session = all_session_data[0]
+            if first_session and isinstance(first_session, dict):
+                processes = first_session.get("processes", {})
+                if isinstance(processes, dict):
+                    # Extract test cases and scenarios for coverage calculation
+                    for process_name, process_data in processes.items():
+                        output = process_data.get("output", {})
+                        if "test_cases" in output or "test_scenarios" in output:
+                            if "test_cases" not in execution_data:
+                                execution_data = {}
+                            execution_data.update({
+                                "test_cases": output.get("test_cases", []),
+                                "test_scenarios": output.get("test_scenarios", {}).get("TestScenarios", [])
+                            })
+        
+        # Prepare metadata for consistency validation (SAME as Test Reporting)
+        metadata = {
+            "report_type": "test_closure",
+            "total_sessions": metrics.get("total_sessions", 0) if metrics else 0,
+            "test_metrics": metrics.get("test_execution", {}) if metrics else {},
+            "sessions_analyzed": len(all_session_data) if all_session_data else 0
+        }
+        
+        # Evaluate report quality (SAME as Test Reporting)
+        quality_evaluation = evaluator.evaluate_report(
+            report_content=report_content,
+            execution_data=execution_data,
+            metadata=metadata
+        )
+        
+        logger.info(
+            f"[Closure Quality] Overall Score: {quality_evaluation['overall_score']:.4f} | "
+            f"Completeness: {quality_evaluation['completeness']:.4f} | "
+            f"Coverage: {quality_evaluation['coverage']:.4f} | "
+            f"Clarity: {quality_evaluation['clarity']:.4f} | "
+            f"Depth: {quality_evaluation['depth']:.4f} | "
+            f"Consistency: {quality_evaluation['consistency']:.4f}"
+        )
+        
+        return quality_evaluation
+    
+    async def save_closure_report_to_database(
+        self,
+        session_ids: List[str],
+        report_content: str,
+        quality_evaluation: Dict[str, Any],
+        metadata: Dict[str, Any]
+    ) -> str:
+        """
+        Save generated closure report as a NEW independent session in session_history.
+        This allows multiple closure reports for the same sessions with different models/criteria.
+        
+        Similar to Test Reporting module, each closure report generation creates a new
+        independent session record, enabling:
+        - Multiple closure reports from same source sessions
+        - Iterative closure report refinement
+        - Historical tracking of closure decisions
+        - Comparison of different AI models for closure analysis
+        
+        Args:
+            session_ids: List of analyzed session IDs (source sessions)
+            report_content: Generated closure report markdown
+            quality_evaluation: Quality metrics for the report
+            metadata: Closure metadata (model, sessions analyzed, etc.)
+            
+        Returns:
+            New session ID for the test closure session
+        """
+        await self.initialize()
+        collection = self.db["session_history"]
+        
+        # Generate unique session_id for this test closure session
+        # Include microseconds to ensure uniqueness even for rapid successive calls
+        timestamp = datetime.now()
+        session_id = f"test_closure_{timestamp.strftime('%Y%m%d_%H%M%S')}_{timestamp.microsecond}"
+        
+        # Create descriptive process name
+        session_count = len(session_ids) if session_ids else metadata.get("sessions_analyzed", 0)
+        model_name = metadata.get("model_used", "Unknown")
+        
+        process_name = f"Test Closure: {session_count} Session(s) - {model_name}"
+        
+        # Build the new session document as an INDEPENDENT session
+        session_document = {
+            "session_id": session_id,
+            "created_at": timestamp.isoformat(),
+            "updated_at": timestamp.isoformat(),
+            "process_name": process_name,
+            "session_type": "test_closure",  # Mark as test closure session
+            
+            # Metadata about the closure process
+            "closure_metadata": {
+                "analyzed_session_ids": session_ids,
+                "session_count": session_count,
+                "model_used": model_name,
+                "provider": metadata.get("provider", "Unknown"),
+                "report_generated_at": timestamp.isoformat(),
+                "date_from": metadata.get("date_from"),
+                "date_to": metadata.get("date_to"),
+                "total_test_scenarios": metadata.get("total_test_scenarios", 0),
+                "total_test_cases": metadata.get("total_test_cases", 0),
+                "total_test_execution": metadata.get("total_test_execution", 0)
+            },
+            
+            # Store the closure report as a process output (consistent with other sessions)
+            "processes": {
+                "test_closure": {
+                    "status": "completed",
+                    "timestamp": timestamp.isoformat(),
+                    "process_name": "Test Closure Report Generation",
+                    "model_used": model_name,
+                    
+                    "input": {
+                        "session_ids": session_ids,
+                        "session_count": session_count,
+                        "date_from": metadata.get("date_from"),
+                        "date_to": metadata.get("date_to"),
+                        "aggregated_metrics": metadata.get("metrics")
+                    },
+                    
+                    "output": {
+                        "success": True,
+                        "report_content": report_content,
+                        "report_length": len(report_content),
+                        "generated_at": timestamp.isoformat(),
+                        
+                        # Include quality evaluation in output
+                        "quality_evaluation": {
+                            "overall_score": quality_evaluation.get("overall_score", 0),
+                            "completeness": quality_evaluation.get("completeness", 0),
+                            "coverage": quality_evaluation.get("coverage", 0),
+                            "clarity": quality_evaluation.get("clarity", 0),
+                            "depth": quality_evaluation.get("depth", 0),
+                            "consistency": quality_evaluation.get("consistency", 0),
+                            "weights_used": quality_evaluation.get("weights_used", {}),
+                            "calculation_details": quality_evaluation.get("calculation_details", {})
+                        }
+                    },
+                    
+                    "metadata": {
+                        "model_used": model_name,
+                        "provider": metadata.get("provider", "Unknown"),
+                        "sessions_analyzed": session_count,
+                        "generation_time_seconds": metadata.get("generation_time", 0),
+                        
+                        # Aggregated test metrics summary
+                        "test_summary": {
+                            "total_scenarios": metadata.get("total_test_scenarios", 0),
+                            "total_test_cases": metadata.get("total_test_cases", 0),
+                            "total_executed": metadata.get("total_test_execution", 0),
+                            "pass_rate": metadata.get("pass_rate", 0)
+                        }
+                    }
+                }
+            }
+        }
+        
+        # Insert as a NEW session document
+        await collection.insert_one(session_document)
+        
+        logger.info(f"✅ Test closure report saved as new independent session: {session_id}")
+        logger.info(f"   - Analyzed sessions: {session_count}")
+        logger.info(f"   - Model: {model_name}")
+        logger.info(f"   - Quality score: {quality_evaluation.get('overall_score', 0):.4f}")
+        logger.info(f"   - Report length: {len(report_content)} characters")
+        
+        return session_id
 
 
 # Singleton instance

@@ -150,6 +150,8 @@ export default function TestReportingForm({
   const [promptPreview, setPromptPreview] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
+  const [processPrompt, setProcessPrompt] = useState(''); // Store loaded process prompt
+  const [showProcessPrompt, setShowProcessPrompt] = useState(false); // Toggle visibility
 
   // Auto-select first available LOCAL model when models load (prefer LM Studio over Gemini)
   useEffect(() => {
@@ -161,6 +163,24 @@ export default function TestReportingForm({
       console.log('[TestReporting] Auto-selected model:', modelToSelect.key, modelToSelect.name);
     }
   }, [availableModels, modelsLoading, selectedModel]);
+
+  // Load process prompt on mount
+  useEffect(() => {
+    const loadProcessPrompt = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/prompts/test-reporting');
+        if (response.ok) {
+          const data = await response.json();
+          setProcessPrompt(data.prompt_text || '');
+          console.log('[TestReporting] Process prompt loaded');
+        }
+      } catch (error) {
+        console.error('[TestReporting] Error loading process prompt:', error);
+      }
+    };
+    
+    loadProcessPrompt();
+  }, []);
 
   // Fetch available sessions on mount
   const fetchSessions = useCallback(async () => {
@@ -893,6 +913,47 @@ Please ensure the backend services are running:
           </div>
         </div>
       </div>
+
+      {/* Process Prompt Section */}
+      {processPrompt && (
+        <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-gray-900 flex items-center">
+              📝 Process Prompt
+            </h3>
+            <button
+              onClick={() => setShowProcessPrompt(!showProcessPrompt)}
+              className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+            >
+              {showProcessPrompt ? 'Hide' : 'Show'} Prompt
+            </button>
+          </div>
+          
+          {showProcessPrompt && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
+                {processPrompt}
+              </pre>
+              <div className="mt-3 flex items-center justify-between">
+                <p className="text-xs text-gray-500">
+                  This is the default prompt used for test reporting analysis
+                </p>
+                <button
+                  onClick={() => {
+                    setCustomPrompt(processPrompt);
+                    setPromptPreview(processPrompt);
+                    setShowPromptEditor(true);
+                    toast.success('Prompt loaded in editor');
+                  }}
+                  className="text-sm px-3 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+                >
+                  Edit Prompt
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Generation Progress */}
       {isGenerating && (

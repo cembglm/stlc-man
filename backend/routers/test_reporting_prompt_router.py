@@ -1,7 +1,6 @@
 """
 test_reporting_prompt_router.py
---------------------------------
-Test Reporting prompt yönetimi için API endpoint'leri
+Test Reporting prompt management API endpoints
 """
 
 from fastapi import APIRouter, HTTPException, Body
@@ -23,7 +22,7 @@ class TestReportingPromptResponse(BaseModel):
 @router.get("/api/prompts/test-reporting", response_model=TestReportingPromptResponse)
 async def get_test_reporting_prompt():
     """
-    Test reporting için prompt ve system_suffix döndürür.
+    Returns prompt and system_suffix for test reporting.
     """
     try:
         db = get_db()
@@ -64,7 +63,7 @@ Data:
 @router.post("/api/prompts/test-reporting", response_model=PromptSaveResponse)
 async def save_test_reporting_prompt(data: Dict[str, Any] = Body(...)):
     """
-    Test reporting için yeni prompt ekler/günceller.
+    Adds or updates test reporting prompt.
     """
     try:
         db = get_db()

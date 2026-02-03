@@ -391,8 +391,179 @@ class LLMClient:
         # Yoksa direkt model key'i kullan
         return model_key
 
+    def _split_prompt_into_chunks(self, prompt: str, max_chars: int = 6000) -> list:
+        """
+        Split a long prompt into smaller chunks for context-limited models.
+        Each chunk will be ~1500 tokens (6000 chars ≈ 1500 tokens).
+        
+        Args:
+            prompt: The full prompt text
+            max_chars: Maximum characters per chunk (default: 6000 = ~1500 tokens)
+            
+        Returns:
+            List of prompt chunks
+        """
+        if len(prompt) <= max_chars:
+            return [prompt]
+        
+        chunks = []
+        current_pos = 0
+        total_length = len(prompt)
+        
+        while current_pos < total_length:
+            # Calculate end position
+            end_pos = min(current_pos + max_chars, total_length)
+            
+            # Try to break at a natural boundary (paragraph, sentence, or word)
+            if end_pos < total_length:
+                # Look for paragraph break
+                last_para = prompt.rfind('\n\n', current_pos, end_pos)
+                if last_para > current_pos + max_chars // 2:  # At least halfway
+                    end_pos = last_para + 2
+                else:
+                    # Look for sentence break
+                    last_sentence = max(
+                        prompt.rfind('. ', current_pos, end_pos),
+                        prompt.rfind('.\n', current_pos, end_pos),
+                        prompt.rfind('! ', current_pos, end_pos),
+                        prompt.rfind('? ', current_pos, end_pos)
+                    )
+                    if last_sentence > current_pos + max_chars // 2:
+                        end_pos = last_sentence + 2
+                    else:
+                        # Look for word break
+                        last_space = prompt.rfind(' ', current_pos, end_pos)
+                        if last_space > current_pos + max_chars // 2:
+                            end_pos = last_space + 1
+            
+            chunk = prompt[current_pos:end_pos]
+            chunks.append(chunk)
+            current_pos = end_pos
+        
+        return chunks
+    
+    def _is_context_overflow_error(self, error_message: str) -> bool:
+        """Check if error is related to context length overflow"""
+        overflow_keywords = [
+            "context length",
+            "context overflow",
+            "overflows",
+            "4096 tokens",
+            "larger context",
+            "shorter input"
+        ]
+        error_lower = error_message.lower()
+        return any(keyword in error_lower for keyword in overflow_keywords)
+    
+    async def _generate_with_chunking(
+        self, 
+        prompt: str, 
+        temperature: float = 0.7, 
+        max_tokens: int = 2000,
+        max_chars_per_chunk: int = 6000
+    ) -> str:
+        """
+        Generate response by splitting prompt into chunks and combining results.
+        Used when context overflow occurs.
+        
+        Args:
+            prompt: The full prompt
+            temperature: Generation temperature
+            max_tokens: Max tokens per chunk response (reduced for 4096 limit)
+            max_chars_per_chunk: Max characters per chunk (~1500 tokens)
+            
+        Returns:
+            Combined response from all chunks
+        """
+        self.logger.info(f"🔪 Chunking prompt: {len(prompt)} chars into chunks of ~{max_chars_per_chunk} chars")
+        
+        chunks = self._split_prompt_into_chunks(prompt, max_chars_per_chunk)
+        self.logger.info(f"📦 Created {len(chunks)} chunks")
+        
+        chunk_responses = []
+        
+        for i, chunk in enumerate(chunks, 1):
+            self.logger.info(f"🔄 Processing chunk {i}/{len(chunks)} ({len(chunk)} chars)")
+            
+            # Minimal header to save tokens
+            chunk_prompt = f"[{i}/{len(chunks)}]\n{chunk}"
+            
+            try:
+                # Try to process this chunk
+                response = await self._generate_single_chunk(chunk_prompt, temperature, max_tokens)
+                chunk_responses.append({
+                    'chunk_index': i,
+                    'response': response
+                })
+                self.logger.info(f"✅ Chunk {i}/{len(chunks)} completed ({len(response)} chars)")
+            except aiohttp.ClientResponseError as e:
+                # Check if this chunk is still too large
+                if self._is_context_overflow_error(str(e)) and len(chunk) > 2500:
+                    self.logger.warning(f"⚠️ Chunk {i} still too large, splitting further...")
+                    # Split this chunk into smaller sub-chunks
+                    sub_chunks = self._split_prompt_into_chunks(chunk, max_chars=2500)
+                    self.logger.info(f"📦 Split chunk {i} into {len(sub_chunks)} sub-chunks")
+                    
+                    sub_responses = []
+                    for j, sub_chunk in enumerate(sub_chunks, 1):
+                        try:
+                            sub_prompt = f"[{i}.{j}]\n{sub_chunk}"
+                            sub_response = await self._generate_single_chunk(sub_prompt, temperature, 1500)  # Smaller max_tokens for sub-chunks
+                            sub_responses.append(sub_response)
+                            self.logger.info(f"✅ Sub-chunk {i}.{j} completed")
+                        except Exception as sub_e:
+                            self.logger.error(f"❌ Error processing sub-chunk {i}.{j}: {sub_e}")
+                            sub_responses.append(f"[Error in section {i}.{j}]")
+                    
+                    # Combine sub-responses
+                    combined_sub = "\n\n".join(sub_responses)
+                    chunk_responses.append({
+                        'chunk_index': i,
+                        'response': combined_sub
+                    })
+                else:
+                    self.logger.error(f"❌ Error processing chunk {i}/{len(chunks)}: {e}")
+                    chunk_responses.append({
+                        'chunk_index': i,
+                        'response': f"[Error processing section {i}]"
+                    })
+            except Exception as e:
+                self.logger.error(f"❌ Error processing chunk {i}/{len(chunks)}: {e}")
+                chunk_responses.append({
+                    'chunk_index': i,
+                    'response': f"[Error processing section {i}]"
+                })
+        
+        # Combine all chunk responses
+        self.logger.info(f"🔗 Combining {len(chunk_responses)} chunk responses")
+        
+        combined_response = ""
+        for chunk_resp in chunk_responses:
+            if chunk_resp['chunk_index'] == 1:
+                # First chunk - no separator
+                combined_response += chunk_resp['response']
+            else:
+                # Subsequent chunks - minimal separator
+                combined_response += f"\n\n---\n\n{chunk_resp['response']}"
+        
+        return combined_response
+    
+    async def _generate_single_chunk(
+        self, 
+        prompt: str, 
+        temperature: float = 0.7, 
+        max_tokens: int = 8192
+    ) -> str:
+        """
+        Generate response for a single chunk without recursive chunking.
+        This is the actual API call without chunking logic.
+        """
+        # This will be the actual implementation from generate_response
+        # For now, forward to the existing logic
+        return await self._generate_response_internal(prompt, temperature, max_tokens)
+
     async def generate_response(self, prompt, temperature=0.7, max_tokens=8192, response_format=None):
-        """LLM API çağrısı yapan temel metod - rate limiting ile"""
+        """LLM API çağrısı yapan temel metod - rate limiting ve chunking ile"""
         
         # API tabanlı modeller için rate limiting kontrolü
         if self.is_api_based:
@@ -402,6 +573,42 @@ class LLMClient:
         if self.is_gemini:
             return await self._generate_gemini_response(prompt, temperature, max_tokens)
         
+        # LM Studio için context overflow kontrolü
+        # Prompt çok uzunsa, otomatik chunking yap
+        CONTEXT_LIMIT_CHARS = 6000  # ~1500 tokens (4096 limitinde input+output için güvenli)
+        
+        if len(prompt) > CONTEXT_LIMIT_CHARS:
+            self.logger.warning(f"⚠️ Prompt too long ({len(prompt)} chars > {CONTEXT_LIMIT_CHARS}). Using automatic chunking.")
+            return await self._generate_with_chunking(
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=2000,  # Reduced for chunking to stay within 4096 total
+                max_chars_per_chunk=CONTEXT_LIMIT_CHARS
+            )
+        
+        # Normal flow - try regular generation first
+        try:
+            return await self._generate_response_internal(prompt, temperature, max_tokens)
+        except aiohttp.ClientResponseError as e:
+            # Check if it's a context overflow error
+            error_body = str(e)
+            if self._is_context_overflow_error(error_body):
+                self.logger.warning(f"⚠️ Context overflow detected. Retrying with automatic chunking...")
+                self.logger.info(f"🔪 Original prompt: {len(prompt)} chars")
+                
+                # Retry with chunking (use smaller chunk size)
+                return await self._generate_with_chunking(
+                    prompt=prompt,
+                    temperature=temperature,
+                    max_tokens=2000,  # Reduced for safety
+                    max_chars_per_chunk=4000  # Even smaller for retry after error (~1000 tokens)
+                )
+            else:
+                # Not a context error, re-raise
+                raise
+
+    async def _generate_response_internal(self, prompt, temperature=0.7, max_tokens=8192):
+        """Internal method that does the actual API call without chunking"""
         # LM Studio için - model_name zaten __init__'de identifier'a çevrildi
         actual_model = self.model_name
         
@@ -412,10 +619,6 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens
         }
-        # Note: LM Studio doesn't support response_format parameter, so we ignore it
-        # The calling code should handle JSON parsing from the text response
-        if response_format:
-            self.logger.info(f"Ignoring response_format parameter as LM Studio doesn't support it: {response_format}")
             
         try:
             self.logger.info(f"📤 [LM Studio] Sending request to model: {actual_model}")
@@ -424,12 +627,12 @@ class LLMClient:
             self.logger.info(f"[LM Studio] Prompt length: {len(prompt)} chars")
             self.logger.info(f"[LM Studio] Temperature: {temperature}, Max tokens: {max_tokens}")
             
-            # Use aiohttp for async requests with extended timeout for complex test case generation
+            # Use aiohttp for async requests without timeout for complex operations
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.api_url}/chat/completions",
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=1200)  # 1200 second timeout (20 minutes) for complex test case generation
+                    timeout=aiohttp.ClientTimeout(total=None)  # No timeout - allow long-running operations
                 ) as response:
                     self.logger.info(f"[LM Studio] Response status: {response.status}")
                     
@@ -439,6 +642,11 @@ class LLMClient:
                         self.logger.error(f"❌ [LM Studio] Error response body: {error_body}")
                         self.logger.error(f"❌ [LM Studio] Request model: {actual_model}")
                         self.logger.error(f"❌ [LM Studio] Verify model is loaded in LM Studio")
+                        
+                        # Check if it's a context overflow error before raising
+                        if self._is_context_overflow_error(error_body):
+                            self.logger.warning(f"🚨 Context overflow detected in error response")
+                        
                         raise aiohttp.ClientResponseError(
                             request_info=response.request_info,
                             history=response.history,
@@ -459,13 +667,7 @@ class LLMClient:
                     
         except asyncio.TimeoutError as e:
             self.logger.error(f"⏰ [LM Studio] Timeout error with model {actual_model}: {str(e)}")
-            raise TimeoutError(f"LM Studio API request timed out after 1200 seconds (20 minutes)")
-        except aiohttp.ClientResponseError as e:
-            self.logger.error(f"❌ [LM Studio] API Error (Status {e.status}): {str(e)}")
-            self.logger.error(f"❌ [LM Studio] Model: {actual_model}")
-            self.logger.error(f"❌ [LM Studio] Original key: {self.original_key if hasattr(self, 'original_key') else 'N/A'}")
-            self.logger.error(f"💡 [LM Studio] Make sure model '{actual_model}' is loaded in LM Studio")
-            raise
+            raise TimeoutError(f"LM Studio API request timed out")
         except aiohttp.ClientError as e:
             self.logger.error(f"❌ [LM Studio] Client Error with model {actual_model}: {str(e)}")
             raise
@@ -591,6 +793,14 @@ class LLMClient:
                 
                 self.logger.debug(f"🔍 Gemini finish_reason: {finish_reason} (type: {type(finish_reason)})")
                 
+                # Log safety ratings early to detect filtering issues
+                if hasattr(candidate, 'safety_ratings'):
+                    safety_ratings = candidate.safety_ratings
+                    self.logger.debug(f"🛡️ Safety ratings present: {len(safety_ratings) if safety_ratings else 0}")
+                    for rating in (safety_ratings or []):
+                        if hasattr(rating, 'category') and hasattr(rating, 'probability'):
+                            self.logger.debug(f"   - {rating.category}: {rating.probability}")
+                
                 # Handle both enum and integer values for finish_reason
                 # Convert enum to integer if needed
                 finish_reason_int = finish_reason
@@ -603,17 +813,43 @@ class LLMClient:
                 # Based on Google AI enum: STOP=1, MAX_TOKENS=2, SAFETY=3, RECITATION=4, OTHER=5
                 if finish_reason_int == 1:  # FINISH_REASON_STOP - Normal completion
                     try:
+                        # Try multiple ways to access the response content
+                        result = None
+                        
+                        # Method 1: Direct text access
                         if hasattr(response, 'text') and response.text:
                             result = response.text
+                            self.logger.info(f"✅ Got response via response.text")
+                        
+                        # Method 2: Access via candidates[0].content.parts
+                        elif hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                            parts = candidate.content.parts
+                            if parts and len(parts) > 0:
+                                if hasattr(parts[0], 'text'):
+                                    result = parts[0].text
+                                    self.logger.info(f"✅ Got response via candidate.content.parts[0].text")
+                        
+                        if result and result.strip():
                             self.logger.info(f"✅ Successfully generated response with Gemini model: {self.model_name}")
                             self.logger.info(f"📊 Gemini response length: {len(result)}")
                             self.logger.info(f"📄 Gemini response preview: {result[:200]}...")
-                            return result
+                            return result.strip()
                         else:
-                            self.logger.error(f"❌ Gemini response has no text content despite STOP finish reason")
-                            raise ValueError("No text content in Gemini response")
+                            # No valid content found
+                            self.logger.error(f"❌ Gemini response has no valid text content despite STOP finish reason")
+                            self.logger.error(f"Response structure: {dir(response)}")
+                            if hasattr(candidate, 'content'):
+                                self.logger.error(f"Candidate content: {dir(candidate.content)}")
+                                if hasattr(candidate.content, 'parts'):
+                                    self.logger.error(f"Parts count: {len(candidate.content.parts)}")
+                            
+                            raise ValueError("No text content in Gemini response despite finish_reason=STOP. "
+                                           "This may be due to safety filters or API issues.")
+                    except AttributeError as attr_error:
+                        self.logger.error(f"❌ Attribute error accessing response content: {attr_error}")
+                        raise ValueError(f"Cannot access response text due to missing attributes: {attr_error}")
                     except Exception as text_error:
-                        self.logger.error(f"❌ Error accessing response.text even with STOP finish reason: {text_error}")
+                        self.logger.error(f"❌ Error accessing response text: {text_error}")
                         raise ValueError(f"Cannot access response text: {text_error}")
                         
                 elif finish_reason_int == 2:  # FINISH_REASON_MAX_TOKENS - Hit token limit

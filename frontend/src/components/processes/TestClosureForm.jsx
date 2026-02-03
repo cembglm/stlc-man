@@ -94,6 +94,7 @@ export default function TestClosureForm({ onComplete, onSetOutput, onSetFormStat
   const [generatingReport, setGeneratingReport] = useState(false);
   const [metrics, setMetrics] = useState(null);
   const [report, setReport] = useState(null);
+  const [qualityEvaluation, setQualityEvaluation] = useState(null); // Store quality metrics
   const hasFetchedRef = useRef(false); // Track if initial fetch has been done
   
   // Prompt preview and edit state
@@ -459,6 +460,7 @@ This may take a few moments depending on the amount of data.`,
       if (data.success) {
         setReport(data.report_content);
         setMetrics(data.metrics);
+        setQualityEvaluation(data.quality_evaluation); // Store quality metrics
         toast.success('Closure report generated successfully');
         
         // Show success output in OutputPanel
@@ -469,7 +471,8 @@ This may take a few moments depending on the amount of data.`,
           model: selectedModel,
           processType: 'Test Closure',
           metrics: data.metrics,
-          sessions_analyzed: data.sessions_analyzed
+          sessions_analyzed: data.sessions_analyzed,
+          quality_evaluation: data.quality_evaluation // Include quality metrics
         };
 
         if (onSetOutput) {
@@ -600,12 +603,21 @@ This may take a few moments depending on the amount of data.`,
   }, [selectedSessions, selectedModel, generatingReport, onSetFormState, generateClosureReport]);
 
   /**
-   * Download report as markdown file
+   * Download report as markdown file with quality metrics
    */
   const downloadReport = () => {
     if (!report) return;
 
-    const blob = new Blob([report], { type: 'text/markdown' });
+    // Prepare enhanced report with quality metrics
+    let enhancedReport = report;
+    
+    if (qualityEvaluation) {
+      const qualitySection = `\n\n---\n\n# 📊 Closure Report Quality Metrics\n\n**Generated for Academic Research & Quality Assessment**\n\n## Overall Quality Score\n\n**Overall Score:** ${(qualityEvaluation.overall_score * 100).toFixed(2)}%\n\n## Quality Dimensions\n\n| Dimension | Score | Description |\n|-----------|-------|-------------|\n| **Completeness** | ${(qualityEvaluation.completeness * 100).toFixed(2)}% | Presence of required sections (IEEE 829, ISO/IEC/IEEE 29119-3) |\n| **Coverage** | ${(qualityEvaluation.coverage * 100).toFixed(2)}% | Faithfulness to test execution data |\n| **Clarity** | ${(qualityEvaluation.clarity * 100).toFixed(2)}% | Statistical readability and absence of ambiguity |\n| **Depth** | ${(qualityEvaluation.depth * 100).toFixed(2)}% | Analytical vs descriptive content ratio |\n| **Consistency** | ${(qualityEvaluation.consistency * 100).toFixed(2)}% | Numeric constraint validation |\n\n## Evaluation Methodology\n\n**Standards Compliance:**\n- ISO/IEC/IEEE 29119-3:2013 (Software Testing Standard - Part 3: Test Documentation)\n- IEEE 829-2008 (Standard for Software and System Test Documentation)\n- ISTQB Foundation Level v4.0 (2023)\n- ISTQB Test Manager (Advanced Level) 2012\n\n**Evaluation Approach:**\n- Model-Agnostic: Independent of LLM used for generation\n- Fully Deterministic: Reproducible metrics based on structural analysis\n- Standards-Based: Aligned with international testing standards\n\n**Quality Dimension Weights:**\n${Object.entries(qualityEvaluation.weights_used || {}).map(([key, value]) => `- ${key.charAt(0).toUpperCase() + key.slice(1)}: ${(value * 100).toFixed(0)}%`).join('\n')}\n\n## Detailed Calculation\n\n${qualityEvaluation.calculation_details ? JSON.stringify(qualityEvaluation.calculation_details, null, 2) : 'N/A'}\n\n---\n\n**Report Metadata:**\n- Generation Time: ${new Date().toISOString()}\n- Model Used: ${selectedModel || 'Unknown'}\n- Sessions Analyzed: ${metrics?.total_sessions || 0}\n- Evaluation Method: Deterministic Quality Evaluator v1.0\n`;
+      
+      enhancedReport = report + qualitySection;
+    }
+
+    const blob = new Blob([enhancedReport], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -614,7 +626,7 @@ This may take a few moments depending on the amount of data.`,
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast.success('Report downloaded');
+    toast.success('Report downloaded with quality metrics');
   };
 
   return (
@@ -984,6 +996,109 @@ This may take a few moments depending on the amount of data.`,
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Closure Quality Metrics Display */}
+      {qualityEvaluation && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            📊 Closure Report Quality Assessment
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Based on international testing standards (ISO/IEC/IEEE 29119-3, IEEE 829, ISTQB)
+          </p>
+          
+          {/* Overall Score */}
+          <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-6 mb-6">
+            <div className="text-center">
+              <p className="text-sm text-gray-600 mb-2">Overall Quality Score</p>
+              <p className="text-5xl font-bold text-purple-900">
+                {(qualityEvaluation.overall_score * 100).toFixed(1)}%
+              </p>
+              <div className="mt-4 bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-purple-500 to-blue-500 h-full transition-all duration-500"
+                  style={{ width: `${qualityEvaluation.overall_score * 100}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Quality Dimensions Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Completeness */}
+            <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+              <p className="text-xs text-blue-600 font-medium mb-2">📋 Completeness</p>
+              <p className="text-2xl font-bold text-blue-900">
+                {(qualityEvaluation.completeness * 100).toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-600 mt-2">
+                Required sections present
+              </p>
+            </div>
+
+            {/* Coverage */}
+            <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+              <p className="text-xs text-green-600 font-medium mb-2">🎯 Coverage</p>
+              <p className="text-2xl font-bold text-green-900">
+                {(qualityEvaluation.coverage * 100).toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-600 mt-2">
+                Data faithfulness
+              </p>
+            </div>
+
+            {/* Clarity */}
+            <div className="bg-yellow-50 rounded-lg p-4 border border-yellow-200">
+              <p className="text-xs text-yellow-600 font-medium mb-2">✨ Clarity</p>
+              <p className="text-2xl font-bold text-yellow-900">
+                {(qualityEvaluation.clarity * 100).toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-600 mt-2">
+                Readability & precision
+              </p>
+            </div>
+
+            {/* Depth */}
+            <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+              <p className="text-xs text-purple-600 font-medium mb-2">🔬 Depth</p>
+              <p className="text-2xl font-bold text-purple-900">
+                {(qualityEvaluation.depth * 100).toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-600 mt-2">
+                Analytical content
+              </p>
+            </div>
+
+            {/* Consistency */}
+            <div className="bg-red-50 rounded-lg p-4 border border-red-200">
+              <p className="text-xs text-red-600 font-medium mb-2">✓ Consistency</p>
+              <p className="text-2xl font-bold text-red-900">
+                {(qualityEvaluation.consistency * 100).toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-600 mt-2">
+                Numeric accuracy
+              </p>
+            </div>
+          </div>
+
+          {/* Evaluation Methodology */}
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">📚 Evaluation Methodology</h4>
+            <div className="text-xs text-gray-600 space-y-1">
+              <p><strong>Approach:</strong> Model-Agnostic, Fully Deterministic</p>
+              <p><strong>Standards:</strong> ISO/IEC/IEEE 29119-3, IEEE 829, ISTQB Foundation & Test Manager</p>
+              <p><strong>Weights Used:</strong> {Object.entries(qualityEvaluation.weights_used || {}).map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`).join(', ')}</p>
+            </div>
+          </div>
+
+          {/* Academic Use Note */}
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs text-blue-800">
+              ℹ️ <strong>For Academic Research:</strong> These metrics are calculated using a deterministic, standards-based methodology suitable for academic studies and quality assessment. All scores are reproducible and model-agnostic.
+            </p>
           </div>
         </div>
       )}

@@ -8,6 +8,7 @@ and communicating with the MCP server
 
 import logging
 import aiohttp
+import re
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from services.test_closure_service import test_closure_service
+from utils.model_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,8 @@ class ClosureReportResponse(BaseModel):
     model_used: Optional[str] = None
     provider: Optional[str] = None
     timestamp: Optional[str] = None
+    quality_evaluation: Optional[Dict[str, Any]] = None  # Report quality metrics
+    session_id: Optional[str] = None  # NEW: Saved session ID
     error: Optional[str] = None
 
 
@@ -121,157 +124,49 @@ async def call_llm(
     max_tokens: int = 8000
 ) -> str:
     """
-    Call LLM service (LM Studio or Gemini) for report generation
+    Call LLM service using LLMClient (supports both LM Studio and Gemini)
+    Now with automatic chunking support for context overflow
     
     Args:
         prompt: Prompt to send
-        model: Model identifier (frontend format)
+        model: Model identifier
         api_key: API key for Gemini
         max_tokens: Max tokens to generate
         
     Returns:
         LLM response text
     """
-    provider, model_name = parse_model_to_provider_info(model)
-    logger.info(f"[call_llm] Called with model='{model}'")
-    logger.info(f"[call_llm] Parsed: provider='{provider}', model_name='{model_name}'")
-    
-    # Convert to LM Studio format if needed
-    if provider == "lm_studio":
-        lm_studio_model = convert_to_lm_studio_format(model)
-        logger.info(f"[call_llm] Converted to LM Studio format: '{model}' -> '{lm_studio_model}'")
-    else:
-        lm_studio_model = model
-
-    
     try:
-        if provider == "gemini":
-            # Gemini API call
-            if not api_key:
-                raise ValueError("API key required for Gemini models")
-            
-            url = f"{GEMINI_API_BASE}/{model_name}:generateContent"
-            params = {"key": api_key}
-            
-            payload = {
-                "contents": [{
-                    "parts": [{
-                        "text": prompt
-                    }]
-                }],
-                "generationConfig": {
-                    "maxOutputTokens": max_tokens,
-                    "temperature": 0.7
-                }
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, params=params) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise HTTPException(
-                            status_code=response.status,
-                            detail=f"Gemini API error: {error_text}"
-                        )
-                    
-                    result = await response.json()
-                    
-                    # Extract text from Gemini response
-                    if "candidates" in result and result["candidates"]:
-                        candidate = result["candidates"][0]
-                        if "content" in candidate and "parts" in candidate["content"]:
-                            parts = candidate["content"]["parts"]
-                            if parts and "text" in parts[0]:
-                                return parts[0]["text"]
-                    
-                    raise ValueError("Unexpected Gemini response format")
+        logger.info(f"[call_llm] Initializing LLMClient with model: {model}")
+        logger.info(f"[call_llm] API key provided: {'Yes' if api_key else 'No'}")
+        logger.info(f"[call_llm] Prompt length: {len(prompt)} characters")
+        logger.info(f"[call_llm] Max tokens: {max_tokens}")
         
-        else:
-            # LM Studio call
-            # Use the converted LM Studio model format
-            payload = {
-                "model": lm_studio_model,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": max_tokens,
-                "temperature": 0.7
-            }
-            
-            logger.info(f"[call_llm] LM Studio payload: model='{payload['model']}'")
-            logger.info(f"[call_llm] LM Studio URL: {LM_STUDIO_URL}")
-            logger.info(f"[call_llm] Prompt length: {len(prompt)} chars")
-            
-            async with aiohttp.ClientSession() as session:
-                # First, try to load the model in LM Studio
-                try:
-                    logger.info(f"[call_llm] Attempting to load model in LM Studio: {lm_studio_model}")
-                    load_url = "http://localhost:1234/v1/models/load"
-                    load_payload = {"model": lm_studio_model}
-                    async with session.post(load_url, json=load_payload, timeout=aiohttp.ClientTimeout(total=15)) as load_response:
-                        if load_response.status == 200:
-                            logger.info(f"[call_llm] Model load request accepted for: {lm_studio_model}")
-                            # Wait for model to load - check status periodically
-                            import asyncio
-                            logger.info(f"[call_llm] Waiting for model to load...")
-                            
-                            # Wait up to 30 seconds, checking every 3 seconds
-                            max_wait_time = 30
-                            check_interval = 3
-                            total_waited = 0
-                            
-                            while total_waited < max_wait_time:
-                                await asyncio.sleep(check_interval)
-                                total_waited += check_interval
-                                
-                                # Check if model is loaded by querying /v1/models
-                                try:
-                                    async with session.get("http://localhost:1234/v1/models", timeout=aiohttp.ClientTimeout(total=5)) as models_response:
-                                        if models_response.status == 200:
-                                            models_data = await models_response.json()
-                                            loaded_models = [m.get("id") for m in models_data.get("data", [])]
-                                            logger.info(f"[call_llm] Currently loaded models: {loaded_models}")
-                                            
-                                            if lm_studio_model in loaded_models:
-                                                logger.info(f"[call_llm] Model '{lm_studio_model}' is now loaded! (waited {total_waited}s)")
-                                                break
-                                            else:
-                                                logger.info(f"[call_llm] Model not yet loaded, waiting... ({total_waited}s elapsed)")
-                                except Exception as check_error:
-                                    logger.warning(f"[call_llm] Could not check model status: {str(check_error)}")
-                            
-                            if total_waited >= max_wait_time:
-                                logger.warning(f"[call_llm] Reached max wait time ({max_wait_time}s), proceeding anyway")
-                        else:
-                            logger.warning(f"[call_llm] Model load request returned status {load_response.status}")
-                except Exception as load_error:
-                    logger.warning(f"[call_llm] Could not load model (will try anyway): {str(load_error)}")
-                
-                # Now make the actual chat completion request
-                async with session.post(LM_STUDIO_URL, json=payload) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"LM Studio error for model '{model}': {error_text}")
-                        raise HTTPException(
-                            status_code=response.status,
-                            detail=f"LM Studio error with model '{model}': {error_text}"
-                        )
-                    
-                    result = await response.json()
-                    
-                    # Extract text from LM Studio response
-                    if "choices" in result and result["choices"]:
-                        return result["choices"][0]["message"]["content"]
-                    
-                    raise ValueError("Unexpected LM Studio response format")
-    
-    except aiohttp.ClientError as e:
-        error_msg = f"LLM service unavailable: {str(e)}"
-        logger.error(f"LLM API error: {error_msg}")
-        raise HTTPException(status_code=503, detail=error_msg)
+        # Initialize LLMClient with test_closure use_case
+        llm_client = LLMClient(
+            model_name=model,
+            api_key=api_key,
+            use_case='test_closure'
+        )
+        
+        # Generate response using unified LLMClient (with automatic chunking)
+        response = await llm_client.generate_response(
+            prompt=prompt,
+            temperature=0.7,
+            max_tokens=max_tokens
+        )
+        
+        if not response:
+            raise ValueError("Empty response from LLM")
+        
+        logger.info(f"[call_llm] ✅ Successfully received response (length: {len(response)})")
+        return response
+        
     except Exception as e:
         error_msg = f"LLM error: {type(e).__name__}: {str(e)}"
-        logger.error(f"LLM call error: {error_msg}")
+        logger.error(f"[call_llm] ❌ Error: {error_msg}")
+        logger.error(f"[call_llm] Model: {model}")
+        logger.error(f"[call_llm] Prompt length: {len(prompt)} characters")
         raise HTTPException(status_code=500, detail=error_msg)
 
 
@@ -396,6 +291,9 @@ async def generate_closure_report(request: ClosureReportRequest):
         logger.info(f"[TestClosure] Using model: {request.model}")
         logger.info(f"[TestClosure] Custom prompt provided: {bool(request.custom_prompt)}")
         
+        # Initialize result variable
+        result = None
+        
         # Determine which prompt to use
         if request.custom_prompt:
             # User provided custom edited prompt
@@ -422,9 +320,11 @@ async def generate_closure_report(request: ClosureReportRequest):
         
         logger.info(f"[TestClosure] Calling LLM with prompt...")
         
-        # Step 2: Call LLM to generate report
+        # Parse model to get provider and model_name
         provider, model_name = parse_model_to_provider_info(request.model)
+        logger.info(f"[TestClosure] Parsed - Provider: {provider}, Model: {model_name}")
         
+        # Step 2: Call LLM to generate report
         report_content = await call_llm(
             prompt=prompt,
             model=request.model,
@@ -435,15 +335,71 @@ async def generate_closure_report(request: ClosureReportRequest):
         logger.info(f"[TestClosure] Report generated successfully")
         logger.info(f"[TestClosure] Report length: {len(report_content)} characters")
         
-        # Step 3: Return response
+        # Step 3: Evaluate report quality (SAME as Test Reporting)
+        logger.info(f"[TestClosure] Evaluating closure report quality using deterministic methodology...")
+        
+        # Get all_session_data from result (added in generate_closure_report)
+        all_session_data = result.get("all_session_data", [])
+        
+        quality_evaluation = test_closure_service.evaluate_closure_report_quality(
+            report_content=report_content,
+            metrics=metrics,
+            all_session_data=all_session_data  # Pass session data like Test Reporting does
+        )
+        logger.info(
+            f"[TestClosure] Quality Score: {quality_evaluation['overall_score']:.4f} | "
+            f"Completeness: {quality_evaluation['completeness']:.4f} | "
+            f"Coverage: {quality_evaluation['coverage']:.4f} | "
+            f"Clarity: {quality_evaluation['clarity']:.4f} | "
+            f"Depth: {quality_evaluation['depth']:.4f} | "
+            f"Consistency: {quality_evaluation['consistency']:.4f}"
+        )
+        
+        # Step 4: Save to database as new independent session
+        logger.info(f"[TestClosure] Saving closure report to database...")
+        
+        # Prepare metadata for database save
+        save_metadata = {
+            "model_used": model_name,
+            "provider": provider,
+            "sessions_analyzed": result.get("sessions_analyzed", 0) if result else 0,
+            "metrics": metrics,
+            "date_from": request.date_from,
+            "date_to": request.date_to,
+            "generation_time": 0  # Could add timing logic if needed
+        }
+        
+        # Add test metrics summary if available
+        if metrics:
+            test_execution = metrics.get("test_execution", {})
+            save_metadata.update({
+                "total_test_scenarios": metrics.get("test_scenarios", {}).get("total", 0),
+                "total_test_cases": metrics.get("test_cases", {}).get("total_generated", 0),
+                "total_test_execution": test_execution.get("total_executed", 0),
+                "pass_rate": test_execution.get("pass_rate", 0)
+            })
+        
+        # Save to database
+        saved_session_id = await test_closure_service.save_closure_report_to_database(
+            session_ids=request.session_ids or [],
+            report_content=report_content,
+            quality_evaluation=quality_evaluation,
+            metadata=save_metadata
+        )
+        
+        logger.info(f"[TestClosure] Report saved with session ID: {saved_session_id}")
+        
+        # Step 5: Return response with quality metrics and session ID
         return ClosureReportResponse(
             success=True,
             report_content=report_content,
             metrics=metrics,
-            sessions_analyzed=result["sessions_analyzed"],
+            sessions_analyzed=result.get("sessions_analyzed", 0) if result else 0,
             model_used=model_name,
             provider=provider,
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            quality_evaluation=quality_evaluation,
+            session_id=saved_session_id  # NEW: Include saved session ID
         )
         
     except HTTPException:

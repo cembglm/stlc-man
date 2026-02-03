@@ -45,6 +45,22 @@ async def get_available_process_titles():
         logger.error(f"Error getting process titles: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/test-case-count/{process_title}")
+async def get_test_case_count(process_title: str):
+    """
+    Belirli bir process title için unique test case sayısını döndürür
+    """
+    try:
+        unique_test_cases = test_code_service.get_unique_test_cases_by_process_title(process_title)
+        return {
+            "success": True,
+            "process_title": process_title,
+            "count": len(unique_test_cases)
+        }
+    except Exception as e:
+        logger.error(f"Error getting test case count: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/run")
 async def process_test_code_generation(
     process_title: str = Form(...),
@@ -55,10 +71,14 @@ async def process_test_code_generation(
     session_id: Optional[str] = Form(None),
     environment_name: Optional[str] = Form(None),
     output_format: Optional[str] = Form("JSON"),
-    api_key: Optional[str] = Form(None)
+    api_key: Optional[str] = Form(None),
+    max_test_cases: Optional[int] = Form(None)
 ):
     """
     Standard process runner for test code generation
+    
+    Args:
+        max_test_cases: Optional limit on number of test cases to process (useful for large batches)
     """
     try:
         if not files:
@@ -81,6 +101,7 @@ async def process_test_code_generation(
         logger.info(f"Files count: {len(files)}")
         logger.info(f"Model: {model}")
         logger.info(f"Output format: {output_format}")
+        logger.info(f"Max test cases: {max_test_cases if max_test_cases else 'unlimited'}")
         logger.info(f"API key provided: {'Yes' if api_key else 'No'}")
         if api_key:
             logger.info(f"API key preview: {api_key[:15]}...")
@@ -94,7 +115,8 @@ async def process_test_code_generation(
             session_id=session_id,
             environment_name=environment_name,
             output_format=output_format,
-            api_key=api_key
+            api_key=api_key,
+            max_test_cases=max_test_cases
         )
         
         return result

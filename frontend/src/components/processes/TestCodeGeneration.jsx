@@ -49,6 +49,7 @@ const TestCodeGeneration = ({
   const [environmentName, setEnvironmentName] = useState('');
   const [model, setModel] = useState('llama3.2:3b');
   const [outputFormat, setOutputFormat] = useState('JSON');
+  const [maxTestCases, setMaxTestCases] = useState(''); // Empty string for "unlimited"
   
   // Use prop prompt if available, fallback to default
   const effectivePrompt = currentPrompt || defaultTestPrompt;
@@ -101,31 +102,47 @@ const TestCodeGeneration = ({
     fetchEnvironmentSetups();
   }, []);
 
-  // Load process titles when environment setup is selected
+  // Load process titles on component mount (independent of environment setup)
   useEffect(() => {
     const fetchProcessTitles = async () => {
-      if (!selectedEnvironmentId) {
-        setProcessTitles([]);
-        setSelectedProcessTitle('');
-        return;
-      }
-
       try {
-        const response = await api.get('/api/processes/test-code-generation/process-titles', {
-          params: { environment_setup_id: selectedEnvironmentId }
-        });
+        console.log('🔍 Fetching process titles...');
+        const response = await api.get('/api/processes/test-code-generation/process-titles');
+        
+        console.log('✅ Process titles response:', response.data);
         
         if (response.data.success === true) {
           setProcessTitles(response.data.data || []);
+          console.log(`✅ Loaded ${response.data.data?.length || 0} process titles`);
         }
       } catch (err) {
-        console.error('Error fetching process titles:', err);
+        console.error('❌ Error fetching process titles:', err);
         toast.error('Error loading process titles');
       }
     };
 
     fetchProcessTitles();
-  }, [selectedEnvironmentId]);
+  }, []); // Load once on mount, not dependent on environment selection
+
+  // Check test case count and warn user
+  const checkTestCaseCount = async (processTitle) => {
+    try {
+      const response = await api.get(`/api/processes/test-code-generation/test-case-count/${encodeURIComponent(processTitle)}`);
+      if (response.data.success && response.data.count) {
+        const count = response.data.count;
+        if (count > 50) {
+          toast.warning(
+            `⚠️ This process has ${count} unique test cases. Generation may take ${Math.ceil(count * 0.5 / 60)} minutes or more and might timeout. Consider processing in batches.`,
+            { duration: 8000 }
+          );
+        } else if (count > 20) {
+          toast.info(`ℹ️ This process has ${count} unique test cases. Generation may take several minutes.`, { duration: 5000 });
+        }
+      }
+    } catch (err) {
+      console.error('Error checking test case count:', err);
+    }
+  };
 
   // Initialize and sync prompt with parent
   useEffect(() => {
@@ -263,6 +280,12 @@ const TestCodeGeneration = ({
         }
         if (formDataObj.output_format) {
           formData.append('output_format', formDataObj.output_format);
+        }
+        
+        // Add max_test_cases limit if specified
+        if (maxTestCases && maxTestCases > 0) {
+          formData.append('max_test_cases', maxTestCases);
+          console.log(`⚠️ Limiting to ${maxTestCases} test cases`);
         }
         
         // Add API key if available - get from Redux store based on selected model
@@ -446,17 +469,55 @@ const TestCodeGeneration = ({
             </label>
             <select
               value={selectedProcessTitle}
-              onChange={(e) => setSelectedProcessTitle(e.target.value)}
+              onChange={(e) => {
+                const newTitle = e.target.value;
+                setSelectedProcessTitle(newTitle);
+                if (newTitle) {
+                  checkTestCaseCount(newTitle);
+                }
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              disabled={disabled || !selectedEnvironmentId}
+              disabled={disabled}
             >
               <option value="">Select Process Title</option>
-              {processTitles.map((title, index) => (
-                <option key={index} value={title}>
-                  {title}
-                </option>
-              ))}
+              {processTitles.map((processInfo, index) => {
+                // Support both old format (string) and new format (object)
+                const processName = typeof processInfo === 'string' ? processInfo : processInfo.process_name;
+                const testCaseCount = typeof processInfo === 'object' ? processInfo.test_case_count : null;
+                const displayText = testCaseCount !== null 
+                  ? `${processName} (${testCaseCount} test cases)`
+                  : processName;
+                
+                return (
+                  <option key={index} value={processName}>
+                    {displayText}
+                  </option>
+                );
+              })}
             </select>
+          </div>
+        </div>
+
+        {/* Batch Processing Options */}
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h2 className="text-lg font-semibold mb-4">Batch Processing</h2>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Max Test Cases (Optional)
+            </label>
+            <input
+              type="number"
+              min="1"
+              placeholder="Leave empty for all test cases"
+              value={maxTestCases}
+              onChange={(e) => setMaxTestCases(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              disabled={disabled}
+            />
+            <p className="mt-2 text-sm text-gray-500">
+              ⚠️ For processes with many test cases (50+), consider limiting to 10-20 at a time to avoid timeouts.
+              Leave empty to process all test cases.
+            </p>
           </div>
         </div>
 

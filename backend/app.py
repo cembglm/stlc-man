@@ -1,3 +1,8 @@
+# Windows multiprocessing için terminal size hatası düzeltmesi
+import os
+os.environ.setdefault('COLUMNS', '80')
+os.environ.setdefault('LINES', '24')
+
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
