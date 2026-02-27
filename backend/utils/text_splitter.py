@@ -5,12 +5,32 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# tiktoken encoder — cl100k_base is used by GPT-4 / Llama 3 / Qwen 2.5 tokenizers
+# It gives a much more accurate token count than simple word-splitting.
+try:
+    import tiktoken
+    _encoder = tiktoken.get_encoding("cl100k_base")
+    _TIKTOKEN_AVAILABLE = True
+    logger.info("tiktoken encoder loaded (cl100k_base)")
+except Exception as _e:
+    _TIKTOKEN_AVAILABLE = False
+    logger.warning(f"tiktoken not available, falling back to word-split token counting: {_e}")
+
+
 def count_tokens(text: str) -> int:
     """
-    Metindeki token sayısını basit bir şekilde hesaplar (kelime bazında).
-    :param text: Token sayısı hesaplanacak metin.
-    :return: Token sayısı.
+    Metindeki token sayısını döndürür.
+    tiktoken yüklüyse cl100k_base encoding ile gerçek token sayısını verir;
+    değilse eski word-split yaklaşımını kullanır.
     """
+    if not text:
+        return 0
+    if _TIKTOKEN_AVAILABLE:
+        try:
+            return len(_encoder.encode(text))
+        except Exception as e:
+            logger.warning(f"tiktoken encoding failed, falling back to word-split: {e}")
+    # Fallback: word-split approximation
     return len(text.split())
 
 def split_text_into_chunks(text: str, base_chunk_size: int = 1000, overlap: int = 100, llm_token_limit: int = 4096, min_chunk_size: int = 500) -> list:

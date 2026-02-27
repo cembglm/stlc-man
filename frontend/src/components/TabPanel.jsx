@@ -16,10 +16,10 @@ import RequirementAnalysisForm from './processes/RequirementAnalysisForm';
 import TestPlanningForm from './processes/TestPlanningForm';
 import EnvironmentSetupForm from './processes/EnvironmentSetupForm';
 import ApiSettingsModal from './ApiSettingsModal';
-import PipelineConfigItem from './PipelineConfigItem';
 import PipelineFileSelector from './PipelineFileSelector';
 import GlobalAIConfig from './GlobalAIConfig';
-import { usePipelineConfig } from '../hooks/usePipelineConfig';
+import TestExecutionMethodSelector from './TestExecutionMethodSelector';
+import PipelineResultsPanel from './PipelineResultsPanel';
 
 export default function TabPanel({
   processes,
@@ -39,8 +39,10 @@ export default function TabPanel({
   processPrompts,
   onPromptUpdate,
   pipelineStatus,
+  pipelineResults = {},
   onRun,
   onSetOutput, // Add this new prop
+  onRegisterPipelineExecutor, // Pipeline executor kaydı için
   validationError,
   output,
   outputs,
@@ -50,31 +52,26 @@ export default function TabPanel({
   fileProcessMappings,
   onFileProcessMapping,
   onFileDelete,
-  sessionId, // Add sessionId prop
+  sessionId,
   selectedFileIds,
   setSelectedFileIds,
-  onGeneratePrompt  // Add this line
+  onGeneratePrompt,
+  pipelineModel = 'qwen2.5-7b-instruct-1m',
+  onPipelineModelChange,
+  testExecutionMethod = 'ai',
+  onTestExecutionMethodChange,
+  dockerAvailable = false,
+  dockerConfig = { language: 'python', packages: '', timeout: 300 },
+  onDockerConfigChange,
+  robotConfig = { robotType: 'generic', simulationPrecision: 'medium' },
+  onRobotConfigChange,
 }) {
   const [editingPrompt, setEditingPrompt] = useState(null);
   const [tempPrompt, setTempPrompt] = useState('');
   const [showHelp, setShowHelp] = useState(false);
   const [isApiSettingsOpen, setIsApiSettingsOpen] = useState(false);
   
-  // Pipeline configuration hook
-  const {
-    pipelineConfigs,
-    globalAIConfig,
-    saveProcessConfig,
-    getProcessConfig,
-    isProcessConfigured,
-    validatePipelineConfigs,
-    getBackendConfig,
-    applyGlobalAIToAll,
-    isUsingGlobalAI
-  } = usePipelineConfig();
-  
-  // Pipeline expanded states - hangi process'lerin expand olduğunu takip eder
-  const [expandedProcesses, setExpandedProcesses] = useState({});
+  // Pipeline expanded states no longer needed — per-step cards removed
   
   // Test Scenario Generation form state tracking for main button
   const [testScenarioFormState, setTestScenarioFormState] = useState({
@@ -169,6 +166,86 @@ export default function TabPanel({
   const handleTestCaseOptimizationLoadingChange = useCallback((loading) => {
     setTestCaseOptimizationFormState(prev => ({ ...prev, isRunning: loading }));
   }, []);
+
+  // Pipeline çalıştırma fonksiyonu - her process türü için doğru handler'ı çağırır
+  const executePipelineStep = useCallback(async (processId, pipelineConfigs) => {
+    console.log(`[TabPanel] Executing pipeline step: ${processId}`);
+    
+    // Process-specific handler'ları kontrol et
+    switch (processId) {
+      case 'test-scenario-generation':
+        if (testScenarioFormState.handleRun) {
+          console.log('[TabPanel] Running test-scenario-generation via form handler');
+          await testScenarioFormState.handleRun();
+          return 'completed';
+        }
+        break;
+        
+      case 'test-case-generation':
+        if (testCaseFormState.handleRun) {
+          console.log('[TabPanel] Running test-case-generation via form handler');
+          await testCaseFormState.handleRun();
+          return 'completed';
+        }
+        break;
+        
+      case 'test-case-optimization':
+        if (testCaseOptimizationFormState.handleRun) {
+          console.log('[TabPanel] Running test-case-optimization via form handler');
+          await testCaseOptimizationFormState.handleRun();
+          return 'completed';
+        }
+        break;
+        
+      case 'test-execution':
+        if (testExecutionFormState.handleRun) {
+          console.log('[TabPanel] Running test-execution via form handler');
+          await testExecutionFormState.handleRun();
+          return 'completed';
+        }
+        break;
+        
+      case 'test-reporting':
+        if (testReportingFormState.handleRun) {
+          console.log('[TabPanel] Running test-reporting via form handler');
+          await testReportingFormState.handleRun();
+          return 'completed';
+        }
+        break;
+        
+      case 'test-closure':
+        if (testClosureFormState.handleRun) {
+          console.log('[TabPanel] Running test-closure via form handler');
+          await testClosureFormState.handleRun();
+          return 'completed';
+        }
+        break;
+        
+      default:
+        // Bu process için özel handler yok, App.jsx'teki fallback mantığı kullanılacak
+        console.log(`[TabPanel] No custom handler for ${processId}, falling back to App.jsx logic`);
+        return false;
+    }
+    
+    // Handler bulunamadı veya çalışmadı
+    console.warn(`[TabPanel] Handler for ${processId} not available yet`);
+    return false;
+  }, [
+    testScenarioFormState,
+    testCaseFormState,
+    testCaseOptimizationFormState,
+    testExecutionFormState,
+    testReportingFormState,
+    testClosureFormState
+  ]);
+
+  // Pipeline executor'u parent'a kaydet
+  useEffect(() => {
+    if (onRegisterPipelineExecutor) {
+      console.log('[TabPanel] Registering pipeline executor with parent');
+      onRegisterPipelineExecutor(executePipelineStep);
+    }
+  }, [onRegisterPipelineExecutor, executePipelineStep]);
 
   // Aktif tab değiştiğinde veya ilk açılışta base prompt'u otomatik yükle
   useEffect(() => {
@@ -742,23 +819,18 @@ Important:
 
   return (
     <div className="flex flex-col h-full w-full">
-      {/* Enable Auto-selection toggle - yeni eklendi */}
+      {/* Header bar — API Settings + pipeline lock indicator */}
       <div className="bg-white border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="pipelineToggle"
-                checked={isPipelineEnabled}
-                onChange={() => onTogglePipeline(!isPipelineEnabled)}
-                className="h-4 w-4 text-indigo-600 rounded"
-              />
-              <label htmlFor="pipelineToggle" className="text-sm text-gray-700">
-                Enable Auto-selection
-              </label>
+            {/* Locked-steps badge */}
+            <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200">
+              <svg className="h-3.5 w-3.5 text-indigo-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+              </svg>
+              <span className="text-xs font-medium text-indigo-700">11 steps active</span>
             </div>
-            
+
             {/* API Settings Button */}
             <button
               onClick={() => setIsApiSettingsOpen(true)}
@@ -771,7 +843,7 @@ Important:
             </button>
           </div>
           <div className="text-xs text-gray-500">
-            Auto-selected processes will be highlighted in yellow
+            Configure steps individually or use Global AI Config
           </div>
         </div>
 
@@ -791,25 +863,6 @@ Important:
                 )}
               >
                 <div className="flex items-center px-3 py-2">
-                  {tab.id !== 'pipeline' && tab.id !== 'files' && (
-                    <input
-                      type="checkbox"
-                      checked={selectedProcesses.has(tab.id)}
-                      onChange={() => {
-                        // Eğer herhangi bir process çalışıyorsa ve aktif tab o değilse, geçişe izin verme
-                        if (anyProcessRunning && tab.id !== activeTab && isCurrentTabRunning) {
-                          alert('Bir süreç çalışırken başka bir taba geçemezsiniz.');
-                          return;
-                        }
-                        handleProcessToggle(tab.id);
-                      }}
-                      className={clsx(
-                        "h-4 w-4 rounded mr-2",
-                        processOrigins[tab.id] === 'auto' ? 'text-yellow-500 border-yellow-500' : 'text-indigo-600 border-gray-300'
-                      )}
-                      disabled={isDisabled && activeTab !== tab.id}
-                    />
-                  )}
                   <button
                     onClick={() => {
                       // Eğer herhangi bir process çalışıyorsa ve aktif tab o değilse, geçişe izin verme
@@ -832,12 +885,6 @@ Important:
                   >
                     {tab.name}
                   </button>
-                  {/* Auto etiketi - yeni eklendi */}
-                  {processOrigins[tab.id] === 'auto' && (
-                    <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                      Auto
-                    </span>
-                  )}
                 </div>
                 {activeTab === tab.id && (
                   <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />
@@ -901,128 +948,54 @@ Important:
                   onFileUpload={onFileUpload}
                 />
 
-                {/* Global AI Configuration - PipelineFileSelector'dan hemen sonra */}
+                {/* Global AI Model — single dropdown, applied to every step */}
                 <GlobalAIConfig
-                  selectedProcesses={selectedProcesses}
-                  onApplyToAll={(config) => applyGlobalAIToAll(selectedProcesses, config)}
+                  selectedModel={pipelineModel}
+                  onModelChange={onPipelineModelChange}
                 />
 
-                {/* Pipeline Validation Summary */}
-                {(() => {
-                  const validation = validatePipelineConfigs(selectedProcesses);
-                  return validation.totalCount > 0 && (
-                    <div className={clsx(
-                      'p-4 rounded-lg border',
-                      validation.allConfigured ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'
-                    )}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className={clsx(
-                            'font-medium',
-                            validation.allConfigured ? 'text-green-800' : 'text-yellow-800'
-                          )}>
-                            Pipeline Configuration Status
-                          </h4>
-                          <p className={clsx(
-                            'text-sm mt-1',
-                            validation.allConfigured ? 'text-green-600' : 'text-yellow-600'
-                          )}>
-                            {validation.configuredCount} of {validation.totalCount} processes configured
-                          </p>
-                        </div>
-                        {!validation.allConfigured && (
-                          <div className="text-sm text-yellow-600">
-                            Configure all processes before running pipeline
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* Test Execution Method — AI / Docker / Robot Simulation */}
+                <TestExecutionMethodSelector
+                  method={testExecutionMethod}
+                  onMethodChange={onTestExecutionMethodChange}
+                  dockerAvailable={dockerAvailable}
+                  dockerConfig={dockerConfig}
+                  onDockerConfigChange={onDockerConfigChange}
+                  robotConfig={robotConfig}
+                  onRobotConfigChange={onRobotConfigChange}
+                  selectedProcesses={selectedProcesses}
+                />
 
-                {/* Pipeline Configuration Items */}
-                {processes
-                  .filter(p => selectedProcesses.has(p.id))
-                  .map((process, index) => {
-                    const ProcessFormComponent = ProcessFormComponents[process.id];
-                    const isConfigured = isProcessConfigured(process.id);
-                    const config = getProcessConfig(process.id);
-                    const isExpanded = expandedProcesses[process.id] || false;
-                    
-                    return (
-                      <PipelineConfigItem
-                        key={process.id}
-                        process={process}
-                        isSelected={true}
-                        isConfigured={isConfigured}
-                        isExpanded={isExpanded}
-                        onToggleExpand={(expanded) => {
-                          setExpandedProcesses(prev => ({
-                            ...prev,
-                            [process.id]: expanded
-                          }));
-                        }}
-                        onToggleSelect={(selected) => {
-                          // Pipeline'da artık seçim yapılamaz, checkbox devre dışı
-                        }}
-                        onSaveConfig={() => {
-                          // Her process için kendi state'inden config'i al ve kaydet
-                          // Bu kısım her form component için özel olmalı
-                          const currentConfig = {
-                            // Process-specific config'i buraya ekle
-                            processId: process.id,
-                            aiModel: aiModels[process.id],
-                            prompt: processPrompts[process.id],
-                            environmentName: environmentNames[process.id],
-                            outputFormat: outputFormats[process.id],
-                            files: managedFiles.filter(file => 
-                              fileProcessMappings[file.id]?.includes(process.id)
-                            )
-                          };
-                          
-                          saveProcessConfig(process.id, currentConfig);
-                          alert(`Configuration saved for ${process.name}!`);
-                        }}
-                        config={config}
-                        pipelineStatus={pipelineStatus[process.id]}
-                        processOrigin={processOrigins[process.id]}
-                        isUsingGlobalAI={isUsingGlobalAI(process.id)}
-                      >
-                        {/* Form Component Render - Her process'in kendi formu */}
-                        {ProcessFormComponent && (
-                          <ProcessFormComponent
-                            process={process}
-                            processFiles={processFiles}
-                            onFileUpload={onFileUpload}
-                            onPromptUpdate={onPromptUpdate}
-                            onAIModelUpdate={onAIModelUpdate}
-                            onEnvironmentNameUpdate={onEnvironmentNameUpdate}
-                            onOutputFormatUpdate={onOutputFormatUpdate}
-                            processPrompts={processPrompts}
-                            aiModels={aiModels}
-                            environmentNames={environmentNames}
-                            outputFormats={outputFormats}
-                            managedFiles={managedFiles}
-                            fileProcessMappings={fileProcessMappings}
-                            onFileProcessMapping={onFileProcessMapping}
-                            sessionId={sessionId}
-                            onRun={onRun}
-                            onFormStateChange={
-                              process.id === 'test-scenario-generation' ? setTestScenarioFormState :
-                              process.id === 'test-case-generation' ? setTestCaseFormState :
-                              process.id === 'test-case-optimization' ? handleTestCaseOptimizationStateChange :
-                              process.id === 'test-execution' ? setTestExecutionFormState :
-                              process.id === 'test-reporting' ? setTestReportingFormState :
-                              process.id === 'test-closure' ? setTestClosureFormState :
-                              undefined
-                            }
-                            // Pipeline mode - form'un Run butonunu gizlemek için
-                            pipelineMode={true}
-                          />
-                        )}
-                      </PipelineConfigItem>
-                    );
-                  })}
+                {/* Pipeline Progress — visible once any step has a status */}
+                {Object.values(pipelineStatus).some(s => s && s !== 'idle') && (
+                  <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
+                    <div className="px-4 py-3 bg-gradient-to-r from-indigo-50 to-blue-50 border-b border-indigo-100 flex items-center justify-between">
+                      <h3 className="font-semibold text-gray-900 text-sm">Pipeline Progress</h3>
+                      <span className="text-xs text-gray-500">
+                        {Object.values(pipelineStatus).filter(s => s === 'completed').length} / {processes.filter(p => selectedProcesses.has(p.id)).length} steps done
+                      </span>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {processes.filter(p => selectedProcesses.has(p.id)).map(process => {
+                        const status = pipelineStatus[process.id];
+                        const statusMeta = {
+                          'pending':   { dot: 'bg-gray-300',  text: 'text-gray-400', label: 'Pending'   },
+                          'running':   { dot: 'bg-blue-500 animate-pulse', text: 'text-blue-600', label: 'Running…' },
+                          'completed': { dot: 'bg-green-500', text: 'text-green-700', label: 'Done'     },
+                          'error':     { dot: 'bg-red-500',   text: 'text-red-700',   label: 'Failed'   },
+                        }[status] || { dot: 'bg-gray-200', text: 'text-gray-400', label: '—' };
+
+                        return (
+                          <div key={process.id} className="flex items-center px-4 py-2 gap-3">
+                            <span className={`h-2 w-2 rounded-full flex-shrink-0 ${statusMeta.dot}`} />
+                            <span className="flex-1 text-sm text-gray-700">{process.name}</span>
+                            <span className={`text-xs font-medium ${statusMeta.text}`}>{statusMeta.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {validationError && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
@@ -1124,19 +1097,11 @@ Important:
                       onRun(activeTab);
                     }
                   } else {
-                    // PIPELINE MODE - Validate configurations before running
-                    const validation = validatePipelineConfigs(selectedProcesses);
-                    
-                    if (!validation.allConfigured) {
-                      const missingNames = validation.missingConfigs.map(id => 
-                        processes.find(p => p.id === id)?.name || id
-                      ).join(', ');
-                      
-                      alert(`Please configure all processes before running the pipeline.\n\nMissing configurations:\n${missingNames}`);
-                      return;
-                    }
-                    
-                    // Validate file mappings
+                    // PIPELINE MODE
+                    // All 11 steps are always active and auto-configured —
+                    // no manual configuration gate needed.
+
+                    // Warn about unmapped files (optional — proceed anyway)
                     const unmappedFiles = managedFiles.filter(file => 
                       !fileProcessMappings[file.id] || fileProcessMappings[file.id].length === 0
                     );
@@ -1144,36 +1109,18 @@ Important:
                     if (unmappedFiles.length > 0) {
                       const unmappedNames = unmappedFiles.map(f => f.name).join(', ');
                       const proceed = confirm(
-                        `⚠️ Warning: ${unmappedFiles.length} file(s) are not mapped to any process:\n\n${unmappedNames}\n\nDo you want to continue anyway?`
+                        `⚠️ Warning: ${unmappedFiles.length} file(s) are not mapped to any step:\n\n${unmappedNames}\n\nDo you want to continue without mapping them?`
                       );
                       if (!proceed) return;
                     }
                     
-                    // Check if processes have required files
-                    const processesWithoutFiles = Array.from(selectedProcesses).filter(processId => {
-                      const processFiles = managedFiles.filter(file => 
-                        fileProcessMappings[file.id]?.includes(processId)
-                      );
-                      return processFiles.length === 0;
-                    });
-                    
-                    if (processesWithoutFiles.length > 0) {
-                      const processNames = processesWithoutFiles.map(id => 
-                        processes.find(p => p.id === id)?.name || id
-                      ).join(', ');
-                      
-                      alert(`❌ Cannot run pipeline!\n\nThe following processes have no files mapped:\n${processNames}\n\nPlease map files to all processes in the File Selection & Mapping section above.`);
-                      return;
-                    }
-                    
-                    // All configured and validated, run pipeline with saved configs
-                    console.log('[TabPanel] Starting pipeline with configurations:', pipelineConfigs);
-                    onRun(null, pipelineConfigs);
+                    // All validated — start pipeline
+                    console.log('[TabPanel] Starting pipeline');
+                    onRun(null);
                   }
                 }}
                 disabled={
-                  (activeTab === 'pipeline' && selectedProcesses.size === 0) ||
-                  (activeTab === 'pipeline' && !validatePipelineConfigs(selectedProcesses).allConfigured) ||
+                  (activeTab === 'pipeline' && Array.from(selectedProcesses).some(id => pipelineStatus[id] === 'running')) ||
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
@@ -1184,8 +1131,7 @@ Important:
                 }
                 className={clsx(
                   "w-full py-3 px-4 rounded-md text-white font-medium transition-colors shadow-sm flex items-center justify-center",
-                  (activeTab === 'pipeline' && selectedProcesses.size === 0) || 
-                  (activeTab === 'pipeline' && !validatePipelineConfigs(selectedProcesses).allConfigured) ||
+                  (activeTab === 'pipeline' && Array.from(selectedProcesses).some(id => pipelineStatus[id] === 'running')) ||
                   (activeTab === 'test-scenario-generation' && (!testScenarioFormState.canRun || testScenarioFormState.isRunning)) ||
                   (activeTab === 'test-case-generation' && (!testCaseFormState.canRun || testCaseFormState.isRunning)) ||
                   (activeTab === 'test-case-optimization' && !testCaseOptimizationFormState.canRun && !testCaseOptimizationFormState.isRunning) ||
@@ -1303,7 +1249,7 @@ Important:
           {/* Header */}
           <div className="flex-none h-16 px-6 flex items-center justify-between border-b border-gray-200 bg-white">
             <h2 className="text-xl font-medium text-gray-900">
-              {activeTab === 'pipeline' ? 'Pipeline Output' : 
+              {activeTab === 'pipeline' ? 'Pipeline Results' : 
                activeTab === 'files' ? '' : 
                `${processes.find(p => p.id === activeTab)?.name || activeTab} Output`}
             </h2>
@@ -1322,6 +1268,12 @@ Important:
               <div className="flex items-center justify-center h-full">
                 <p className="text-gray-400 text-center">This is file management view. The output will be displayed when running processes.</p>
               </div>
+            ) : activeTab === 'pipeline' ? (
+              <PipelineResultsPanel
+                processes={processes}
+                pipelineStatus={pipelineStatus}
+                pipelineResults={pipelineResults}
+              />
             ) : (
               <OutputPanel 
                 output={output}

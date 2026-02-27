@@ -383,15 +383,13 @@ const TestCodeGeneration = ({
     }
   };
 
-  // Expose executeProcess function globally for TabPanel to access
+  // Register executeProcess on window so App.jsx can invoke it via window.testCodeGenerationExecute()
   useEffect(() => {
-    // Store the execution function on window for TabPanel to access
     window.testCodeGenerationExecute = executeProcess;
-    
     return () => {
-      // Cleanup
-      delete window.testCodeGenerationExecute;
+      window.testCodeGenerationExecute = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEnvironmentId, selectedProcessTitle, selectedFiles.length > 0, model, environmentName, effectivePrompt, outputFormat]);
 
   return (

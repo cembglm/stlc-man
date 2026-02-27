@@ -8,12 +8,36 @@ from datetime import datetime
 import json
 import logging
 from datetime import datetime
+from utils.model_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     tags=["test-scenario-generation"]
 )
+
+
+@router.get("/model-context-length/{model_key}")
+async def get_model_context_length(model_key: str):
+    """
+    Verilen model key için LM Studio'dan gerçek context length bilgisini döndürür.
+    Frontend bu endpoint'i model seçildiğinde çağırarak dinamik token sınırını gösterebilir.
+    """
+    try:
+        client = LLMClient()
+        actual_model = client.get_model_identifier(model_key)
+        context_length = await client.get_model_context_length(actual_model)
+        # safe_input_limit: context_length - max_output_tokens (4000) - overhead (500)
+        safe_input_limit = max(context_length - 4000 - 500, 1000)
+        return {
+            "model_key": model_key,
+            "model_identifier": actual_model,
+            "context_length": context_length,
+            "safe_input_token_limit": safe_input_limit,
+        }
+    except Exception as e:
+        logger.error(f"[ERROR] get_model_context_length failed for '{model_key}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/generate-prompt")
 async def generate_test_scenario_prompt(request: Request):
@@ -725,11 +749,13 @@ async def generate_test_cases_for_scenarios(request: Request):
             
             # Check token limit
             if total_token_count > TOKEN_LIMIT:
-                logger.warning(f"[TestCaseGeneration] Token count ({total_token_count}) exceeds limit ({TOKEN_LIMIT}), switching to high-capacity model")
-                # Switch to high-capacity model
-                if ai_model != "qwen2.5:7b-1m":
-                    logger.info(f"[TestCaseGeneration] Switching model from {ai_model} to qwen2.5:7b-1m for large content processing")
-                    ai_model = "qwen2.5:7b-1m"  # High-capacity model for large content
+                logger.warning(f"[TestCaseGeneration] Token count ({total_token_count}) exceeds limit ({TOKEN_LIMIT})")
+                # Only switch model if it's already a local LM Studio model (not Gemini)
+                if not ai_model.startswith("gemini") and ai_model != "qwen2.5-7b-instruct-1m":
+                    logger.info(f"[TestCaseGeneration] Switching local model from {ai_model} to qwen2.5-7b-instruct-1m for large content processing")
+                    ai_model = "qwen2.5-7b-instruct-1m"  # High-capacity local model for large content
+                else:
+                    logger.info(f"[TestCaseGeneration] Model {ai_model} already supports large context, no switch needed")
             else:
                 logger.info(f"[TestCaseGeneration] Token count ({total_token_count}) is within limit ({TOKEN_LIMIT}), using selected model: {ai_model}")
         
@@ -740,9 +766,9 @@ async def generate_test_cases_for_scenarios(request: Request):
         logger.info(f"[TestCaseGeneration] Process prompt tokens: {prompt_token_count}")
         logger.info(f"[TestCaseGeneration] Combined total tokens: {total_combined_tokens}")
         
-        if total_combined_tokens > TOKEN_LIMIT and ai_model != "qwen2.5:7b-1m":
+        if total_combined_tokens > TOKEN_LIMIT and ai_model != "qwen2.5-7b-instruct-1m":
             logger.warning(f"[TestCaseGeneration] Combined token count ({total_combined_tokens}) exceeds limit, switching to high-capacity model")
-            ai_model = "qwen2.5:7b-1m"
+            ai_model = "qwen2.5-7b-instruct-1m"
         
         # Initialize LLM client with final model
         actual_model = model_client.get_model_identifier(ai_model)  # Convert frontend key to actual model
@@ -821,9 +847,9 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
             individual_prompt_tokens = count_tokens(scenario_prompt)
             logger.info(f"[TestCaseGeneration] Individual scenario prompt tokens: {individual_prompt_tokens}")
             
-            if individual_prompt_tokens > TOKEN_LIMIT and ai_model != "qwen2.5:7b-1m":
+            if individual_prompt_tokens > TOKEN_LIMIT and ai_model != "qwen2.5-7b-instruct-1m":
                 logger.warning(f"[TestCaseGeneration] Individual prompt exceeds token limit, ensuring high-capacity model")
-                ai_model = "qwen2.5:7b-1m"
+                ai_model = "qwen2.5-7b-instruct-1m"
                 # Re-initialize LLM client with updated model
                 actual_model = model_client.get_model_identifier(ai_model)
                 llm_client = LLMClient(model_name=actual_model, api_key=api_key, use_case='test_scenario_generation')

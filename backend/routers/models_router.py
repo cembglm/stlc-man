@@ -251,46 +251,14 @@ async def get_api_models_endpoint():
         logger.error(f"Error in get_api_models_endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{model_key}")
-async def get_model_details(model_key: str):
-    """
-    Belirli bir model hakkında detaylı bilgi getir.
-    """
-    try:
-        model = get_model_by_key(model_key)
-        
-        if not model:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Model with key '{model_key}' not found"
-            )
-        
-        # Model açıklamalarını ekle
-        descriptions = get_model_descriptions(model_key)
-        model_with_descriptions = model.copy()
-        model_with_descriptions["detailed_descriptions"] = descriptions
-        
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": f"Model details for '{model_key}' retrieved successfully",
-                "data": model_with_descriptions
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in get_model_details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/{model_key}/descriptions")
+@router.get("/{model_key:path}/descriptions")
 async def get_model_descriptions_endpoint(model_key: str):
     """
     Belirli bir model için detaylı açıklamaları getir.
     """
     try:
+        from urllib.parse import unquote
+        model_key = unquote(model_key)
         descriptions = get_model_descriptions(model_key)
         
         if not descriptions:
@@ -392,4 +360,44 @@ async def get_available_models_legacy():
         
     except Exception as e:
         logger.error(f"Error in get_available_models_legacy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# NOTE: Path-parametreli route'lar en sona alınmalıdır.
+# {model_key:path} her şeyi match edeceğinden sabit route'lar önce tanımlanmıştır.
+
+@router.get("/{model_key:path}")
+async def get_model_details(model_key: str):
+    """
+    Belirli bir model hakkında detaylı bilgi getir.
+    """
+    try:
+        from urllib.parse import unquote
+        model_key = unquote(model_key)
+
+        model = get_model_by_key(model_key)
+
+        if not model:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Model with key '{model_key}' not found"
+            )
+
+        # Model açıklamalarını ekle
+        descriptions = get_model_descriptions(model_key)
+        model_with_descriptions = model.copy()
+        model_with_descriptions["detailed_descriptions"] = descriptions
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": f"Model details for '{model_key}' retrieved successfully",
+                "data": model_with_descriptions
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_model_details: {e}")
         raise HTTPException(status_code=500, detail=str(e))

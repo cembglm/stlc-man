@@ -73,7 +73,7 @@ export default function TestCaseGenerationForm({
     "gemma3:4b": "gemma-3-4b-it",
     "llama3.2:3b": "llama-3.2-3b-instruct",
     "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
-    "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",
+    "qwen2.5-7b-instruct-1m": "qwen2.5-7b-instruct-1m",
     "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
     "stable-code:3b": "stable-code-instruct-3b",
     "starcoder2:7b": "starcoder2-7b"
@@ -656,7 +656,7 @@ Generate comprehensive test cases now following the exact JSON structure above.`
       const hasPrompts = processPrompt && finalPrompt;
       
       // Seçenek 1: Token limiti aşımında da çalıştırmaya izin ver (ÖNERİLEN)
-      // Sistem otomatik olarak yüksek kapasiteli model (qwen2.5:7b-1m) kullanacak
+      // Sistem otomatik olarak yüksek kapasiteli model (qwen2.5-7b-instruct-1m) kullanacak
       // Bu yaklaşım kullanıcı deneyimini bozmaz ve sistem akıllı model seçimi yapar
       const canRun = hasSelectedScenarios && hasPrompts;
       
@@ -669,7 +669,7 @@ Generate comprehensive test cases now following the exact JSON structure above.`
           totalTokens,
           exceedsLimit,
           selectedModel: selectedAIModel,
-          autoModelSwitch: exceedsLimit ? 'qwen2.5:7b-1m' : selectedAIModel
+          autoModelSwitch: exceedsLimit ? 'qwen2.5-7b-instruct-1m' : selectedAIModel
         }
       });
     }
@@ -864,7 +864,7 @@ Generate comprehensive test cases now following the exact JSON structure above.`
                         <p>Selected files contain approximately <strong>{totalTokens.toLocaleString()}</strong> tokens</p>
                         {exceedsLimit && (
                           <p className="mt-1">
-                            <strong>⚠️ Large content detected!</strong> The system will automatically use <strong>qwen2.5:7b-1m</strong> model for optimal processing of large documents.
+                            <strong>⚠️ Large content detected!</strong> The system will automatically use <strong>qwen2.5-7b-instruct-1m</strong> model for optimal processing of large documents.
                             <br />
                             <span className="text-green-600 font-medium">✅ Process can still be run - model will be switched automatically!</span>
                           </p>

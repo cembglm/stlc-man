@@ -310,7 +310,12 @@ class TestPlanningService:
                             task["Start Date"] = current_end_date.strftime("%Y-%m-%d")
                         
                         # Calculate End Date based on Start Date + Duration
-                        start_date = datetime.strptime(task["Start Date"], "%Y-%m-%d")
+                        try:
+                            start_date = datetime.strptime(task["Start Date"], "%Y-%m-%d")
+                        except ValueError:
+                            self.logger.warning(f"Invalid start date '{task['Start Date']}', falling back to current_end_date")
+                            start_date = current_end_date
+                            task["Start Date"] = start_date.strftime("%Y-%m-%d")
                         end_date = start_date + timedelta(days=duration - 1)  # -1 because start day is included
                         task["End Date"] = end_date.strftime("%Y-%m-%d")
                         
@@ -349,10 +354,27 @@ class TestPlanningService:
             calculated_date = base_date + timedelta(days=days_offset)
             return calculated_date.strftime("%Y-%m-%d")
         
-        # Check if it's already a proper date format (YYYY-MM-DD)
-        date_match = re.match(r'\d{4}-\d{2}-\d{2}', str(date_expression))
+        # Check if it's a date + offset expression like "2026-02-25+5"
+        date_offset_match = re.match(r'^(\d{4}-\d{2}-\d{2})\s*\+\s*(\d+)$', str(date_expression).strip())
+        if date_offset_match:
+            try:
+                base = datetime.strptime(date_offset_match.group(1), "%Y-%m-%d")
+                days_offset = int(date_offset_match.group(2))
+                calculated_date = base + timedelta(days=days_offset)
+                return calculated_date.strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+
+        # Check if it's already a proper date format (YYYY-MM-DD) — use full-string match and validate
+        date_str = str(date_expression).strip()
+        date_match = re.match(r'^\d{4}-\d{2}-\d{2}$', date_str)
         if date_match:
-            return str(date_expression)
+            try:
+                datetime.strptime(date_str, "%Y-%m-%d")  # validate it's a real date
+                return date_str
+            except ValueError:
+                self.logger.warning(f"Invalid date value: {date_str}, using base date")
+                return base_date.strftime("%Y-%m-%d")
         
         # Try to parse as integer (days offset without format)
         try:

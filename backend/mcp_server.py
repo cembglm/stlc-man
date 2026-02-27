@@ -49,7 +49,7 @@ MODEL_NAME_MAPPING = {
     "gemma2:2b": "gemma-2-2b-it",
     "gemma3:4b": "gemma-3-4b-it",
     "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
-    "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",
+    "qwen2.5-7b-instruct-1m": "qwen2.5-7b-instruct-1m",
     "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
     "stable-code:3b": "stable-code-instruct-3b",
     "starcoder2:7b": "starcoder2-7b",

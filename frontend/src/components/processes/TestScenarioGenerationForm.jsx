@@ -43,7 +43,7 @@ function useModelInfo(selectedModel) {
       "Generates high-accuracy code in multiple programming languages.",
       "Efficient at code completion and interpretation."
     ],
-    "qwen2.5:7b-1m": [
+    "qwen2.5-7b-instruct-1m": [
       "A high-capacity 7B parameter model optimized for processing large content (1M+ tokens).",
       "Auto-selected when file contents exceed 100,000 tokens.",
       "Ideal for analyzing very large documents and codebases."
@@ -103,7 +103,7 @@ export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, on
     setIsLoading(false);
   }, []);
 
-  // Token counting utility function (simple word-based approximation)
+  // Token counting utility function (simple word-based approximation — mirrors tiktoken on backend)
   const countTokens = (text) => {
     if (!text || typeof text !== 'string') return 0;
     return text.split(/\s+/).filter(word => word.length > 0).length;
@@ -126,8 +126,31 @@ export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, on
   };
 
   const totalTokens = calculateTotalTokens();
-  const TOKEN_LIMIT = 4000;
-  const exceedsLimit = totalTokens > TOKEN_LIMIT;
+
+  // --- Dynamic context length (fetched from LM Studio via backend) ---
+  // Default values until the real context length is known.
+  const [modelContextLength, setModelContextLength] = useState(4096);
+  // safe_input_limit = context_length - max_output_tokens (4000) - overhead (500)
+  const safeInputLimit = Math.max(modelContextLength - 4000 - 500, 1000);
+  const exceedsLimit = totalTokens > safeInputLimit;
+
+  // Fetch context length whenever the selected model changes
+  useEffect(() => {
+    if (!model) return;
+    let cancelled = false;
+    processService.getModelContextLength(model).then((info) => {
+      if (!cancelled && info && info.context_length) {
+        setModelContextLength(info.context_length);
+        console.log(
+          '[DEBUG] Model context length fetched:',
+          model, '->', info.context_length, 'tokens',
+          '| safe input limit:', info.safe_input_token_limit
+        );
+      }
+    });
+    return () => { cancelled = true; };
+  }, [model]);
+  // -------------------------------------------------------------------
 
   // Merkezi model hook'unu kullan
   const { 
@@ -342,6 +365,18 @@ export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, on
         processId: process?.id
       });
       
+      // Determine effective model — auto-switch to high-context model when content is too large
+      const effectiveModel = exceedsLimit ? 'qwen2.5-7b-instruct-1m' : model;
+
+      // Notify user if the model will be auto-switched due to large content
+      if (exceedsLimit) {
+        toast(
+          `⚠️ Seçilen dosyaların token sayısı (${totalTokens.toLocaleString()}) modelin güvenli giriş sınırını (${safeInputLimit.toLocaleString()} token) aşıyor. Seçilen model: “${model}” → “qwen2.5-7b-instruct-1m” modeline otomatik geçiş yapılıyor.`,
+          { icon: '🤖', duration: 6000 }
+        );
+        console.log(`[DEBUG] Auto-switching from "${model}" to "qwen2.5-7b-instruct-1m" — token count (${totalTokens}) exceeds safe input limit (${safeInputLimit})`);
+      }
+      
       if (managedFiles && selectedFiles.length > 0) {
         // Find files that are both selected by user and available for this process
         const availableFiles = getAvailableFiles();
@@ -405,7 +440,7 @@ export default function TestScenarioGenerationForm({ onGeneratePrompt, onRun, on
       const promptGenerationData = {
         testType,
         testCategory,
-        model,
+        model: effectiveModel,
         testPrompt: testPrompt || 'Generate comprehensive test scenarios for the provided code', // Base test prompt
         fileContents: fileContents, // Include selected file contents array
         session_id: sessionId, // Use the existing session ID for consistency
@@ -811,13 +846,18 @@ Generate the test scenarios now following the exact JSON structure above.`;
                   </h3>
                   <div className={`mt-1 text-sm ${exceedsLimit ? 'text-yellow-700' : 'text-blue-700'}`}>
                     <p>Selected files contain approximately <strong>{totalTokens.toLocaleString()}</strong> tokens</p>
+                    <p className="mt-1 text-xs opacity-75">
+                      Model context window: <strong>{modelContextLength.toLocaleString()}</strong> tokens
+                      {' | '}Safe input limit: <strong>{safeInputLimit.toLocaleString()}</strong> tokens
+                    </p>
                     {exceedsLimit && (
                       <p className="mt-1">
-                        <strong>⚠️ Large content detected!</strong> The system will automatically use <strong>qwen2.5:7b-1m</strong> model for optimal processing of large documents.
+                        <strong>⚠️ Büyük içerik algılandı!</strong> Seçilen dosyalar modelin güvenli giriş sınırını ({safeInputLimit.toLocaleString()} token) aşıyor.
+                        Sistem otomatik olarak <strong>qwen2.5-7b-instruct-1m</strong> modeline geçecek.
                       </p>
                     )}
                     {!exceedsLimit && (
-                      <p className="mt-1">Content size is within normal limits. Your selected model will be used.</p>
+                      <p className="mt-1">✅ İçerik boyutu güvenli sınır içinde. Seçilen model kullanılacak.</p>
                     )}
                   </div>
                 </div>

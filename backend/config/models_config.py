@@ -93,7 +93,7 @@ AVAILABLE_MODELS: List[Dict[str, Any]] = [
         "performance": "fast"
     },
     {
-        "key": "qwen2.5:7b-1m",
+        "key": "qwen2.5-7b-instruct-1m",
         "name": "Qwen 2.5 (7B-1M)",
         "description": "Large context version for processing extensive content",
         "type": "local",
@@ -388,7 +388,7 @@ MODEL_DESCRIPTIONS = {
         "Generates high-accuracy code in multiple programming languages.",
         "Efficient at code completion and interpretation."
     ],
-    "qwen2.5:7b-1m": [
+    "qwen2.5-7b-instruct-1m": [
         "A high-capacity 7B parameter model optimized for processing large content (1M+ tokens).",
         "Auto-selected when file contents exceed 100,000 tokens.",
         "Ideal for analyzing very large documents and codebases."
