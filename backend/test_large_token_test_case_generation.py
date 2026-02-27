@@ -196,7 +196,7 @@ async def test_large_token_test_case_generation():
                         print(f"Processing time: {processing_time:.2f} seconds")
                         
                         # Check if model was switched due to token limit
-                        if summary.get('model_used') == 'qwen2.5:7b-1m':
+                        if summary.get('model_used') == 'qwen2.5-7b-instruct-1m':
                             print("✅ Model automatically switched to high-capacity due to large content")
                         else:
                             print("⚠️ Model was not switched - check token limit logic")

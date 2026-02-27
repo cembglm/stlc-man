@@ -36,7 +36,7 @@ export const useModels = (options = {}) => {
     optimizationReady = null,
     fastOnly = false,
     autoFetch = true,
-    includeDescriptions = true,
+    includeDescriptions = false,
     includeUnavailableApi = false,
     showApiKeyStatus = null // null = global setting'i kullan
   } = options;

@@ -1,8 +1,20 @@
 """
 pipeline_executor.py
 --------------------
+⚠️ DEPRECATED: This file is not currently in use.
+
+Pipeline orchestration is now handled in the frontend (App.jsx and TabPanel.jsx).
+Each STLC module has its own API endpoint (e.g., /api/processes/code-review/run)
+and the frontend calls these sequentially.
+
+This file is kept for potential future use if backend-side pipeline orchestration is needed.
+
+Original purpose:
 determine_pipeline fonksiyonundan gelen adım listesini sırasıyla çalıştırır.
 Her adımın giriş-çıkış verilerini yönetir ve son toplu çıktıyı oluşturur.
+
+Note: The STLC_MODULE_MAP keys (camelCase) don't match the frontend process IDs (kebab-case),
+and the modules don't have a run_step() method as assumed here.
 """
 
 from stlc import (

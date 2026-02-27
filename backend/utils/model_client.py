@@ -332,7 +332,7 @@ class LLMClient:
             "openai/gpt-oss-20b": "openai/gpt-oss-20b",
             "qwen/qwq-32b": "qwen/qwq-32b",
             "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
-            "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",
+            "qwen2.5-7b-instruct-1m": "qwen2.5-7b-instruct-1m",
             "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
             "qwen/qwen3-14b": "qwen3-14b-instruct",
             "stable-code:3b": "stable-code-instruct-3b",
@@ -372,7 +372,7 @@ class LLMClient:
             "google/gemma-3-12b": "gemma-3-12b-it",
             "llama3.2:3b": "llama-3.2-3b-instruct",
             "qwen2.5:7b": "qwen2.5-7b-instruct-1m",
-            "qwen2.5:7b-1m": "qwen2.5-7b-instruct-1m",
+            "qwen2.5-7b-instruct-1m": "qwen2.5-7b-instruct-1m",
             "qwen2.5-coder:3b": "qwen2.5-coder-3b-instruct",
             "qwen/qwen3-14b": "qwen3-14b-instruct",
             "stable-code:3b": "stable-code-instruct-3b",
@@ -390,6 +390,79 @@ class LLMClient:
         
         # Yoksa direkt model key'i kullan
         return model_key
+
+    async def get_model_context_length(self, model_identifier: str = None) -> int:
+        """
+        LM Studio'nun /v1/models endpoint'inden aktif modelin context_length değerini alır.
+        
+        Args:
+            model_identifier: Sorgulanacak model id'si. None ise self.model_name kullanılır.
+            
+        Returns:
+            Modelin context length değeri (token cinsinden).
+            Bağlantı hatası veya bilgi bulunamazsa güvenli default olan 4096 döndürür.
+        """
+        DEFAULT_CONTEXT_LENGTH = 4096
+        target_id = (model_identifier or self.model_name or "").lower()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{self.api_url}/models",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status != 200:
+                        self.logger.warning(
+                            f"LM Studio /v1/models returned status {response.status}, "
+                            f"using default context length {DEFAULT_CONTEXT_LENGTH}"
+                        )
+                        return DEFAULT_CONTEXT_LENGTH
+
+                    data = await response.json()
+                    models = data.get("data", [])
+
+                    # Model'i id ile eşleştir (kısmi eşleşme desteklenir)
+                    for m in models:
+                        m_id = m.get("id", "").lower()
+                        if target_id in m_id or m_id in target_id:
+                            ctx = (
+                                m.get("context_length")
+                                or m.get("max_context_length")
+                                or m.get("max_model_len")
+                                or m.get("n_ctx")
+                            )
+                            if ctx and isinstance(ctx, (int, float)) and ctx > 0:
+                                ctx_int = int(ctx)
+                                self.logger.info(
+                                    f"✅ Model context length from LM Studio: \"{m.get('id')}\" -> {ctx_int} tokens"
+                                )
+                                return ctx_int
+                            # context_length alanı yoksa model specs'e bak
+                            specs = m.get("specs", {}) or {}
+                            ctx = specs.get("context_length") or specs.get("max_context")
+                            if ctx and isinstance(ctx, (int, float)) and ctx > 0:
+                                ctx_int = int(ctx)
+                                self.logger.info(
+                                    f"✅ Model context length from specs: \"{m.get('id')}\" -> {ctx_int} tokens"
+                                )
+                                return ctx_int
+
+                    self.logger.warning(
+                        f"Context length not found in LM Studio response for model '{target_id}'. "
+                        f"Returning default {DEFAULT_CONTEXT_LENGTH}"
+                    )
+                    return DEFAULT_CONTEXT_LENGTH
+
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                f"Timeout querying LM Studio for context length, using default {DEFAULT_CONTEXT_LENGTH}"
+            )
+            return DEFAULT_CONTEXT_LENGTH
+        except Exception as e:
+            self.logger.warning(
+                f"Could not query LM Studio context length ({e}), using default {DEFAULT_CONTEXT_LENGTH}"
+            )
+            return DEFAULT_CONTEXT_LENGTH
 
     def _split_prompt_into_chunks(self, prompt: str, max_chars: int = 6000) -> list:
         """
@@ -562,8 +635,16 @@ class LLMClient:
         # For now, forward to the existing logic
         return await self._generate_response_internal(prompt, temperature, max_tokens)
 
-    async def generate_response(self, prompt, temperature=0.7, max_tokens=8192, response_format=None):
-        """LLM API çağrısı yapan temel metod - rate limiting ve chunking ile"""
+    async def generate_response(self, prompt, temperature=0.7, max_tokens=8192, response_format=None, skip_chunking=False):
+        """
+        LLM API çağrısı yapan temel metod - rate limiting ve chunking ile.
+        
+        Args:
+            skip_chunking: True ise otomatik chunking mekanizması devre dışı bırakılır.
+                           Modelin context window'unu doldurmak yerine tüm prompt tek seferde
+                           gönderilir (orn. test_scenario_generation ve test_case_generation
+                           gibi bağlam bütünlüğü kritik olan akışlarda kullanılır).
+        """
         
         # API tabanlı modeller için rate limiting kontrolü
         if self.is_api_based:
@@ -572,6 +653,14 @@ class LLMClient:
         # Gemini modeli kontrolü
         if self.is_gemini:
             return await self._generate_gemini_response(prompt, temperature, max_tokens)
+        
+        # skip_chunking=True ise tüm bağlamı tek seferde gönder (chunking yok)
+        if skip_chunking:
+            self.logger.info(
+                f"⏭️ Chunking devre dışı (skip_chunking=True) — "
+                f"prompt {len(prompt)} chars, tek seferde gönderiliyor."
+            )
+            return await self._generate_response_internal(prompt, temperature, max_tokens)
         
         # LM Studio için context overflow kontrolü
         # Prompt çok uzunsa, otomatik chunking yap
@@ -632,7 +721,7 @@ class LLMClient:
                 async with session.post(
                     f"{self.api_url}/chat/completions",
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=None)  # No timeout - allow long-running operations
+                    timeout=aiohttp.ClientTimeout(total=600)  # 10-minute timeout for large models
                 ) as response:
                     self.logger.info(f"[LM Studio] Response status: {response.status}")
                     

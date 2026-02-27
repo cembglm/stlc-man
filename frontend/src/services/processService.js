@@ -303,6 +303,28 @@ export const processService = {
     }
   },
 
+  /**
+   * Verilen model key için LM Studio'dan gerçek context_length değerini alır.
+   * @param {string} modelKey - Model key (ör. "llama3.2:3b", "qwen2.5-7b-instruct-1m")
+   * @returns {{ context_length: number, safe_input_token_limit: number, model_identifier: string }}
+   */
+  async getModelContextLength(modelKey) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/test-scenario-generation/model-context-length/${encodeURIComponent(modelKey)}`,
+        { method: 'GET', headers: { 'Accept': 'application/json' } }
+      );
+      if (!response.ok) {
+        console.warn(`[ProcessService] getModelContextLength failed for ${modelKey}: ${response.status}`);
+        return { context_length: 4096, safe_input_token_limit: 596, model_identifier: modelKey };
+      }
+      return await response.json();
+    } catch (error) {
+      console.warn('[ProcessService] getModelContextLength error:', error);
+      return { context_length: 4096, safe_input_token_limit: 596, model_identifier: modelKey };
+    }
+  },
+
   // Test Scenario Generation için dosya içeriklerini dikkate alan custom prompt oluşturma
   async generateCustomPromptFileAware(promptGenerationData, fileContents) {
     try {
@@ -442,7 +464,7 @@ export const processService = {
     try {
       console.log('[ProcessService] Generating test scenarios with data:', data);
       
-      const response = await fetch('http://localhost:8000/test-scenario-generation/generate-test-scenarios', {
+      const response = await fetch('http://localhost:8000/api/processes/test-scenario-generation/generate-test-scenarios', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

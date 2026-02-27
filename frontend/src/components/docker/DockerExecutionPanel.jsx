@@ -1,37 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Button,
-  TextField,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  Chip,
-  Alert,
-  CircularProgress,
-  Grid,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Divider,
-  IconButton,
-  Tooltip
-} from '@mui/material';
-import {
-  PlayArrow as PlayIcon,
-  Stop as StopIcon,
-  Refresh as RefreshIcon,
-  ExpandMore as ExpandMoreIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Info as InfoIcon,
-  Memory as MemoryIcon,
-  Settings as SettingsIcon
-} from '@mui/icons-material';
 import axios from 'axios';
 
 const DockerExecutionPanel = () => {
@@ -39,9 +6,10 @@ const DockerExecutionPanel = () => {
   const [testCode, setTestCode] = useState('');
   const [language, setLanguage] = useState('python');
   const [robotType, setRobotType] = useState('generic');
-  const [executionMode, setExecutionMode] = useState('standard'); // standard, robot, custom
+  const [executionMode, setExecutionMode] = useState('standard'); // standard, robot
   const [additionalPackages, setAdditionalPackages] = useState('');
   const [timeout, setTimeout] = useState(300);
+  const [showConfig, setShowConfig] = useState(true);
   
   // Docker status
   const [dockerAvailable, setDockerAvailable] = useState(false);
@@ -77,15 +45,25 @@ const DockerExecutionPanel = () => {
 
   const loadAvailableOptions = async () => {
     try {
-      const [robotsRes, languagesRes] = await Promise.all([
-        axios.get('http://localhost:8000/api/docker-execution/available-robots'),
-        axios.get('http://localhost:8000/api/docker-execution/supported-languages')
+      const robotsRes = await axios.get('http://localhost:8000/api/docker-execution/available-robots');
+      setAvailableRobots(robotsRes.data.robot_types || [
+        { id: 'generic', name: 'Generic 3-DOF', dof: 3 },
+        { id: 'industrial', name: 'Industrial 6-DOF', dof: 6 },
+        { id: 'collaborative', name: 'Collaborative 4-DOF', dof: 4 }
       ]);
       
-      setAvailableRobots(robotsRes.data.robot_types || []);
-      setSupportedLanguages(languagesRes.data.languages || []);
+      setSupportedLanguages([
+        { id: 'python', name: 'Python' }
+      ]);
     } catch (error) {
       console.error('Failed to load options:', error);
+      // Set defaults on error
+      setAvailableRobots([
+        { id: 'generic', name: 'Generic 3-DOF', dof: 3 },
+        { id: 'industrial', name: 'Industrial 6-DOF', dof: 6 },
+        { id: 'collaborative', name: 'Collaborative 4-DOF', dof: 4 }
+      ]);
+      setSupportedLanguages([{ id: 'python', name: 'Python' }]);
     }
   };
 
@@ -208,301 +186,342 @@ print("\\n✅ Package test completed!")`
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Card>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <MemoryIcon sx={{ mr: 1, fontSize: 32, color: 'primary.main' }} />
-            <Typography variant="h5" component="h2">
-              Docker-Based Test Execution
-            </Typography>
-            <Box sx={{ flexGrow: 1 }} />
-            <Tooltip title="Refresh Docker status">
-              <IconButton onClick={checkDockerStatus} size="small">
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
+    <div className="p-6">
+      {/* Main Card */}
+      <div className="bg-white rounded-lg shadow-md overflow-hidden">
+        <div className="p-6">
+          {/* Header */}
+          <div className="flex items-center mb-4">
+            <div className="flex items-center flex-1">
+              <svg className="w-8 h-8 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
+              </svg>
+              <h2 className="text-2xl font-bold text-gray-800">Docker Sandbox</h2>
+            </div>
+            <button
+              onClick={checkDockerStatus}
+              className="p-2 text-gray-600 hover:text-blue-600 hover:bg-gray-100 rounded transition"
+              title="Refresh Docker status"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
 
-          {/* Docker Status */}
-          <Alert 
-            severity={dockerAvailable ? "success" : "error"} 
-            sx={{ mb: 2 }}
-            icon={dockerAvailable ? <CheckCircleIcon /> : <ErrorIcon />}
-          >
-            Docker is {dockerAvailable ? 'available' : 'not available'}
-            {dockerAvailable && ` - ${dockerImages.length} images available`}
-          </Alert>
+          {/* Docker Status Alert */}
+          <div className={`p-4 mb-4 rounded-lg flex items-center ${
+            dockerAvailable 
+              ? 'bg-green-50 text-green-800 border border-green-200' 
+              : 'bg-red-50 text-red-800 border border-red-200'
+          }`}>
+            <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              {dockerAvailable ? (
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              ) : (
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              )}
+            </svg>
+            <span className="font-medium">
+              Docker is {dockerAvailable ? 'available' : 'not available'}
+              {dockerAvailable && ` - ${dockerImages.length} images available`}
+            </span>
+          </div>
 
           {/* Execution Mode Selection */}
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="subtitle1" gutterBottom>
+          <div className="mb-4">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
               Execution Mode
-            </Typography>
-            <Grid container spacing={1}>
-              <Grid item>
-                <Chip
-                  label="Standard Test"
-                  color={executionMode === 'standard' ? 'primary' : 'default'}
-                  onClick={() => setExecutionMode('standard')}
-                  sx={{ cursor: 'pointer' }}
-                />
-              </Grid>
-              <Grid item>
-                <Chip
-                  label="Robot Simulation"
-                  color={executionMode === 'robot' ? 'primary' : 'default'}
-                  onClick={() => setExecutionMode('robot')}
-                  sx={{ cursor: 'pointer' }}
-                />
-              </Grid>
-            </Grid>
-          </Box>
+            </label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setExecutionMode('standard')}
+                className={`px-4 py-2 rounded-lg font-medium transition ${
+                  executionMode === 'standard'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Standard Test
+              </button>
+              <button
+                onClick={() => setExecutionMode('robot')}
+                className={`px-4 py-2 rounded-lg font-medium transition ${
+                  executionMode === 'robot'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                🤖 Robot Simulation
+              </button>
+            </div>
+          </div>
 
-          {/* Configuration */}
-          <Accordion defaultExpanded>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <SettingsIcon sx={{ mr: 1 }} />
-              <Typography>Configuration</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Grid container spacing={2}>
+          {/* Configuration Section */}
+          <div className="border border-gray-200 rounded-lg mb-4">
+            <button
+              onClick={() => setShowConfig(!showConfig)}
+              className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition"
+            >
+              <div className="flex items-center">
+                <svg className="w-5 h-5 text-gray-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                </svg>
+                <span className="font-semibold text-gray-700">Configuration</span>
+              </div>
+              <svg
+                className={`w-5 h-5 text-gray-600 transition-transform ${showConfig ? 'transform rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {showConfig && (
+              <div className="p-4 border-t border-gray-200 space-y-4">
                 {executionMode === 'robot' ? (
-                  <Grid item xs={12}>
-                    <FormControl fullWidth>
-                      <InputLabel>Robot Type</InputLabel>
-                      <Select
-                        value={robotType}
-                        onChange={(e) => setRobotType(e.target.value)}
-                        label="Robot Type"
-                      >
-                        {availableRobots.map((robot) => (
-                          <MenuItem key={robot.id} value={robot.id}>
-                            {robot.name} ({robot.dof} DOF)
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Grid>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Robot Type
+                    </label>
+                    <select
+                      value={robotType}
+                      onChange={(e) => setRobotType(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      {availableRobots.map((robot) => (
+                        <option key={robot.id} value={robot.id}>
+                          {robot.name} ({robot.dof} DOF)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 ) : (
                   <>
-                    <Grid item xs={12} md={6}>
-                      <FormControl fullWidth>
-                        <InputLabel>Language</InputLabel>
-                        <Select
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Language
+                        </label>
+                        <select
                           value={language}
                           onChange={(e) => setLanguage(e.target.value)}
-                          label="Language"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         >
                           {supportedLanguages.map((lang) => (
-                            <MenuItem key={lang.id} value={lang.id}>
+                            <option key={lang.id} value={lang.id}>
                               {lang.name}
-                            </MenuItem>
+                            </option>
                           ))}
-                        </Select>
-                      </FormControl>
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <TextField
-                        fullWidth
-                        label="Additional Packages"
-                        value={additionalPackages}
-                        onChange={(e) => setAdditionalPackages(e.target.value)}
-                        placeholder="numpy,pandas,requests"
-                        helperText="Comma-separated package names"
-                      />
-                    </Grid>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Additional Packages
+                        </label>
+                        <input
+                          type="text"
+                          value={additionalPackages}
+                          onChange={(e) => setAdditionalPackages(e.target.value)}
+                          placeholder="numpy,pandas,requests"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Comma-separated package names</p>
+                      </div>
+                    </div>
                   </>
                 )}
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Timeout (seconds)
+                  </label>
+                  <input
                     type="number"
-                    label="Timeout (seconds)"
                     value={timeout}
                     onChange={(e) => setTimeout(parseInt(e.target.value))}
-                    inputProps={{ min: 30, max: 600 }}
+                    min="30"
+                    max="600"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
-                </Grid>
-              </Grid>
-            </AccordionDetails>
-          </Accordion>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Example Code Buttons */}
-          <Box sx={{ mt: 2, mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Load Example:
-            </Typography>
-            <Grid container spacing={1}>
-              <Grid item>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => loadExampleCode('python')}
-                >
-                  Simple Python
-                </Button>
-              </Grid>
-              <Grid item>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => loadExampleCode('robot')}
-                >
-                  Robot Simulation
-                </Button>
-              </Grid>
-              <Grid item>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => loadExampleCode('packages')}
-                >
-                  With Packages
-                </Button>
-              </Grid>
-            </Grid>
-          </Box>
+            </label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => loadExampleCode('python')}
+                className="px-3 py-1.5 text-sm border border-blue-500 text-blue-600 rounded hover:bg-blue-50 transition"
+              >
+                Simple Python
+              </button>
+              <button
+                onClick={() => loadExampleCode('robot')}
+                className="px-3 py-1.5 text-sm border border-blue-500 text-blue-600 rounded hover:bg-blue-50 transition"
+              >
+                Robot Simulation
+              </button>
+              <button
+                onClick={() => loadExampleCode('packages')}
+                className="px-3 py-1.5 text-sm border border-blue-500 text-blue-600 rounded hover:bg-blue-50 transition"
+              >
+                With Packages
+              </button>
+            </div>
+          </div>
 
           {/* Test Code Editor */}
-          <TextField
-            fullWidth
-            multiline
-            rows={15}
-            label="Test Code"
-            value={testCode}
-            onChange={(e) => setTestCode(e.target.value)}
-            placeholder="Enter your test code here..."
-            sx={{ mb: 2, fontFamily: 'monospace' }}
-            InputProps={{
-              sx: { fontFamily: 'Courier New, monospace', fontSize: '0.9rem' }
-            }}
-          />
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Test Code
+            </label>
+            <textarea
+              value={testCode}
+              onChange={(e) => setTestCode(e.target.value)}
+              placeholder="Enter your test code here..."
+              rows={15}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              style={{ fontFamily: 'Courier New, monospace' }}
+            />
+          </div>
 
           {/* Execute Button */}
-          <Button
-            fullWidth
-            variant="contained"
-            size="large"
+          <button
             onClick={handleExecute}
             disabled={!dockerAvailable || isExecuting || !testCode.trim()}
-            startIcon={isExecuting ? <CircularProgress size={20} /> : <PlayIcon />}
+            className={`w-full py-3 rounded-lg font-semibold flex items-center justify-center transition ${
+              !dockerAvailable || isExecuting || !testCode.trim()
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
           >
-            {isExecuting ? 'Executing in Docker...' : 'Execute in Docker Container'}
-          </Button>
+            {isExecuting ? (
+              <>
+                <svg className="animate-spin h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Executing in Docker...
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                </svg>
+                Execute in Docker Container
+              </>
+            )}
+          </button>
 
           {/* Error Display */}
           {error && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {error}
-            </Alert>
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
+              <div className="flex items-start">
+                <svg className="w-5 h-5 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                <span>{error}</span>
+              </div>
+            </div>
           )}
 
           {/* Execution Results */}
           {executionResult && (
-            <Box sx={{ mt: 3 }}>
-              <Divider sx={{ mb: 2 }} />
-              <Typography variant="h6" gutterBottom>
-                Execution Results
-              </Typography>
+            <div className="mt-6">
+              <div className="border-t border-gray-200 my-4"></div>
+              <h3 className="text-xl font-bold text-gray-800 mb-3">Execution Results</h3>
               
-              <Alert 
-                severity={executionResult.success ? "success" : "error"}
-                sx={{ mb: 2 }}
-              >
-                {executionResult.success ? 'Execution Completed Successfully' : 'Execution Failed'}
-                {executionResult.exit_code !== undefined && (
-                  <Typography variant="body2">
-                    Exit Code: {executionResult.exit_code}
-                  </Typography>
-                )}
-              </Alert>
-
-              <Card variant="outlined">
-                <CardContent>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Output:
-                  </Typography>
-                  <Box
-                    component="pre"
-                    sx={{
-                      p: 2,
-                      bgcolor: 'grey.100',
-                      borderRadius: 1,
-                      overflow: 'auto',
-                      maxHeight: 400,
-                      fontFamily: 'Courier New, monospace',
-                      fontSize: '0.85rem',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word'
-                    }}
-                  >
-                    {executionResult.output || 'No output'}
-                  </Box>
-                  
-                  {executionResult.error && (
-                    <Box sx={{ mt: 2 }}>
-                      <Typography variant="subtitle2" color="error" gutterBottom>
-                        Error:
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        color="error"
-                        sx={{ fontFamily: 'monospace' }}
-                      >
-                        {executionResult.error}
-                      </Typography>
-                    </Box>
+              <div className={`p-4 mb-4 rounded-lg flex items-center ${
+                executionResult.success 
+                  ? 'bg-green-50 text-green-800 border border-green-200' 
+                  : 'bg-red-50 text-red-800 border border-red-200'
+              }`}>
+                <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  {executionResult.success ? (
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  ) : (
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                   )}
-                </CardContent>
-              </Card>
-            </Box>
-          )}
-        </CardContent>
-      </Card>
+                </svg>
+                <div>
+                  <div className="font-semibold">
+                    {executionResult.success ? 'Execution Completed Successfully' : 'Execution Failed'}
+                  </div>
+                  {executionResult.exit_code !== undefined && (
+                    <div className="text-sm">Exit Code: {executionResult.exit_code}</div>
+                  )}
+                </div>
+              </div>
 
-      {/* Docker Info */}
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                  <span className="text-sm font-semibold text-gray-700">Output:</span>
+                </div>
+                <pre className="p-4 bg-gray-900 text-gray-100 overflow-auto max-h-96 text-sm font-mono whitespace-pre-wrap break-words">
+                  {executionResult.output || 'No output'}
+                </pre>
+                
+                {executionResult.error && (
+                  <>
+                    <div className="bg-red-50 px-4 py-2 border-t border-red-200">
+                      <span className="text-sm font-semibold text-red-700">Error:</span>
+                    </div>
+                    <div className="p-4 bg-red-900 text-red-100 font-mono text-sm">
+                      {executionResult.error}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Docker Info Card */}
       {dockerAvailable && (
-        <Card sx={{ mt: 2 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Docker Environment Info
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={6}>
-                <Typography variant="subtitle2">Available Images:</Typography>
-                <Box sx={{ mt: 1 }}>
+        <div className="bg-white rounded-lg shadow-md mt-4 overflow-hidden">
+          <div className="p-6">
+            <h3 className="text-lg font-bold text-gray-800 mb-4">Docker Environment Info</h3>
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <p className="text-sm font-semibold text-gray-700 mb-2">Available Images:</p>
+                <div className="flex flex-wrap gap-2">
                   {dockerImages.slice(0, 5).map((image, idx) => (
-                    <Chip
+                    <span
                       key={idx}
-                      label={image}
-                      size="small"
-                      sx={{ mr: 1, mb: 1 }}
-                    />
+                      className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full"
+                    >
+                      {image}
+                    </span>
                   ))}
                   {dockerImages.length > 5 && (
-                    <Chip
-                      label={`+${dockerImages.length - 5} more`}
-                      size="small"
-                      variant="outlined"
-                    />
+                    <span className="px-2 py-1 bg-gray-200 text-gray-600 text-xs rounded-full border border-gray-300">
+                      +{dockerImages.length - 5} more
+                    </span>
                   )}
-                </Box>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Typography variant="subtitle2">Container Status:</Typography>
-                <Typography variant="body2" sx={{ mt: 1 }}>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-700 mb-2">Container Status:</p>
+                <p className="text-sm text-gray-600">
                   Total Containers: {containerStatus.total_containers || 0}
-                </Typography>
-                <Typography variant="body2">
+                </p>
+                <p className="text-sm text-gray-600">
                   STLC Containers: {containerStatus.stlc_containers?.length || 0}
-                </Typography>
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
-    </Box>
+    </div>
   );
 };
 

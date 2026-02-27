@@ -13,7 +13,8 @@ export const processes = [
       'Supports multiple programming languages and frameworks.',
     ],
     inputs: [],
-    output: 'Code Review Report'
+    output: 'Code Review Report',
+    dependencies: []
   },  
   {
     id: 'requirement-analysis',
@@ -27,7 +28,8 @@ export const processes = [
       'Supports iterative refinement of requirements throughout the project lifecycle.'
     ],
     inputs: ['Requirement Document', 'Technical Design Document'],
-    output: 'Requirements Analysis Report'
+    output: 'Requirements Analysis Report',
+    dependencies: []
   },
   {
     id: 'test-planning',
@@ -42,7 +44,8 @@ export const processes = [
       'Establishes communication and reporting protocols for test progress and issues.'
     ],
     inputs: ['Requirements Analysis Report', 'Code Review Report'],
-    output: 'Test Plan'
+    output: 'Test Plan',
+    dependencies: ['code-review', 'requirement-analysis']
   },
   {
     id: 'environment-setup',
@@ -57,7 +60,8 @@ export const processes = [
       'Encourages removal of unnecessary dependencies and tools to ensure a clean and secure setup.'
     ],
     inputs: ['Test Scripts', 'Technical Design Document'],
-    output: 'Environment Setup Report'
+    output: 'Environment Setup Report',
+    dependencies: []
   },
   {
     id: 'test-scenario-generation',
@@ -119,7 +123,8 @@ export const processes = [
       'Technical Design Document',
       'Requirements Document'
     ],
-    defaultPrompt: 'Generate test scenarios considering the provided input and selected test type.'
+    defaultPrompt: 'Generate test scenarios considering the provided input and selected test type.',
+    dependencies: ['test-planning']
   },
   {
     id: 'test-case-generation',
@@ -130,7 +135,8 @@ export const processes = [
       'Validate test cases for completeness and accuracy'
     ],
     inputs: ['Optimized Test Scenarios', 'Requirements Analysis Report'],
-    output: 'Test Cases'
+    output: 'Test Cases',
+    dependencies: ['test-scenario-generation']
   },
   {
     id: 'test-case-optimization',
@@ -141,7 +147,8 @@ export const processes = [
       'Ensure test case effectiveness and efficiency'
     ],
     inputs: ['Test Cases'],
-    output: 'Optimized Test Cases'
+    output: 'Optimized Test Cases',
+    dependencies: ['test-case-generation']
   },
   {
     id: 'test-code-generation',
@@ -157,7 +164,8 @@ export const processes = [
     ],
     inputs: ['Unique Test Cases', 'Source Code', 'Environment Setup Results'],
     output: 'Executable Test Code Files',
-    defaultPrompt: 'Generate executable test code based on unique test cases, source code analysis, and environment setup configuration.'
+    defaultPrompt: 'Generate executable test code based on unique test cases, source code analysis, and environment setup configuration.',
+    dependencies: ['test-case-optimization', 'environment-setup']
   },
  
   {
@@ -173,7 +181,8 @@ export const processes = [
       'Support for multiple programming languages and test frameworks'
     ],
     inputs: ['Generated Test Code', 'AI Provider Configuration'],
-    output: 'Test Execution Results'
+    output: 'Test Execution Results',
+    dependencies: ['test-code-generation']
   },
   {
     id: 'test-reporting',
@@ -187,7 +196,8 @@ export const processes = [
       'Flexible reporting with configurable analysis depth'
     ],
     inputs: ['Session Data', 'Selected Processes'],
-    output: 'Comprehensive Test Report'
+    output: 'Comprehensive Test Report',
+    dependencies: ['test-execution']
   },
   {
     id: 'test-closure',
@@ -204,6 +214,7 @@ export const processes = [
     ],
     inputs: ['Test Sessions', 'Test Execution Results', 'All STLC Process Data'],
     output: 'AI-Generated Test Closure Report',
-    defaultPrompt: 'Generate a comprehensive test closure report with metrics, quality assessment, and recommendations.'
+    defaultPrompt: 'Generate a comprehensive test closure report with metrics, quality assessment, and recommendations.',
+    dependencies: ['test-reporting']
   }
 ];

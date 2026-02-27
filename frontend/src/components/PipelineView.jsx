@@ -1,3 +1,13 @@
+/**
+ * ⚠️ DEPRECATED: This component is not currently in use.
+ * 
+ * Pipeline view is now handled by PipelineConfigItem components with
+ * expandable configuration sections in TabPanel.jsx. This file is kept  
+ * for reference but is not imported or rendered anywhere in the application.
+ * 
+ * Consider removing this file in the future.
+ */
+
 import React from 'react';
 import { clsx } from 'clsx';
 

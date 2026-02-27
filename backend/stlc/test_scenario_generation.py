@@ -123,12 +123,12 @@ You are an expert prompt engineer in software test process. Generate a customize
 - Base Test Prompt: {base_test_prompt if base_test_prompt else "Use general testing principles"}
 - Document Content: {document_content if document_content else "No specific document content provided"}
 
-**DEFINE A ROLE FOR THE LLM TO GENERATE TEST SCENARIOS:**
-ISTQB Certified Test Analyst: As an ISTQB Certified Test Analyst, you will thoroughly analyze all functional requirements and user stories to ensure comprehensive coverage of business logic and user workflows. You will apply specification‐based techniques—such as equivalence partitioning, boundary value analysis, decision tables, and state transition testing—to identify positive, negative, and edge‐case scenarios. For each scenario, you will document clear preconditions, precise test data sets, detailed step‐by‐step actions, and unambiguous expected results. Throughout this process, you will maintain traceability matrices that map each scenario back to specific requirement IDs, collaborating closely with business analysts and developers to validate completeness and correctness.
-ISTQB Certified Technical Test Analyst: As an ISTQB Certified Technical Test Analyst, you will dive into the software’s architecture, source code structure, and technical design to uncover potential defects that cannot be detected through purely functional testing. You will design and specify low‐level structural test scenarios—such as code‐path coverage checks, data‐flow validations, concurrency/race condition tests, and fault‐injection cases—to verify the robustness and reliability of the system. In addition, you will develop non‐functional test scenarios covering performance, security, and reliability aspects—for example, API load tests under concurrent user simulation, SQL/NoSQL injection attempts, memory‐leak detection, and authentication/authorization bypass scenarios. You will outline detailed environment setups (including mocks, stubs, test data seeding, and tool configurations), define measurable pass/fail criteria (e.g., response‐time thresholds, resource utilization limits, or vulnerability scan results), and integrate these scenarios into continuous integration/continuous delivery pipelines.
-ISTQB Certified Test Manager: As an ISTQB Certified Test Manager, you will establish the overall test strategy, determine resource allocations, and define risk‐based priorities to ensure that testing efforts align with project objectives and organizational quality standards. You will decide which modules and features require the greatest focus—balancing functional, non‐functional, and security considerations—based on business impact, technical complexity, and historical defect data. You will define entry and exit criteria for each test phase, set targets for scenario coverage (e.g., “All critical user journeys must have at least three positive and two negative scenarios”), and oversee the creation and review of final test scenario inventories produced by Test Analysts and Technical Test Analysts. Finally, you will monitor key performance indicators (such as scenario coverage percentage, defect density, and test execution progress), report status and risks to stakeholders, and continuously refine the test approach to address emerging issues or changes in project scope.
-ISTQB Certified Test Automation Engineer: As an ISTQB Certified Test Automation Engineer, you will translate high‐level functional and technical scenarios into maintainable, reusable automation scripts or framework components. You will select or design an automation framework (for example, leveraging Selenium WebDriver, Cypress, REST Assured, JMeter, or custom in‐house tools), build page‐object models or API client libraries, and implement data‐driven approaches to maximize coverage and minimize duplication. For each scenario, you will break down the steps into precise scriptable actions—such as UI interactions, REST API calls with JSON payloads, database validations, or performance metric collection—and embed clear assertions to verify expected outcomes. You will integrate these automated tests into the CI/CD pipeline (e.g., Jenkins, GitLab CI), configure environment provisioning (including containerized test environments or virtual machines), monitor test reliability and execution times, and plan regular maintenance cycles to update scripts in response to application changes.
-ISTQB Certified Agile Tester: As an ISTQB Certified Agile Tester, you will work within cross‐functional Scrum or Kanban teams to incorporate testing “shift‐left” into every stage of development, collaborating directly with Product Owners and Developers to clarify requirements and acceptance criteria. You will write concise, example‐driven scenarios in “Given–When–Then” (Gherkin) format that capture both happy‐path and negative‐path behavior, ensuring that each user story contains a minimal but sufficient set of executable acceptance criteria. You will continuously refine these scenarios throughout the sprint, adding exploratory or edge‐case tests as new information or risks emerge, and decide which scenarios should be automated immediately versus which should be executed as manual exploratory tests. By providing rapid feedback and ensuring that acceptance criteria are met before code is merged, you will help the team deliver incremental value with high confidence and maintain a healthy balance between automated and exploratory testing.
+**ROLE FOR TEST SCENARIO GENERATION (select the most relevant):**
+- ISTQB Test Analyst: Apply equivalence partitioning, boundary value analysis, decision tables, and state transition testing to derive positive, negative, and edge-case scenarios with traceability to requirements.
+- ISTQB Technical Test Analyst: Design structural and non-functional scenarios covering code paths, concurrency, performance, security, and reliability; define measurable pass/fail criteria.
+- ISTQB Test Manager: Establish risk-based test strategy with entry/exit criteria, coverage targets, and resource priorities; monitor KPIs and report to stakeholders.
+- ISTQB Test Automation Engineer: Translate scenarios into maintainable, data-driven automation scripts integrated into CI/CD pipelines using appropriate frameworks.
+- ISTQB Agile Tester: Write Given-When-Then acceptance scenarios within Scrum/Kanban teams, balancing automation with exploratory testing across sprints.
 
 **REQUIREMENTS FOR THE CUSTOM PROMPT CONTENT:**
 1. Analyze the provided documents and extract key insights relevant to the test type and category to generate a custom test prompt.
@@ -190,23 +190,37 @@ async def generate_prompt(input_data, max_retries=3):
     
     logger.info(f"[DEBUG] Combined document_content length: {len(document_content)}")
     
-    # Token sayısını kontrol et (Test Scenario Generation için özel)
+    # Token sayısını hesapla ve modelin context length'ini LM Studio'dan dinamik olarak sorgula
     total_token_count = 0
     if document_content:
         total_token_count = count_tokens(document_content)
-        logger.info(f"[DEBUG] Total token count for file contents: {total_token_count}")
-        
-        # 4 bin token sınırını kontrol et
-        TOKEN_LIMIT = 4000
-        if total_token_count > TOKEN_LIMIT:
-            logger.warning(f"[DEBUG] Token count ({total_token_count}) exceeds limit ({TOKEN_LIMIT}), switching to high-capacity model")
-            # Model'i büyük kapasiteli modele değiştir
-            if model_name != "qwen2.5:7b-1m":
-                logger.info(f"[DEBUG] Switching model from {model_name} to qwen2.5:7b-1m for large content processing")
-                model_name = "qwen2.5:7b-1m"  # Büyük içerikleri işleyebilen model
+        logger.info(f"[DEBUG] Total token count for file contents (tiktoken): {total_token_count}")
+
+        # LM Studio'dan modelin gerçek context length'ini al
+        _temp_client = LLMClient(api_key=api_key)
+        _tmp_actual = _temp_client.get_model_identifier(model_name)
+        model_context_length = await _temp_client.get_model_context_length(_tmp_actual)
+        # Güvenli eşik: context_length - max_output_tokens (2048) - prompt overhead (500)
+        safe_input_limit = max(model_context_length - 2048 - 500, 1000)
+        logger.info(
+            f"[DEBUG] Model '{model_name}' context length: {model_context_length} tokens, "
+            f"safe input limit: {safe_input_limit} tokens"
+        )
+
+        if total_token_count > safe_input_limit:
+            logger.warning(
+                f"[DEBUG] Token count ({total_token_count}) exceeds safe limit ({safe_input_limit}) "
+                f"for model '{model_name}', switching to qwen2.5-7b-instruct-1m"
+            )
+            if model_name != "qwen2.5-7b-instruct-1m":
+                logger.info(f"[DEBUG] Switching model from {model_name} to qwen2.5-7b-instruct-1m")
+                model_name = "qwen2.5-7b-instruct-1m"
         else:
-            logger.info(f"[DEBUG] Token count ({total_token_count}) is within limit ({TOKEN_LIMIT}), using selected model: {model_name}")
-    
+            logger.info(
+                f"[DEBUG] Token count ({total_token_count}) within safe limit "
+                f"({safe_input_limit}), using selected model: {model_name}"
+            )
+
     logger.info(f"Generating prompt for test_type: {test_type}, category: {test_category}, model: {model_name}")
     logger.info(f"[DEBUG] Final model selection: {model_name} (token count: {total_token_count})")
 
@@ -228,10 +242,12 @@ async def generate_prompt(input_data, max_retries=3):
             logger.info(f"Calling LLM to generate custom prompt... (Attempt {attempts + 1}/{max_retries})")
             
             # Generate response without JSON mode constraint
+            # skip_chunking=True: bağlam bütünlüğü kritik, tüm prompt tek seferde gönderilir
             resp = await llm_client.generate_response(
-                customised_prompt, 
-                temperature=0.3, 
-                max_tokens=2048
+                customised_prompt,
+                temperature=0.3,
+                max_tokens=2048,
+                skip_chunking=True
             )
             logger.info(f"LLM response received. Length: {len(resp) if resp else 0}")
             logger.debug(f"Raw LLM response: {resp[:500] if resp else 'EMPTY'}")
@@ -390,35 +406,38 @@ async def run_step(input_data):
             logger.info(f"[DEBUG] No files provided - assuming final_prompt already contains file contents")
 
         logger.info(f"[DEBUG] Total files processed: {processed_files}, total content length: {len(file_contents)}")        
-        # Define token limit constant
-        TOKEN_LIMIT = 4000
-        
-        # Token sayısını kontrol et ve model seçimini güncelle (Test Scenario Generation için özel)
+        # Token sayısını hesapla (tiktoken ile doğru sayım)
         total_token_count = 0
         if file_contents.strip():
             total_token_count = count_tokens(file_contents)
-            logger.info(f"[DEBUG] Total token count for file contents: {total_token_count}")
-            
-            # 100 bin token sınırını kontrol et
-            if total_token_count > TOKEN_LIMIT:
-                logger.warning(f"[DEBUG] Token count ({total_token_count}) exceeds limit ({TOKEN_LIMIT}), switching to high-capacity model")
-                # Model'i büyük kapasiteli modele değiştir
-                if model_name != "qwen2.5:7b-1m":
-                    logger.info(f"[DEBUG] Switching model from {model_name} to qwen2.5:7b-1m for large content processing")
-                    model_name = "qwen2.5:7b-1m"  # Büyük içerikleri işleyebilen model
-            else:
-                logger.info(f"[DEBUG] Token count ({total_token_count}) is within limit ({TOKEN_LIMIT}), using selected model: {model_name}")
-        
-        # Ayrıca final_prompt'taki token sayısını da kontrol edelim
+            logger.info(f"[DEBUG] Total token count for file contents (tiktoken): {total_token_count}")
+
+        # Prompt token sayısını da hesapla
         prompt_token_count = count_tokens(final_prompt) if final_prompt else 0
         total_combined_tokens = total_token_count + prompt_token_count
-        
+
         logger.info(f"[DEBUG] Final prompt tokens: {prompt_token_count}")
         logger.info(f"[DEBUG] Combined total tokens: {total_combined_tokens}")
-        
-        if total_combined_tokens > TOKEN_LIMIT and model_name != "qwen2.5:7b-1m":
-            logger.warning(f"[DEBUG] Combined token count ({total_combined_tokens}) exceeds limit, switching to high-capacity model")
-            model_name = "qwen2.5:7b-1m"# Test senaryosu üretme prompt'u oluştur - Sadeleştirilmiş versiyon
+
+        # LM Studio'dan modelin gerçek context length'ini al
+        _temp_client = LLMClient(api_key=api_key)
+        _tmp_actual = _temp_client.get_model_identifier(model_name)
+        model_context_length = await _temp_client.get_model_context_length(_tmp_actual)
+        # Güvenli eşik: context_length - max_output_tokens (4000) - overhead (500)
+        safe_input_limit = max(model_context_length - 4000 - 500, 1000)
+        logger.info(
+            f"[DEBUG] Model '{model_name}' context length: {model_context_length} tokens, "
+            f"safe input limit: {safe_input_limit} tokens"
+        )
+
+        if total_combined_tokens > safe_input_limit and model_name != "qwen2.5-7b-instruct-1m":
+            logger.warning(
+                f"[DEBUG] Combined token count ({total_combined_tokens}) exceeds safe limit "
+                f"({safe_input_limit}) for '{model_name}', switching to qwen2.5-7b-instruct-1m"
+            )
+            model_name = "qwen2.5-7b-instruct-1m"
+        else:
+            logger.info(f"[DEBUG] Token count within safe limit, using selected model: {model_name}")# Test senaryosu üretme prompt'u oluştur - Sadeleştirilmiş versiyon
         if file_contents.strip():
             # Eğer dosyalar varsa, onları da ekle
             test_scenario_prompt = f"""IMPORTANT: You must respond ONLY with valid JSON. Do not include any explanatory text, markdown formatting, or additional content outside the JSON.
@@ -482,7 +501,6 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
         logger.info(f"[DEBUG] Sending request to LLM model: {model_name}")
 
         # LLM client'ı oluştur ve model mapping yap (diğer servislerdeki gibi)
-        from utils.model_client import LLMClient
         model_client = LLMClient(api_key=api_key)
         logger.info(f"Model key: {model_name}")
         actual_model = None
@@ -498,12 +516,14 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
         logger.info(f"[DEBUG] Prompt being sent to LLM (first 200 chars): {test_scenario_prompt[:200]}")
         
         # JSON formatını zorlamak için response_format kullan (eğer destekleniyorsa)
+        # skip_chunking=True: bağlam bütünlüğü kritik, tüm prompt tek seferde gönderilir
         try:
             response = await llm_client.generate_response(
                 test_scenario_prompt,
                 temperature=0.2,  # Daha deterministic output için düşük temperature
                 max_tokens=4000,
-                response_format={"type": "json_object"}  # JSON formatını zorla
+                response_format={"type": "json_object"},  # JSON formatını zorla
+                skip_chunking=True
             )
         except Exception as json_format_error:
             logger.warning(f"[DEBUG] JSON format not supported, falling back to normal mode: {json_format_error}")
@@ -511,7 +531,8 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
             response = await llm_client.generate_response(
                 test_scenario_prompt,
                 temperature=0.2,
-                max_tokens=4000
+                max_tokens=4000,
+                skip_chunking=True
             )
         
         if not response:
@@ -590,10 +611,42 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
                     logger.warning(f"[DEBUG] Could not parse JSON, attempting manual extraction")
                     raise json.JSONDecodeError("Could not parse response as JSON", response, 0)
             
-            # Validate structure
+            # Validate structure — auto-wrap if top-level is a list
             if "TestScenarios" not in test_scenarios:
-                raise ValueError("TestScenarios key not found in response")
-            
+                # Model may have returned the array directly or used a different key
+                # Try common alternative keys first
+                alt_keys = ["testScenarios", "test_scenarios", "scenarios", "Scenarios",
+                            "Tests", "tests", "TestCases", "items"]
+                found_key = None
+                for alt in alt_keys:
+                    if alt in test_scenarios and isinstance(test_scenarios[alt], list):
+                        found_key = alt
+                        break
+
+                if found_key:
+                    test_scenarios = {"TestScenarios": test_scenarios[found_key]}
+                    logger.warning(f"[DEBUG] Remapped key '{found_key}' -> 'TestScenarios'")
+                elif isinstance(test_scenarios, list):
+                    # Top-level is already a list
+                    test_scenarios = {"TestScenarios": test_scenarios}
+                    logger.warning("[DEBUG] Top-level was list, wrapped in TestScenarios")
+                else:
+                    # Last resort: create minimal scenarios from the raw text
+                    logger.warning("[DEBUG] Could not find TestScenarios key — building fallback scenario")
+                    test_scenarios = {
+                        "TestScenarios": [{
+                            "ScenarioID": "TS-001",
+                            "Title": "General Functionality Test",
+                            "Category": test_category or "Functional",
+                            "Priority": "High",
+                            "ObjectiveDescription": "Verify general system functionality based on provided requirements",
+                            "Preconditions": "System is initialized and running",
+                            "Steps": "1. Setup system\n2. Execute primary workflow\n3. Verify output",
+                            "ExpectedResults": "System behaves as specified in requirements",
+                            "Comments": "Auto-generated fallback — LLM response did not contain structured JSON"
+                        }]
+                    }
+
             scenarios = test_scenarios["TestScenarios"]
             if not isinstance(scenarios, list):
                 raise ValueError("TestScenarios must be a list")

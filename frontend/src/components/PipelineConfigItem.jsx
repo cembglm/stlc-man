@@ -81,33 +81,26 @@ export default function PipelineConfigItem({
   };
 
   return (
-    <div className={clsx(
-      'border rounded-lg transition-all duration-200',
-      isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-white',
-      !isSelected && 'opacity-60'
-    )}>
+    <div className="border rounded-lg transition-all duration-200 border-indigo-500 bg-indigo-50">
       {/* Header */}
       <div className="p-4">
         <div className="flex items-center justify-between">
-          {/* Left side - Checkbox, Expand button, Title */}
+          {/* Left side - Lock icon, Expand button, Title */}
           <div className="flex items-center space-x-3 flex-1">
-            {/* Checkbox */}
-            <input
-              type="checkbox"
-              checked={isSelected}
-              onChange={(e) => onToggleSelect && onToggleSelect(e.target.checked)}
-              className={clsx(
-                "h-5 w-5 rounded border-gray-300",
-                processOrigin === 'auto' ? 'text-yellow-500' : 'text-indigo-600'
-              )}
-              disabled={pipelineStatus === 'running'}
-            />
+            {/* Lock icon — step is always active */}
+            <div
+              className="h-5 w-5 flex items-center justify-center text-indigo-600"
+              title="Step is always active"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clipRule="evenodd" />
+              </svg>
+            </div>
             
             {/* Expand/Collapse Button */}
             <button
               onClick={handleToggleExpand}
               className="p-1 hover:bg-gray-100 rounded transition-colors"
-              disabled={!isSelected}
             >
               {localExpanded ? (
                 <ChevronDownIcon className="h-5 w-5 text-gray-600" />

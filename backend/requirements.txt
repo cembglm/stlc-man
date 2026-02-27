@@ -17,3 +17,4 @@ google-genai
 aiohttp
 motor
 docker
+tiktoken

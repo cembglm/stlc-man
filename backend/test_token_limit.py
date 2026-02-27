@@ -58,7 +58,7 @@ def test_model_selection():
     print(f"Normal model: {normal_model} -> {actual_normal}")
     
     # Test high-capacity model
-    high_capacity_model = "qwen2.5:7b-1m"
+    high_capacity_model = "qwen2.5-7b-instruct-1m"
     actual_high_capacity = client.get_model_identifier(high_capacity_model)
     print(f"High-capacity model: {high_capacity_model} -> {actual_high_capacity}")
     print()
@@ -88,9 +88,9 @@ def test_logic_simulation():
         # Apply the same logic as in test_scenario_generation.py
         if tokens > TOKEN_LIMIT:
             print(f"  ⚠️ Token count ({tokens}) exceeds limit ({TOKEN_LIMIT})")
-            if model_name != "qwen2.5:7b-1m":
-                print(f"  🔄 Switching model from {model_name} to qwen2.5:7b-1m")
-                model_name = "qwen2.5:7b-1m"
+            if model_name != "qwen2.5-7b-instruct-1m":
+                print(f"  🔄 Switching model from {model_name} to qwen2.5-7b-instruct-1m")
+                model_name = "qwen2.5-7b-instruct-1m"
             else:
                 print(f"  ✅ Already using high-capacity model")
         else:

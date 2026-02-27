@@ -30,9 +30,28 @@ function AppContents() {
 		return sid;
 	});
 
+	// All 11 pipeline steps — always selected, user cannot deselect
+	const ALL_PIPELINE_STEPS = [
+		'code-review',
+		'requirement-analysis',
+		'test-planning',
+		'environment-setup',
+		'test-scenario-generation',
+		'test-case-generation',
+		'test-case-optimization',
+		'test-code-generation',
+		'test-execution',
+		'test-reporting',
+		'test-closure',
+	];
+
 	// Combined states from both App.jsx files
-	const [selectedProcesses, setSelectedProcesses] = useState(new Set());
-	const [processOrigins, setProcessOrigins] = useState({}); // { processId: 'manual' | 'auto' }
+	const [selectedProcesses, setSelectedProcesses] = useState(
+		() => new Set(ALL_PIPELINE_STEPS)
+	);
+	const [processOrigins, setProcessOrigins] = useState(
+		() => Object.fromEntries(ALL_PIPELINE_STEPS.map(id => [id, 'manual']))
+	); // { processId: 'manual' | 'auto' }
 	const [processFiles, setProcessFiles] = useState({});
 	const [aiModels, setAIModels] = useState({});  // New state for AI models
 	const [environmentNames, setEnvironmentNames] = useState({});  // New state for environment names
@@ -54,6 +73,50 @@ function AppContents() {
 	const [generatedPrompt, setGeneratedPrompt] = useState("");
 	// Çıktı formatlarını takip etmek için state ekliyoruz
 	const [outputFormats, setOutputFormats] = useState({});
+
+	// Pipeline step results — populated as each step completes
+	const [pipelineResults, setPipelineResults] = useState({});
+
+	// Global pipeline model — single model used for all pipeline steps
+	const [pipelineModel, setPipelineModel] = useState('qwen2.5-7b-instruct-1m');
+
+	// Test Execution Method (pipeline) — "ai" | "docker" | "robot"
+	const [testExecutionMethod, setTestExecutionMethod] = useState('ai');
+	const [dockerAvailable, setDockerAvailable] = useState(false);
+	const [dockerConfig, setDockerConfig] = useState({ language: 'python', packages: '', timeout: 300 });
+	const [robotConfig, setRobotConfig] = useState({ robotType: 'generic', simulationPrecision: 'medium' });
+
+	const handleDockerConfigChange = (field, value) => {
+		setDockerConfig(prev => ({ ...prev, [field]: value }));
+	};
+	const handleRobotConfigChange = (field, value) => {
+		setRobotConfig(prev => ({ ...prev, [field]: value }));
+	};
+
+	// Docker availability check — runs once on mount
+	useEffect(() => {
+		const checkDocker = async () => {
+			try {
+				const res = await fetch('http://localhost:8000/api/docker-execution/status');
+				if (res.ok) {
+					const data = await res.json();
+					setDockerAvailable(!!data.docker_available);
+				}
+			} catch {
+				setDockerAvailable(false);
+			}
+		};
+		checkDocker();
+	}, []);
+
+	// Pipeline executor fonksiyonunu saklamak için ref
+	const pipelineExecutorRef = React.useRef(null);
+	
+	// TabPanel'den pipeline executor fonksiyonunu kaydet
+	const registerPipelineExecutor = React.useCallback((executorFn) => {
+		console.log('[App] Registering pipeline executor');
+		pipelineExecutorRef.current = executorFn;
+	}, []);
 
 	// Combined file upload function that supports both direct and centralized file management
 	const handleFileUpload = async (processIdOrFiles, fileTypeOrInfo) => {
@@ -153,142 +216,16 @@ function AppContents() {
 		}));
 	};
 
-	// Complex process selection function from second App.jsx with automatic selection features
-	const handleProcessSelect = (processId) => {
-		console.log(`[App] Process ${processId} selection triggered`);
-		setSelectedProcesses(prevSelected => {
-			const newSet = new Set(prevSelected);
-			const newOrigins = { ...processOrigins };
-			const wasSelected = newSet.has(processId);
-
-			// Toggle selection
-			if (wasSelected) {
-				newSet.delete(processId);
-				delete newOrigins[processId];
-				console.log(`[App] Removed ${processId} manually`);
-			} else {
-				newSet.add(processId);
-				newOrigins[processId] = 'manual';
-				console.log(`[App] Added ${processId} manually`);
-			}
-
-			// Pipeline etkin değilse sadece seçimi güncelle
-			if (!isPipelineEnabled) {
-				setProcessOrigins(newOrigins);
-				return newSet;
-			}
-
-			// Process indeksleri
-			const testPlanningIndex = processes.findIndex(p => p.id === 'test-planning');
-			const envSetupIndex = processes.findIndex(p => p.id === 'environment-setup');
-			
-			// Mevcut süreçlerin durumları
-			const isTestPlanningSelected = newSet.has('test-planning');
-			const isEnvSetupSelected = newSet.has('environment-setup');
-			const isTestPlanningManual = isTestPlanningSelected && newOrigins['test-planning'] === 'manual';
-			const isEnvSetupManual = isEnvSetupSelected && newOrigins['environment-setup'] === 'manual';
-
-			// Tüm süreçlerin indeksleriyle birlikte listesi
-			const allProcesses = Array.from(newSet).map(id => ({
-				id,
-				index: processes.findIndex(p => p.id === id)
-			}));
-
-			// Test Planning ve Environment Setup dışındaki süreçler
-			const otherProcesses = allProcesses.filter(
-				item => item.id !== 'test-planning' && item.id !== 'environment-setup'
-			);
-
-			// Sadece bir süreç varsa ve bu requirement-analysis veya test-scenario-generation ise
-			const hasOnlyRequirementAnalysis = otherProcesses.length === 1 && 
-				otherProcesses[0].id === 'requirement-analysis';
-			
-			const hasOnlyTestScenarioGeneration = otherProcesses.length === 1 && 
-				otherProcesses[0].id === 'test-scenario-generation';
-
-			console.log(`[App] Has only requirement-analysis: ${hasOnlyRequirementAnalysis}`);
-			console.log(`[App] Has only test-scenario-generation: ${hasOnlyTestScenarioGeneration}`);
-
-			// Ardışık süreçleri kontrol et (herhangi iki süreç arasında)
-			let hasConsecutive = false;
-			
-			// Tüm süreç çiftlerini kontrol et
-			for (let i = 0; i < otherProcesses.length; i++) {
-				for (let j = i + 1; j < otherProcesses.length; j++) {
-					const indexA = otherProcesses[i].index;
-					const indexB = otherProcesses[j].index;
-					
-					// Eğer herhangi iki süreç ardışıksa
-					if (Math.abs(indexA - indexB) === 1) {
-						hasConsecutive = true;
-						console.log(`[App] Found consecutive pair: ${otherProcesses[i].id} (${indexA}) and ${otherProcesses[j].id} (${indexB})`);
-						break;
-					}
-				}
-				if (hasConsecutive) break;
-			}
-
-			// Requirement-analysis veya test-planning seçildiğinde
-			const hasRequirementAnalysis = otherProcesses.some(p => p.id === 'requirement-analysis');
-			const isRequirementAnalysisAndTestPlanning = hasRequirementAnalysis && isTestPlanningSelected;
-			
-			// Environment-setup veya test-scenario-generation seçildiğinde
-			const hasTestScenarioGeneration = otherProcesses.some(p => p.id === 'test-scenario-generation');
-			const isEnvSetupAndTestScenarioGeneration = hasTestScenarioGeneration && isEnvSetupSelected;
-			
-			console.log(`[App] Has requirement-analysis: ${hasRequirementAnalysis}`);
-			console.log(`[App] Is requirement-analysis and test-planning: ${isRequirementAnalysisAndTestPlanning}`);
-			console.log(`[App] Has test-scenario-generation: ${hasTestScenarioGeneration}`);
-			console.log(`[App] Is environment-setup and test-scenario-generation: ${isEnvSetupAndTestScenarioGeneration}`);
-			
-			// Requirement-analysis VE test-planning seçili ise, sadece environment-setup eklensin
-			if (isRequirementAnalysisAndTestPlanning && !isEnvSetupManual && !isEnvSetupSelected) {
-				newSet.add('environment-setup');
-				newOrigins['environment-setup'] = 'auto';
-				console.log('[App] Added only environment-setup as auto (due to requirement-analysis AND test-planning)');
-			}
-			// Environment-setup VE test-scenario-generation seçili ise, sadece test-planning eklensin
-			else if (isEnvSetupAndTestScenarioGeneration && !isTestPlanningManual && !isTestPlanningSelected) {
-				newSet.add('test-planning');
-				newOrigins['test-planning'] = 'auto';
-				console.log('[App] Added only test-planning as auto (due to environment-setup AND test-scenario-generation)');
-			}
-			// Herhangi başka iki süreç arasında ardışıklık varsa
-			else if (hasConsecutive) {
-				if (!isTestPlanningManual && !isTestPlanningSelected) {
-					newSet.add('test-planning');
-					newOrigins['test-planning'] = 'auto';
-					console.log('[App] Added test-planning as auto (due to consecutive processes)');
-				}
-				if (!isEnvSetupManual && !isEnvSetupSelected) {
-					newSet.add('environment-setup');
-					newOrigins['environment-setup'] = 'auto';
-					console.log('[App] Added environment-setup as auto (due to consecutive processes)');
-				}
-			}
-			// Hiçbir ardışık süreç yoksa VE özel senaryolardan hiçbiri yoksa
-			// otomatik eklenmiş süreçleri kaldır
-			if (!hasConsecutive && 
-					!isRequirementAnalysisAndTestPlanning &&
-					!isEnvSetupAndTestScenarioGeneration) {
-				if (newOrigins['test-planning'] === 'auto') {
-					newSet.delete('test-planning');
-					delete newOrigins['test-planning'];
-					console.log('[App] Removed auto test-planning - no consecutive processes');
-				}
-				if (newOrigins['environment-setup'] === 'auto') {
-					newSet.delete('environment-setup');
-					delete newOrigins['environment-setup'];
-					console.log('[App] Removed auto environment-setup - no consecutive processes');
-				}
-			}
-
-			console.log(`[App] Final selectedProcesses: ${Array.from(newSet)}`);
-			console.log(`[App] Final processOrigins: ${JSON.stringify(newOrigins)}`);
-			setProcessOrigins(newOrigins);
-			return newSet;
-		});
+	// Process selection is locked — all 11 steps are always active
+	// This function is kept for API compatibility but does nothing
+	const handleProcessSelect = (_processId) => {
+		console.log('[App] Process selection is locked — all 11 steps are always active');
+		// no-op: steps cannot be added or removed
+		return;
 	};
+
+	// Legacy compatibility alias — kept for reference only, not used
+	// (all 11 steps are always selected; toggle logic is disabled)
 
 	const validatePipeline = () => {
 		console.log('[App] Validating pipeline');
@@ -674,79 +611,250 @@ function AppContents() {
 	`).join('\n')}`;
 	};
 
-	// Pipeline başlatma fonksiyonu
-	const handleStartPipeline = async (pipelineConfigs = null) => {
-		console.log('[App] Starting pipeline with configs:', pipelineConfigs);
+	// Bağımlılık kontrolü fonksiyonu
+	const checkDependencies = (selectedProcessIds) => {
+		const missingDeps = [];
+		const selectedSet = new Set(selectedProcessIds);
 		
-		// Seçilen süreçleri sırayla çalıştır
-		const selectedProcessIds = Array.from(selectedProcesses);
-		
-		// Önce tüm süreç durumlarını "pending" olarak ayarla
-		setPipelineStatus(prev => {
-			const newStatus = { ...prev };
-			selectedProcessIds.forEach(id => {
-				newStatus[id] = 'pending';
-			});
-			return newStatus;
+		selectedProcessIds.forEach(processId => {
+			const process = processes.find(p => p.id === processId);
+			if (process && process.dependencies) {
+				const missing = process.dependencies.filter(dep => !selectedSet.has(dep));
+				if (missing.length > 0) {
+					missingDeps.push({
+						processId,
+						processName: process.name,
+						dependencies: missing.map(depId => {
+							const depProcess = processes.find(p => p.id === depId);
+							return { id: depId, name: depProcess?.name || depId };
+						})
+					});
+				}
+			}
 		});
 		
-		// Süreçleri sırayla çalıştır
-		for (const processId of selectedProcessIds) {
-			console.log(`[App] Running pipeline step: ${processId}`);
-			
-			try {
-				// Mevcut sürecin durumunu "running" olarak güncelle
-				setPipelineStatus(prev => ({
-					...prev,
-					[processId]: 'running'
-				}));
-				
-				// Config varsa kullan, yoksa mevcut mantığı kullan
-				if (pipelineConfigs && pipelineConfigs[processId]) {
-					const config = pipelineConfigs[processId];
-					console.log(`[App] Using saved configuration for ${processId}:`, config);
-					
-					// Kaydedilmiş config ile çalıştır
-					await handleRunProcessWithConfig(processId, config);
-				} else {
-					// Süreç için dosyaları belirle (eski mantık)
-					const relevantFiles = managedFiles.filter(file => 
-						fileProcessMappings[file.id]?.includes(processId)
-					);
-					
-					// Süreç çalıştırma fonksiyonunu çağır ve sonuçları bekle
-					await handleProcessRun(processId, relevantFiles);
-				}
-				
-				// Kısa bir bekleme süresi ekle
-				await new Promise(resolve => setTimeout(resolve, 500));
-				
-			} catch (error) {
-				console.error(`[App] Pipeline step failed at ${processId}: ${error.message}`);
-				
-				// Hata durumunda süreci durdur
-				setPipelineStatus(prev => ({
-					...prev,
-					[processId]: 'error'
-				}));
-				
-				// Hata mesajını çıktı olarak göster
-				setOutputs(prev => ({
-					...prev,
-					pipeline: {
-						content: `Pipeline Error at ${processId}: ${error.message}`,
-						status: 'error',
-						processType: 'Pipeline',
-						processId: 'pipeline',
-						timestamp: new Date().toISOString()
-					}
-				}));
-				
-				break;
-			}
+		return missingDeps;
+	};
+
+	// Pipeline başlatma fonksiyonu - backend orchestration
+	const handleStartPipeline = async (pipelineConfigs = null) => {
+		console.log('[App] Starting pipeline with configs:', pipelineConfigs);
+		const { toast } = await import('react-hot-toast');
+
+		// Seçilen süreçleri STLC sırasına göre sırala
+		const selectedProcessIds = processes
+			.filter(p => selectedProcesses.has(p.id))
+			.map(p => p.id);
+
+		if (selectedProcessIds.length === 0) {
+			toast.error('No processes selected for pipeline.', { duration: 4000, position: 'top-center' });
+			return;
 		}
-		
-		console.log('[App] Pipeline execution completed');
+
+		// Bağımlılık kontrolü - şimdi bloklama yapıyor
+		const missingDependencies = checkDependencies(selectedProcessIds);
+		if (missingDependencies.length > 0) {
+			const warningMessage = missingDependencies
+				.map(item => `${item.processName} requires: ${item.dependencies.map(d => d.name).join(', ')}`)
+				.join('\n');
+			toast.error(`Pipeline cannot start. Missing dependencies:\n${warningMessage}`, {
+				duration: 8000,
+				position: 'top-center',
+			});
+			return;
+		}
+
+		// Tüm süreç durumlarını "pending" olarak ayarla
+		setPipelineStatus(prev => {
+			const newStatus = { ...prev };
+			selectedProcessIds.forEach(id => { newStatus[id] = 'pending'; });
+			return newStatus;
+		});
+		setPipelineResults({});
+
+		// Build files payload: step_id -> [FileInfo, ...]
+		// fileProcessMappings: { file_id -> [step_id, ...] }
+		const filesPayload = {};
+		managedFiles.forEach(f => {
+			const stepIds = fileProcessMappings[f.id] || [];
+			stepIds.forEach(stepId => {
+				if (!filesPayload[stepId]) filesPayload[stepId] = [];
+				filesPayload[stepId].push({
+					name: f.name,
+					content: f.content || '',
+					type: f.type || 'text/plain',
+				});
+			});
+		});
+
+		// Single global model — all steps use the same model, no per-step overrides
+		const globalModel = pipelineModel || 'qwen2.5-7b-instruct-1m';
+		const globalApiKey = apiKeys?.gemini || null;
+
+		// Minimal per-step configs — only model, everything else uses backend defaults.
+		// For test-execution, also include selected execution method and its sub-config.
+		const stepConfigs = {};
+		selectedProcessIds.forEach(stepId => {
+			if (stepId === 'test-execution') {
+				const execCfg = { model: globalModel, execution_method: testExecutionMethod };
+				if (testExecutionMethod === 'docker') {
+					execCfg.execution_language = dockerConfig.language || 'python';
+					execCfg.docker_timeout = dockerConfig.timeout || 300;
+					if (dockerConfig.packages) {
+						execCfg.additional_packages = dockerConfig.packages
+							.split(',').map(p => p.trim()).filter(Boolean);
+					}
+				} else if (testExecutionMethod === 'robot') {
+					execCfg.robot_type = robotConfig.robotType || 'generic';
+					execCfg.simulation_config = { precision: robotConfig.simulationPrecision || 'medium' };
+				}
+				stepConfigs[stepId] = execCfg;
+			} else {
+				stepConfigs[stepId] = { model: globalModel };
+			}
+		});
+
+		// Auto-generate process_title from date
+		const processTitle = `Pipeline - ${new Date().toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}`;
+
+		const payload = {
+			session_id: sessionId,
+			process_title: processTitle,
+			selected_steps: selectedProcessIds,
+			files: filesPayload,
+			global_model: globalModel,
+			global_api_key: globalApiKey,
+			step_configs: stepConfigs,
+		};
+
+		console.log('[App] Pipeline payload:', JSON.stringify(payload, null, 2));
+
+		let pipelineSessionId = sessionId;
+
+		try {
+			// Start pipeline on backend
+			const startResp = await fetch('http://localhost:8000/api/pipeline/run', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload),
+			});
+
+			if (!startResp.ok) {
+				const errText = await startResp.text();
+				toast.error(`Failed to start pipeline: ${errText}`, { duration: 6000 });
+				return;
+			}
+
+			const startData = await startResp.json();
+			pipelineSessionId = startData.session_id || sessionId;
+			console.log('[App] Pipeline started, session_id:', pipelineSessionId);
+			toast.success(`Pipeline started (${startData.ordered_steps?.length || 0} steps)`, {
+				duration: 3000,
+				position: 'top-center',
+			});
+
+		} catch (err) {
+			console.error('[App] Failed to start pipeline:', err);
+			toast.error(`Pipeline start failed: ${err.message}`, { duration: 6000 });
+			return;
+		}
+
+		// Connect to SSE stream
+		try {
+			const evtSource = new EventSource(
+				`http://localhost:8000/api/pipeline/stream/${pipelineSessionId}`
+			);
+
+			evtSource.onmessage = (event) => {
+				try {
+					const data = JSON.parse(event.data);
+					console.log('[App] Pipeline SSE event:', data);
+
+					switch (data.type) {
+						case 'step_started':
+							setPipelineStatus(prev => ({ ...prev, [data.step_id]: 'running' }));
+							break;
+
+						case 'step_completed':
+							setPipelineStatus(prev => ({ ...prev, [data.step_id]: 'completed' }));
+							// Auto-fetch the full step result from backend
+							(async () => {
+								try {
+									const res = await fetch(
+										`http://localhost:8000/api/pipeline/step-result/${pipelineSessionId}/${data.step_id}`
+									);
+									if (res.ok) {
+										const stepData = await res.json();
+										setPipelineResults(prev => ({ ...prev, [data.step_id]: stepData }));
+									}
+								} catch (fetchErr) {
+									console.warn('[App] Failed to fetch step result:', data.step_id, fetchErr);
+								}
+							})();
+							break;
+
+						case 'step_failed':
+							setPipelineStatus(prev => ({ ...prev, [data.step_id]: 'error' }));
+							// Also store the failed step result (for error message display)
+							setPipelineResults(prev => ({
+								...prev,
+								[data.step_id]: { step_id: data.step_id, status: 'error', error: data.error, output: {} },
+							}));
+							setOutputs(prev => ({
+								...prev,
+								pipeline: {
+									content: `Step '${data.step_id}' failed: ${data.error}`,
+									status: 'error',
+									processType: 'Pipeline',
+									processId: 'pipeline',
+									timestamp: new Date().toISOString(),
+								},
+							}));
+							break;
+
+						case 'pipeline_completed':
+							toast.success(
+								`Pipeline completed! ${data.steps_completed}/${data.total_steps} steps.`,
+								{ duration: 5000, position: 'top-center' }
+							);
+							evtSource.close();
+							break;
+
+						case 'pipeline_failed':
+							toast.error(
+								`Pipeline failed at '${data.failed_step}': ${data.error}`,
+								{ duration: 8000, position: 'top-center' }
+							);
+							evtSource.close();
+							break;
+
+						case 'pipeline_stopped':
+							toast(`Pipeline stopped at '${data.stopped_at_step}'.`, { duration: 5000 });
+							evtSource.close();
+							break;
+
+						case 'stream_end':
+							evtSource.close();
+							break;
+
+						default:
+							break;
+					}
+				} catch (parseErr) {
+					console.warn('[App] Failed to parse SSE event:', event.data, parseErr);
+				}
+			};
+
+			evtSource.onerror = (err) => {
+				console.error('[App] SSE stream error:', err);
+				evtSource.close();
+			};
+
+		} catch (err) {
+			console.error('[App] Failed to connect SSE stream:', err);
+		}
+
+		console.log('[App] Pipeline execution initiated via backend orchestration');
 	};
 	
 	// Ana çalıştırma fonksiyonu - pipeline veya tek süreç
@@ -1118,7 +1226,7 @@ function AppContents() {
 	return (
 		<div className="min-h-screen flex flex-col">
 			<Toaster
-				position="top-right"
+				position="top-center"
 				toastOptions={{
 					duration: 4000,
 					style: {
@@ -1161,14 +1269,25 @@ function AppContents() {
 					onAIModelUpdate={handleAIModelUpdate}
 					onOutputFormatUpdate={handleOutputFormatUpdate}
 					onEnvironmentNameUpdate={handleEnvironmentNameUpdate}
+					pipelineModel={pipelineModel}
+					onPipelineModelChange={setPipelineModel}
+					testExecutionMethod={testExecutionMethod}
+					onTestExecutionMethodChange={setTestExecutionMethod}
+					dockerAvailable={dockerAvailable}
+					dockerConfig={dockerConfig}
+					onDockerConfigChange={handleDockerConfigChange}
+					robotConfig={robotConfig}
+					onRobotConfigChange={handleRobotConfigChange}
 					aiModels={aiModels}
 					environmentNames={environmentNames}
 					outputFormats={outputFormats}
 					processPrompts={processPrompts}
 					onPromptUpdate={handlePromptUpdate}
 					pipelineStatus={pipelineStatus}
+					pipelineResults={pipelineResults}
 					onRun={handleRun}
 					onSetOutput={handleSetOutput}
+					onRegisterPipelineExecutor={registerPipelineExecutor}
 					validationError={validationError}
 					output={output}
 					outputs={outputs}

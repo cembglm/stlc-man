@@ -11,6 +11,7 @@ import { clsx } from 'clsx';
 import { useSelector } from 'react-redux';
 import PropTypes from 'prop-types';
 import { useModels } from '../../hooks/useModels';
+import DockerExecutionPanel from '../docker/DockerExecutionPanel';
 
 // Custom hook to manage model information
 function useModelInfo(selectedModel) {
@@ -93,10 +94,13 @@ export default function TestExecutionForm({
   const [isLoadingTests, setIsLoadingTests] = useState(false);
   
   // Docker execution states
-  const [executionMode, setExecutionMode] = useState('standard'); // 'standard' or 'docker'
+  const [executionMode, setExecutionMode] = useState('standard'); // 'standard', 'docker', or 'sandbox'
   const [dockerAvailable, setDockerAvailable] = useState(false);
   const [additionalPackages, setAdditionalPackages] = useState('');
   const [dockerTimeout, setDockerTimeout] = useState(300);
+  
+  // Sandbox state for direct code execution
+  const [sandboxCode, setSandboxCode] = useState('');
 
   // Model info hook kullanımı
   const modelInfo = useModelInfo(selectedModel);
@@ -658,11 +662,22 @@ ${result.error || 'Unknown error occurred'}
   // Update TabPanel form state to enable/disable Run Process button
   useEffect(() => {
     if (onTestCaseGeneration) {
-      const canRun = selectedTests.length > 0 && selectedProcessName && !isExecuting;
+      let canRun, handleRun;
+      
+      if (executionMode === 'sandbox') {
+        // For sandbox mode, Run button is disabled (sandbox has its own execute button)
+        canRun = false;
+        handleRun = null;
+      } else {
+        // For standard and docker process modes
+        canRun = selectedTests.length > 0 && selectedProcessName && !isExecuting;
+        handleRun = canRun ? (executionMode === 'docker' ? executeInDocker : executeTests) : null;
+      }
+      
       onTestCaseGeneration({
         canRun,
         isRunning: isExecuting,
-        handleRun: canRun ? (executionMode === 'docker' ? executeInDocker : executeTests) : null
+        handleRun
       });
     }
   }, [onTestCaseGeneration, selectedTests, selectedProcessName, isExecuting, executionMode]);
@@ -806,37 +821,52 @@ ${result.error || 'Unknown error occurred'}
               </div>
             )}
 
-            {/* Execution Mode Selection */}
+            {/* Execution Mode Selection - Three Sub-Tabs */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Execution Mode
               </label>
-              <div className="flex gap-2">
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
                 <button
                   onClick={() => setExecutionMode('standard')}
                   className={clsx(
-                    'flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors',
+                    'flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all',
                     executionMode === 'standard'
-                      ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
-                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      ? 'bg-white text-indigo-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
                   )}
                 >
-                  Standard
+                  Standard Execution
                 </button>
                 <button
                   onClick={() => setExecutionMode('docker')}
                   disabled={!dockerAvailable}
                   className={clsx(
-                    'flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors',
+                    'flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all',
                     executionMode === 'docker'
-                      ? 'bg-blue-50 border-blue-500 text-blue-700'
-                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50',
+                      ? 'bg-white text-blue-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900',
                     !dockerAvailable && 'opacity-50 cursor-not-allowed'
                   )}
                 >
-                  🐳 Docker
+                  🐳 Docker Process
+                </button>
+                <button
+                  onClick={() => setExecutionMode('sandbox')}
+                  disabled={!dockerAvailable}
+                  className={clsx(
+                    'flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all',
+                    executionMode === 'sandbox'
+                      ? 'bg-white text-green-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900',
+                    !dockerAvailable && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  🚀 Docker Sandbox
                 </button>
               </div>
+              
+              {/* Docker Status Info */}
               {executionMode === 'docker' && (
                 <div className="mt-3 space-y-2">
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -887,8 +917,14 @@ ${result.error || 'Unknown error occurred'}
         </div>
       </div>
 
-      {/* Test Code Selection Section */}
-      <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
+      {/* Conditional Content Based on Execution Mode */}
+      {executionMode === 'sandbox' ? (
+        /* Docker Sandbox - Direct Code Execution */
+        <DockerExecutionPanel />
+      ) : (
+        <>
+          {/* Test Code Selection Section */}
+          <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
         <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
           <DocumentTextIcon className="w-5 h-5 mr-2 text-gray-600" />
           Test Code Selection
@@ -1115,6 +1151,8 @@ ${result.error || 'Unknown error occurred'}
             </div>
           )}
       </div>
+        </>
+      )}
     </div>
   );
 }

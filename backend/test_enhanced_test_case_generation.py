@@ -405,7 +405,7 @@ class DataValidator:
     print(f"Estimated total tokens: {estimated_tokens}")
     
     if estimated_tokens > 4000:
-        print("⚠️ Content exceeds 4000 tokens - system should auto-switch to qwen2.5:7b-1m")
+        print("⚠️ Content exceeds 4000 tokens - system should auto-switch to qwen2.5-7b-instruct-1m")
     
     try:
         response = requests.post(url, json=payload, timeout=1200)  # 20 minutes timeout
@@ -463,7 +463,7 @@ class DataValidator:
                 
                 # Check if model was switched
                 final_model = summary.get('model_used', 'Unknown')
-                if estimated_tokens > 4000 and 'qwen2.5:7b-1m' in final_model:
+                if estimated_tokens > 4000 and 'qwen2.5-7b-instruct-1m' in final_model:
                     print("✅ Token limit system working - model was automatically switched!")
                 elif estimated_tokens > 4000:
                     print("⚠️ Token limit may not be working properly")

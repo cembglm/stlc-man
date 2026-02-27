@@ -51,7 +51,7 @@ async def get_available_models():
             {"key": "openai/gpt-oss-20b", "name": "GPT OSS (20B)", "description": "OpenAI's open source large model", "type": "local"},
             {"key": "qwen/qwq-32b", "name": "QwQ (32B)", "description": "Qwen's reasoning-focused large model", "type": "local"},
             {"key": "qwen2.5:7b", "name": "Qwen 2.5 (7B)", "description": "Alibaba's advanced model", "type": "local"},
-            {"key": "qwen2.5:7b-1m", "name": "Qwen 2.5 (7B-1M)", "description": "Large context version", "type": "local"},
+            {"key": "qwen2.5-7b-instruct-1m", "name": "Qwen 2.5 (7B-1M)", "description": "Large context version", "type": "local"},
             {"key": "qwen2.5-coder:3b", "name": "Qwen 2.5 Coder (3B)", "description": "Coding-focused Qwen model", "type": "local"},
             {"key": "qwen/qwen3-14b", "name": "Qwen 3 (14B)", "description": "Alibaba's latest large model", "type": "local"},
             {"key": "stable-code:3b", "name": "Stable Code (3B)", "description": "Stability AI's code model", "type": "local"},

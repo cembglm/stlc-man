@@ -1,14 +1,62 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+
+// All 11 pipeline steps — always active
+const ALL_PIPELINE_STEPS = [
+  'code-review',
+  'requirement-analysis',
+  'test-planning',
+  'environment-setup',
+  'test-scenario-generation',
+  'test-case-generation',
+  'test-case-optimization',
+  'test-code-generation',
+  'test-execution',
+  'test-reporting',
+  'test-closure',
+];
+
+/**
+ * Default configuration for a pipeline step.
+ * Provides sensible defaults so the pipeline can start without manual config.
+ */
+function defaultStepConfig(processId) {
+  return {
+    aiModel: 'qwen2.5-7b-instruct-1m',
+    model: 'qwen2.5-7b-instruct-1m',
+    temperature: 0.7,
+    topP: 0.9,
+    maxTokens: 4096,
+    usingGlobalAI: false,
+    isConfigured: true,
+    configuredAt: new Date().toISOString(),
+    // Step-specific defaults
+    ...(processId === 'environment-setup' ? { environment_name: 'Default Environment' } : {}),
+    ...(processId === 'test-scenario-generation' ? { test_type: 'Functional Testing', test_category: 'Functional' } : {}),
+    ...(processId === 'test-case-optimization' ? { optimization_type: 'individual' } : {}),
+    ...(processId === 'test-code-generation' ? { output_format: 'json' } : {}),
+    ...(processId === 'test-execution' ? { execution_mode: 'standard' } : {}),
+    ...(processId === 'test-reporting' ? { analysis_depth: 'detailed' } : {}),
+  };
+}
 
 /**
  * Pipeline Configuration Hook
  * 
  * Her process için yapılan ayarlamaları yönetir.
  * Backend API'larla tam uyumlu config formatı sağlar.
+ * 
+ * Tüm 11 adım otomatik olarak varsayılan konfig ile başlatılır;
+ * kullanıcı sadece özelleştirmek istediği adımları değiştirir.
  */
 export function usePipelineConfig() {
-  // Her process için yapılandırma durumu
-  const [pipelineConfigs, setPipelineConfigs] = useState({});
+  // Her process için yapılandırma durumu — tüm adımlar default config ile başlar
+  const [pipelineConfigs, setPipelineConfigs] = useState(() => {
+    const initial = {};
+    ALL_PIPELINE_STEPS.forEach(id => {
+      initial[id] = defaultStepConfig(id);
+    });
+    return initial;
+  });
   
   // Global AI configuration state
   const [globalAIConfig, setGlobalAIConfig] = useState(null);
