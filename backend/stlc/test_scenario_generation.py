@@ -192,33 +192,23 @@ async def generate_prompt(input_data, max_retries=3):
     
     # Token sayısını hesapla ve modelin context length'ini LM Studio'dan dinamik olarak sorgula
     total_token_count = 0
+    # Sabit eşik: küçük modeller için güvenli token limiti (30k)
+    QWEN_SWITCH_THRESHOLD = 30_000
+
     if document_content:
         total_token_count = count_tokens(document_content)
         logger.info(f"[DEBUG] Total token count for file contents (tiktoken): {total_token_count}")
 
-        # LM Studio'dan modelin gerçek context length'ini al
-        _temp_client = LLMClient(api_key=api_key)
-        _tmp_actual = _temp_client.get_model_identifier(model_name)
-        model_context_length = await _temp_client.get_model_context_length(_tmp_actual)
-        # Güvenli eşik: context_length - max_output_tokens (2048) - prompt overhead (500)
-        safe_input_limit = max(model_context_length - 2048 - 500, 1000)
-        logger.info(
-            f"[DEBUG] Model '{model_name}' context length: {model_context_length} tokens, "
-            f"safe input limit: {safe_input_limit} tokens"
-        )
-
-        if total_token_count > safe_input_limit:
+        if total_token_count > QWEN_SWITCH_THRESHOLD and model_name != "qwen2.5-7b-instruct-1m":
             logger.warning(
-                f"[DEBUG] Token count ({total_token_count}) exceeds safe limit ({safe_input_limit}) "
-                f"for model '{model_name}', switching to qwen2.5-7b-instruct-1m"
+                f"[DEBUG] Token count ({total_token_count}) exceeds threshold ({QWEN_SWITCH_THRESHOLD}), "
+                f"switching from '{model_name}' to qwen2.5-7b-instruct-1m"
             )
-            if model_name != "qwen2.5-7b-instruct-1m":
-                logger.info(f"[DEBUG] Switching model from {model_name} to qwen2.5-7b-instruct-1m")
-                model_name = "qwen2.5-7b-instruct-1m"
+            model_name = "qwen2.5-7b-instruct-1m"
         else:
             logger.info(
-                f"[DEBUG] Token count ({total_token_count}) within safe limit "
-                f"({safe_input_limit}), using selected model: {model_name}"
+                f"[DEBUG] Token count ({total_token_count}) within threshold ({QWEN_SWITCH_THRESHOLD}), "
+                f"using selected model: {model_name}"
             )
 
     logger.info(f"Generating prompt for test_type: {test_type}, category: {test_category}, model: {model_name}")
@@ -419,25 +409,17 @@ async def run_step(input_data):
         logger.info(f"[DEBUG] Final prompt tokens: {prompt_token_count}")
         logger.info(f"[DEBUG] Combined total tokens: {total_combined_tokens}")
 
-        # LM Studio'dan modelin gerçek context length'ini al
-        _temp_client = LLMClient(api_key=api_key)
-        _tmp_actual = _temp_client.get_model_identifier(model_name)
-        model_context_length = await _temp_client.get_model_context_length(_tmp_actual)
-        # Güvenli eşik: context_length - max_output_tokens (4000) - overhead (500)
-        safe_input_limit = max(model_context_length - 4000 - 500, 1000)
-        logger.info(
-            f"[DEBUG] Model '{model_name}' context length: {model_context_length} tokens, "
-            f"safe input limit: {safe_input_limit} tokens"
-        )
+        # Sabit eşik: küçük modeller için güvenli token limiti (30k)
+        QWEN_SWITCH_THRESHOLD = 30_000
 
-        if total_combined_tokens > safe_input_limit and model_name != "qwen2.5-7b-instruct-1m":
+        if total_combined_tokens > QWEN_SWITCH_THRESHOLD and model_name != "qwen2.5-7b-instruct-1m":
             logger.warning(
-                f"[DEBUG] Combined token count ({total_combined_tokens}) exceeds safe limit "
-                f"({safe_input_limit}) for '{model_name}', switching to qwen2.5-7b-instruct-1m"
+                f"[DEBUG] Combined token count ({total_combined_tokens}) exceeds threshold ({QWEN_SWITCH_THRESHOLD}), "
+                f"switching from '{model_name}' to qwen2.5-7b-instruct-1m"
             )
             model_name = "qwen2.5-7b-instruct-1m"
         else:
-            logger.info(f"[DEBUG] Token count within safe limit, using selected model: {model_name}")# Test senaryosu üretme prompt'u oluştur - Sadeleştirilmiş versiyon
+            logger.info(f"[DEBUG] Combined token count ({total_combined_tokens}) within threshold ({QWEN_SWITCH_THRESHOLD}), using selected model: {model_name}")# Test senaryosu üretme prompt'u oluştur - Sadeleştirilmiş versiyon
         if file_contents.strip():
             # Eğer dosyalar varsa, onları da ekle
             test_scenario_prompt = f"""IMPORTANT: You must respond ONLY with valid JSON. Do not include any explanatory text, markdown formatting, or additional content outside the JSON.

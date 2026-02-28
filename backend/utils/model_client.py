@@ -402,7 +402,7 @@ class LLMClient:
             Modelin context length değeri (token cinsinden).
             Bağlantı hatası veya bilgi bulunamazsa güvenli default olan 4096 döndürür.
         """
-        DEFAULT_CONTEXT_LENGTH = 4096
+        DEFAULT_CONTEXT_LENGTH = 32768
         target_id = (model_identifier or self.model_name or "").lower()
 
         try:

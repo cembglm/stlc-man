@@ -80,17 +80,23 @@ function AppContents() {
 	// Global pipeline model — single model used for all pipeline steps
 	const [pipelineModel, setPipelineModel] = useState('qwen2.5-7b-instruct-1m');
 
-	// Test Execution Method (pipeline) — "ai" | "docker" | "robot"
+	// Test Execution Method (pipeline) — "ai" | "docker" | "robot" | "ros2"
 	const [testExecutionMethod, setTestExecutionMethod] = useState('ai');
 	const [dockerAvailable, setDockerAvailable] = useState(false);
 	const [dockerConfig, setDockerConfig] = useState({ language: 'python', packages: '', timeout: 300 });
 	const [robotConfig, setRobotConfig] = useState({ robotType: 'generic', simulationPrecision: 'medium' });
+	const [ros2Available, setRos2Available] = useState(false);
+	const [ros2Config, setRos2Config] = useState({ visualCount: 0, timeout: 120 });
+	const [ros2ContainerName, setRos2ContainerName] = useState('');
 
 	const handleDockerConfigChange = (field, value) => {
 		setDockerConfig(prev => ({ ...prev, [field]: value }));
 	};
 	const handleRobotConfigChange = (field, value) => {
 		setRobotConfig(prev => ({ ...prev, [field]: value }));
+	};
+	const handleRos2ConfigChange = (field, value) => {
+		setRos2Config(prev => ({ ...prev, [field]: value }));
 	};
 
 	// Docker availability check — runs once on mount
@@ -107,6 +113,23 @@ function AppContents() {
 			}
 		};
 		checkDocker();
+	}, []);
+
+	// ROS2 availability check — runs once on mount
+	useEffect(() => {
+		const checkRos2 = async () => {
+			try {
+				const res = await fetch('http://localhost:8000/api/ros2-execution/status');
+				if (res.ok) {
+					const data = await res.json();
+					setRos2Available(!!data.available);
+					if (data.container_name) setRos2ContainerName(data.container_name);
+				}
+			} catch {
+				setRos2Available(false);
+			}
+		};
+		checkRos2();
 	}, []);
 
 	// Pipeline executor fonksiyonunu saklamak için ref
@@ -707,6 +730,9 @@ function AppContents() {
 				} else if (testExecutionMethod === 'robot') {
 					execCfg.robot_type = robotConfig.robotType || 'generic';
 					execCfg.simulation_config = { precision: robotConfig.simulationPrecision || 'medium' };
+				} else if (testExecutionMethod === 'ros2') {
+					execCfg.ros2_visual_count = ros2Config.visualCount ?? 0;
+					execCfg.ros2_timeout = ros2Config.timeout ?? 120;
 				}
 				stepConfigs[stepId] = execCfg;
 			} else {
@@ -865,7 +891,7 @@ function AppContents() {
 			handleStartPipeline(config);
 		} else if (config) {
 			// Config verilmişse (form'dan gelen çağrılar için)
-			handleRunProcessWithConfig(processId, config);
+			return handleRunProcessWithConfig(processId, config);
 		} else {
 			// processId varsa tek süreç çalıştır
 			handleProcessRun(processId);
@@ -1278,6 +1304,10 @@ function AppContents() {
 					onDockerConfigChange={handleDockerConfigChange}
 					robotConfig={robotConfig}
 					onRobotConfigChange={handleRobotConfigChange}
+					ros2Available={ros2Available}
+					ros2Config={ros2Config}
+					onRos2ConfigChange={handleRos2ConfigChange}
+					ros2ContainerName={ros2ContainerName}
 					aiModels={aiModels}
 					environmentNames={environmentNames}
 					outputFormats={outputFormats}
