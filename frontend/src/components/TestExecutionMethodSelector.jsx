@@ -9,13 +9,17 @@ import { BeakerIcon } from '@heroicons/react/24/outline';
  * GlobalAIConfig ile aynı kart pattern'ini kullanır.
  *
  * Props:
- *   method              {string}   "ai" | "docker" | "robot"
+ *   method              {string}   "ai" | "docker" | "robot" | "ros2"
  *   onMethodChange      {fn}       (newMethod: string) => void
  *   dockerAvailable     {boolean}  Docker Engine çalışıyor mu?
  *   dockerConfig        {object}   { language, packages, timeout }
  *   onDockerConfigChange {fn}      (field, value) => void
  *   robotConfig         {object}   { robotType, simulationPrecision }
  *   onRobotConfigChange  {fn}      (field, value) => void
+ *   ros2Available       {boolean}  ROS2 container çalışıyor mu?
+ *   ros2Config          {object}   { visualCount, timeout }
+ *   onRos2ConfigChange  {fn}       (field, value) => void
+ *   ros2ContainerName   {string}   Tespit edilen container ismi
  *   selectedProcesses   {Set}      Pipeline'da seçili adımlar
  */
 export default function TestExecutionMethodSelector({
@@ -26,6 +30,10 @@ export default function TestExecutionMethodSelector({
   onDockerConfigChange,
   robotConfig = { robotType: 'generic', simulationPrecision: 'medium' },
   onRobotConfigChange,
+  ros2Available = false,
+  ros2Config = { visualCount: 0, timeout: 120 },
+  onRos2ConfigChange,
+  ros2ContainerName = '',
   selectedProcesses,
 }) {
   // test-execution adımı seçili değilse hiç render etme
@@ -62,6 +70,15 @@ export default function TestExecutionMethodSelector({
       description: 'Robot arm kinematic simulation via Docker container',
       disabled: dockerDisabled,
       tooltip: dockerDisabled ? 'Docker is not running. Start Docker Engine to enable this option.' : null,
+    },
+    {
+      id: 'ros2',
+      label: '🦿 ROS2 Docker',
+      icon: '',
+      activeColor: 'text-teal-700',
+      description: 'Run tests inside ros2_colcon_workspace:humble container',
+      disabled: !ros2Available,
+      tooltip: !ros2Available ? 'ROS2 container is not running. Start it first (README_Docker.md Step 4).' : null,
     },
   ];
 
@@ -105,6 +122,15 @@ export default function TestExecutionMethodSelector({
             : 'bg-gray-100 text-gray-500'
         )}>
           {dockerAvailable ? '🐳 Docker Ready' : '🐳 Docker Offline'}
+        </span>
+        {/* ROS2 status badge */}
+        <span className={clsx(
+          'ml-1 text-xs font-medium px-2 py-1 rounded-full flex-shrink-0',
+          ros2Available
+            ? 'bg-teal-100 text-teal-700'
+            : 'bg-gray-100 text-gray-500'
+        )}>
+          {ros2Available ? `🦿 ROS2: ${ros2ContainerName || 'Ready'}` : '🦿 ROS2 Offline'}
         </span>
       </div>
 
@@ -255,6 +281,49 @@ export default function TestExecutionMethodSelector({
                 <p className="text-xs text-gray-500 italic">{rt.desc}</p>
               ) : null;
             })()}
+          </div>
+        )}
+        {method === 'ros2' && (
+          <div className="mt-2 space-y-3">
+            <div className="p-3 bg-teal-50 rounded-lg text-xs text-teal-700 border border-teal-100">
+              <p className="font-medium mb-1">ROS2 Docker Execution</p>
+              <p className="text-teal-600 leading-relaxed">
+                Tests are injected as Python scripts into the running
+                <code className="bg-teal-100 px-1 rounded"> ros2_colcon_workspace:humble</code> container via
+                <code className="bg-teal-100 px-1 rounded"> docker exec</code>.
+                The first <strong>N</strong> tests run with DISPLAY forwarded (GUI visible); the rest run headless.
+              </p>
+              {ros2ContainerName && (
+                <p className="mt-1 text-teal-700">Container: <strong>{ros2ContainerName}</strong></p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Görsel Çalıştırma Sayısı (N)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={ros2Config.visualCount ?? 0}
+                  onChange={e => onRos2ConfigChange?.('visualCount', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-400 mt-0.5">İlk N test Gazebo/RViz görsel açar</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Timeout / test (s)</label>
+                <input
+                  type="number"
+                  min={10}
+                  max={600}
+                  value={ros2Config.timeout ?? 120}
+                  onChange={e => onRos2ConfigChange?.('timeout', parseInt(e.target.value, 10) || 120)}
+                  className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>
