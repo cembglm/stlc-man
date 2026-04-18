@@ -65,6 +65,10 @@ export default function TabPanel({
   onDockerConfigChange,
   robotConfig = { robotType: 'generic', simulationPrecision: 'medium' },
   onRobotConfigChange,
+  ros2Available = false,
+  ros2Config = { visualCount: 0, timeout: 120 },
+  onRos2ConfigChange,
+  ros2ContainerName = '',
 }) {
   const [editingPrompt, setEditingPrompt] = useState(null);
   const [tempPrompt, setTempPrompt] = useState('');
@@ -963,6 +967,10 @@ Important:
                   onDockerConfigChange={onDockerConfigChange}
                   robotConfig={robotConfig}
                   onRobotConfigChange={onRobotConfigChange}
+                  ros2Available={ros2Available}
+                  ros2Config={ros2Config}
+                  onRos2ConfigChange={onRos2ConfigChange}
+                  ros2ContainerName={ros2ContainerName}
                   selectedProcesses={selectedProcesses}
                 />
 

@@ -25,10 +25,19 @@ const DockerExecutionPanel = () => {
   const [availableRobots, setAvailableRobots] = useState([]);
   const [supportedLanguages, setSupportedLanguages] = useState([]);
 
-  // Load Docker status on mount
+  // ROS2 state
+  const [ros2Status, setRos2Status] = useState({ available: false, reason: '' });
+  const [ros2VisualCount, setRos2VisualCount] = useState(0);
+  const [ros2Timeout, setRos2Timeout] = useState(120);
+  const [ros2TestCode, setRos2TestCode] = useState('');
+  const [ros2Results, setRos2Results] = useState(null);
+  const [ros2ExpandedIdx, setRos2ExpandedIdx] = useState(null);
+
+  // Load Docker + ROS2 status on mount
   useEffect(() => {
     checkDockerStatus();
     loadAvailableOptions();
+    checkRos2Status();
   }, []);
 
   const checkDockerStatus = async () => {
@@ -40,6 +49,15 @@ const DockerExecutionPanel = () => {
     } catch (error) {
       console.error('Failed to check Docker status:', error);
       setDockerAvailable(false);
+    }
+  };
+
+  const checkRos2Status = async () => {
+    try {
+      const res = await axios.get('http://localhost:8000/api/ros2-execution/status');
+      setRos2Status(res.data);
+    } catch {
+      setRos2Status({ available: false, reason: 'Backend unreachable' });
     }
   };
 
@@ -81,7 +99,26 @@ const DockerExecutionPanel = () => {
       let endpoint = '';
       let payload = {};
 
-      if (executionMode === 'robot') {
+      if (executionMode === 'ros2') {
+        if (!ros2TestCode.trim()) {
+          setError('Please enter test code');
+          setIsExecuting(false);
+          return;
+        }
+        endpoint = '/api/ros2-execution/execute-batch';
+        payload = {
+          test_items: [{ test_id: 'sandbox_test', code: ros2TestCode }],
+          visual_count: ros2VisualCount,
+          timeout: ros2Timeout,
+        };
+        const response = await axios.post(`http://localhost:8000${endpoint}`, payload, {
+          timeout: (ros2Timeout + 30) * 1000,
+        });
+        setRos2Results(response.data);
+        setRos2ExpandedIdx(0);
+        setIsExecuting(false);
+        return;
+      } else if (executionMode === 'robot') {
         endpoint = '/api/docker-execution/execute-robot-simulation';
         payload = {
           test_code: testCode,
@@ -254,6 +291,16 @@ print("\\n✅ Package test completed!")`
               >
                 🤖 Robot Simulation
               </button>
+              <button
+                onClick={() => { setExecutionMode('ros2'); checkRos2Status(); }}
+                className={`px-4 py-2 rounded-lg font-medium transition ${
+                  executionMode === 'ros2'
+                    ? 'bg-teal-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                🦿 ROS2 Docker
+              </button>
             </div>
           </div>
 
@@ -281,7 +328,60 @@ print("\\n✅ Package test completed!")`
             
             {showConfig && (
               <div className="p-4 border-t border-gray-200 space-y-4">
-                {executionMode === 'robot' ? (
+                {executionMode === 'ros2' ? (
+                  <div className="space-y-4">
+                    {/* ROS2 container status */}
+                    <div className={`p-3 rounded-lg border text-sm flex items-start gap-2 ${
+                      ros2Status.available
+                        ? 'bg-teal-50 border-teal-200 text-teal-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}>
+                      <span className="text-lg leading-none">{ros2Status.available ? '✅' : '❌'}</span>
+                      <div>
+                        {ros2Status.available ? (
+                          <><span className="font-semibold">Container found: </span>{ros2Status.container_name} ({ros2Status.container_id})<br />
+                          <span className="text-xs text-teal-600">Image: {ros2Status.image}</span></>
+                        ) : (
+                          <><span className="font-semibold">Container not found</span><br />
+                          <span className="text-xs">{ros2Status.reason}</span></>
+                        )}
+                      </div>
+                      <button onClick={checkRos2Status} className="ml-auto text-xs underline opacity-70 hover:opacity-100">Refresh</button>
+                    </div>
+
+                    {/* Visual count */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Görsel Çalıştırma Sayısı
+                        </label>
+                        <input
+                          type="number"
+                          value={ros2VisualCount}
+                          onChange={e => setRos2VisualCount(Math.max(0, parseInt(e.target.value) || 0))}
+                          min="0"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          İlk N test DISPLAY ile çalışır (Gazebo penceresi açılır). Geri kalanlar headless.
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Timeout (saniye)
+                        </label>
+                        <input
+                          type="number"
+                          value={ros2Timeout}
+                          onChange={e => setRos2Timeout(Math.max(10, parseInt(e.target.value) || 120))}
+                          min="10"
+                          max="600"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : executionMode === 'robot' ? (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Robot Type
@@ -350,6 +450,41 @@ print("\\n✅ Package test completed!")`
             )}
           </div>
 
+          {/* ROS2 mode — its own editor + execute section */}
+          {executionMode === 'ros2' && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Test Code (Python — runs inside ROS2 container)
+              </label>
+              <textarea
+                value={ros2TestCode}
+                onChange={e => setRos2TestCode(e.target.value)}
+                placeholder={`# ROS2 container içinde çalışacak Python kodu\nimport subprocess\nresult = subprocess.run(['ros2', 'topic', 'list'], capture_output=True, text=True)\nprint(result.stdout)`}
+                rows={12}
+                className="w-full px-3 py-2 border border-teal-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-teal-500"
+                style={{ fontFamily: 'Courier New, monospace' }}
+              />
+              <button
+                onClick={handleExecute}
+                disabled={!ros2Status.available || isExecuting || !ros2TestCode.trim()}
+                className={`mt-3 w-full py-3 rounded-lg font-semibold flex items-center justify-center transition ${
+                  !ros2Status.available || isExecuting || !ros2TestCode.trim()
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-teal-600 text-white hover:bg-teal-700'
+                }`}
+              >
+                {isExecuting ? (
+                  <><svg className="animate-spin h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Executing in ROS2 Container...</>
+                ) : (
+                  <>🦿 Execute in ROS2 Container</>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Standard / Robot mode — example + editor + execute */}
+          {executionMode !== 'ros2' && (
+            <>
           {/* Example Code Buttons */}
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -419,6 +554,44 @@ print("\\n✅ Package test completed!")`
               </>
             )}
           </button>
+
+          </>
+          )}
+
+          {/* ROS2 Batch Results */}
+          {executionMode === 'ros2' && ros2Results && (
+            <div className="mt-4">
+              <div className="border-t border-gray-200 my-4" />
+              <div className="flex items-center gap-3 mb-3">
+                <h3 className="text-lg font-bold text-gray-800">ROS2 Execution Results</h3>
+                <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">{ros2Results.passed} passed</span>
+                <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-700">{ros2Results.failed} failed</span>
+              </div>
+              <div className="space-y-2">
+                {ros2Results.results.map((r, idx) => (
+                  <div key={idx} className={`border rounded-lg overflow-hidden ${
+                    r.success ? 'border-green-200' : 'border-red-200'
+                  }`}>
+                    <button
+                      className={`w-full flex items-center justify-between px-4 py-2 text-sm font-medium ${
+                        r.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
+                      }`}
+                      onClick={() => setRos2ExpandedIdx(ros2ExpandedIdx === idx ? null : idx)}
+                    >
+                      <span>{r.success ? '✅' : '❌'} {r.test_id}{r.visual ? ' 👁 visual' : ''}</span>
+                      <span className="text-xs">exit {r.exit_code} {ros2ExpandedIdx === idx ? '▲' : '▼'}</span>
+                    </button>
+                    {ros2ExpandedIdx === idx && (
+                      <pre className="p-3 bg-gray-900 text-gray-100 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-64">
+                        {r.output || '(no output)'}
+                        {r.error ? `\n\n❌ ${r.error}` : ''}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Error Display */}
           {error && (

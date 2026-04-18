@@ -29,6 +29,7 @@ from routers.test_reporting_prompt_router import router as test_reporting_prompt
 from routers.test_closure_prompt_router import router as test_closure_prompt_router
 from routers.test_closure_router import router as test_closure_router
 from routers.docker_execution_router import router as docker_execution_router
+from routers.ros2_execution_router import router as ros2_execution_router
 from routers.pipeline_router import router as pipeline_router
 # from routers.test_scenario_analytics_router import router as test_scenario_analytics_router
 
@@ -132,6 +133,7 @@ app.include_router(test_reporting_prompt_router)  # Test reporting prompt router
 app.include_router(test_closure_router)  # Test closure router
 app.include_router(test_closure_prompt_router)  # Test closure prompt router
 app.include_router(docker_execution_router)  # Docker execution router
+app.include_router(ros2_execution_router)  # ROS2 Docker execution router
 app.include_router(pipeline_router, prefix="/api/pipeline")  # Pipeline orchestration router
 # app.include_router(test_scenario_analytics_router, prefix="/api")  # Test scenario analytics
 

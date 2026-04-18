@@ -57,6 +57,10 @@ class StepConfig(BaseModel):
     robot_type: Optional[str] = "generic"              # Robot: generic/industrial/collaborative
     simulation_config: Optional[Dict[str, Any]] = None  # Robot: simulation parameters
 
+    # ROS2 Docker specific
+    ros2_visual_count: Optional[int] = 0               # ROS2: number of tests to run with GUI visible
+    ros2_timeout: Optional[int] = 120                  # ROS2: per-test timeout in seconds
+
     # Test Reporting specific
     analysis_depth: Optional[str] = "detailed"
 

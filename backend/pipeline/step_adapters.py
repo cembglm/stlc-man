@@ -754,7 +754,51 @@ async def run_test_execution(
         # Route to the appropriate execution engine
         # ----------------------------------------------------------------
 
-        if execution_method in ("docker", "robot"):
+        if execution_method == "ros2":
+            # ---- ROS2 Docker Execution ----
+            from services.ros2_executor import ros2_executor
+            if not ros2_executor.is_ros2_available():
+                return _err(
+                    step_id,
+                    "ROS2 container is not running. Start ros2_colcon_workspace:humble first (README_Docker.md Step 4).",
+                    t0,
+                )
+
+            visual_count = cfg.get("ros2_visual_count", 0)
+            ros2_timeout = cfg.get("ros2_timeout", 120)
+
+            test_items = []
+            for test_item in generated_tests:
+                code = test_item.get("code") or test_item.get("test_code", "")
+                if not code:
+                    continue
+                test_id = test_item.get("test_case_id", test_item.get("id", "unknown"))
+                test_items.append({"test_id": test_id, "code": code})
+
+            logger.info(
+                f"[Pipeline][{step_id}] ROS2 execution: "
+                f"{len(test_items)} tests, visual_count={visual_count}"
+            )
+
+            ros2_results = await ros2_executor.execute_batch(
+                test_items=test_items,
+                visual_count=visual_count,
+                timeout=ros2_timeout,
+            )
+
+            execution_results = [
+                {
+                    "test_id": r.get("test_id"),
+                    "status": "success" if r.get("success") else "error",
+                    "output": r.get("output", ""),
+                    "exit_code": r.get("exit_code"),
+                    "error": r.get("error"),
+                    "visual": r.get("visual", False),
+                }
+                for r in ros2_results
+            ]
+
+        elif execution_method in ("docker", "robot"):
             # Guard: Docker must be available
             from services.docker_executor import docker_executor
             if not docker_executor.is_available():
