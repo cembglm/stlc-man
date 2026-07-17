@@ -1,5 +1,5 @@
 import logging
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 class TextProcessor:
     def count_tokens(self, text: str) -> int:

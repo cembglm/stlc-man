@@ -1,3 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 results_of_tests/stlc_test_results.json filter=lfs diff=lfs merge=lfs -text
+results_of_tests/*.json filter=lfs diff=lfs merge=lfs -text
+results_of_tests/*.xlsx filter=lfs diff=lfs merge=lfs -text
+results_of_tests/**/*.pdf filter=lfs diff=lfs merge=lfs -text
+results_of_tests/**/*.png filter=lfs diff=lfs merge=lfs -text
+results_of_tests/**/*.csv filter=lfs diff=lfs merge=lfs -text
