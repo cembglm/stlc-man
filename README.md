@@ -1,256 +1,547 @@
-# STLC Manager: An AI-Powered Software Testing Life Cycle Management System
+# STLC Manager
 
-## Abstract
+STLC Manager is an AI-assisted web application designed to manage the Software Testing Life Cycle (STLC) from source code, requirements, and the outputs of earlier testing phases.
 
-This repository presents a comprehensive full-stack application designed to automate and manage the Software Testing Life Cycle (STLC) through artificial intelligence integration. The system implements eleven distinct STLC modules, leveraging multiple Large Language Models (LLMs) to provide intelligent automation across all phases of software testing. Built upon a modern technology stack comprising FastAPI, React, and MongoDB, the platform demonstrates significant performance improvements in testing workflow efficiency and quality assurance processes.
+The application provides an 11-step workflow that covers code review and requirement analysis, test planning, scenario and test case generation, test code generation, Docker and ROS 2-based execution, reporting, and test closure.
 
-## 1. Introduction
+> **Project status:** This project is under active development. Some features require local services, a running Docker daemon, a ROS 2 container, or an external model provider. Additional safety and operator-approval layers are required before running generated tests on physical robots.
 
-Software Testing Life Cycle (STLC) represents a critical phase in software development, encompassing systematic processes from requirement analysis to test closure. Traditional STLC implementation faces challenges including manual effort redundancy, inconsistent documentation standards, and suboptimal resource allocation. This project addresses these challenges through AI-driven automation, implementing industry standards including ISTQB (International Software Testing Qualifications Board) methodologies and IEEE testing frameworks.
+## Table of contents
 
-### Key Innovation: Objective Quality Metrics
+- [Key features](#key-features)
+- [STLC pipeline](#stlc-pipeline)
+- [Test Case Optimization](#test-case-optimization)
+- [Test execution methods](#test-execution-methods)
+- [Execution on a remote robot computer](#execution-on-a-remote-robot-computer)
+- [Architecture and directory structure](#architecture-and-directory-structure)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Running the services](#running-the-services)
+- [Configuration](#configuration)
+- [Tests and utility scripts](#tests-and-utility-scripts)
+- [API and health checks](#api-and-health-checks)
+- [Known limitations](#known-limitations)
+- [Security considerations](#security-considerations)
 
-This system implements **objective, data-driven quality assessment** for all STLC phases. Unlike traditional subjective evaluations, quality scores are calculated using mathematical formulas based on quantitative data, ensuring:
+## Key features
 
-- **Reproducibility:** Same input always produces same output
-- **Objectivity:** No subjective LLM interpretation
-- **Academic Defensibility:** Based on ISTQB, ISO 25010, and IEEE 829 standards
-- **Traceability:** Every score has documented calculation methodology
+- An 11-phase STLC pipeline
+- Source code and document-based code review and requirement analysis
+- AI-assisted generation of test plans, scenarios, test cases, and executable test code
+- Individual, bulk, and parallel test case optimization
+- Local models through LM Studio and Google Gemini API models
+- MongoDB persistence for sessions, process outputs, and execution results
+- Isolated test execution in Docker containers
+- Parallel test execution in multiple Docker containers
+- Robot arm simulation and ROS 2/Gazebo-oriented execution paths
+- Test deployment to a local or network-shared directory and result collection
+- Test reporting, quality evaluation, and test closure reports
+- Live pipeline progress through Server-Sent Events (SSE) and pipeline cancellation
 
-Quality is measured across four dimensions (1-10 scale):
-1. **Completeness** - Percentage of required elements present
-2. **Clarity** - Documentation quality and structure
-3. **Coverage** - Breadth and diversity of testing approach
-4. **Depth** - Level of detail and thoroughness
+The quality evaluation layer calculates data-driven dimensions such as completeness, clarity, coverage, and depth. The relevant implementations are located in `backend/services/quality_metrics_calculator.py` and `backend/services/report_quality_evaluator.py`.
 
-See [Quality Metrics Documentation](docs/QUALITY_METRICS.md) for detailed formulas and academic basis.
+## STLC pipeline
 
-## 2. System Architecture
+Pipeline steps run in the following canonical order:
 
-### 2.1 STLC Module Specifications
+| Order | Step | Primary output | Dependencies |
+|---:|---|---|---|
+| 1 | Code Review | Code review report | — |
+| 2 | Requirement Analysis | Requirement analysis report | — |
+| 3 | Test Planning | Test plan | Code Review, Requirement Analysis |
+| 4 | Environment Setup | Environment setup report | — |
+| 5 | Test Scenario Generation | Test scenarios | Test Planning |
+| 6 | Test Case Generation | Detailed test cases | Test Scenario Generation |
+| 7 | Test Case Optimization | Deduplicated and optimized test cases | Test Case Generation |
+| 8 | Test Code Generation | Executable test code | Test Case Optimization, Environment Setup |
+| 9 | Test Execution | Test output and execution status | Test Code Generation |
+| 10 | Test Reporting | Test report and metrics | Test Execution |
+| 11 | Test Closure | Test closure report | Test Reporting |
 
-The system implements eleven comprehensive STLC modules, each designed according to established software engineering principles:
+The authoritative dependency graph is defined in `backend/pipeline/pipeline_controller.py`. The current primary frontend pipeline keeps all 11 steps enabled, while the backend still validates dependencies for the submitted step set.
 
-| Module ID | Component | Functionality |
-|-----------|-----------|---------------|
-| 1 | Code Review | Static analysis, security assessment, performance evaluation |
-| 2 | Requirement Analysis | Requirement validation, gap analysis, compliance verification |
-| 3 | Test Planning | Resource allocation, timeline management, Gantt chart generation |
-| 4 | Environment Setup | Configuration management |
-| 5 | Test Scenario Generation | Comprehensive test scenario generation |
-| 6 | Test Case Generation | Detailed test case specification, step-by-step procedures |
-| 7 | Test Case Optimization | Samrt selection for generated test cases |
-| 8 | Test Code Generation | Automated test script generation |
-| 9 | Test Execution | Automated test running using the MCP Server |
-| 10 | Test Reporting | Comprehensive reporting, stakeholder communication |
-| 11 | Test Closure | Process completion analysis |
+The pipeline supports:
 
-### 2.2 Technology Stack
+- Per-step model and prompt configuration
+- File-to-step mapping
+- Passing outputs between dependent steps
+- Current status and step-result queries
+- Live progress over SSE
+- Stopping a running pipeline
 
-#### Backend Infrastructure
-- **FastAPI Framework**: High-performance web framework with automatic API documentation
-- **Python 3.8+**: Core development language with extensive scientific computing libraries
-- **MongoDB**: NoSQL database for session management and data persistence
-- **Pydantic**: Data validation and serialization with type safety
-- **aiofiles**: Asynchronous file operations for improved I/O performance
+## Test Case Optimization
 
-#### Frontend Architecture
-- **React 18**: Modern UI library with concurrent features
-- **Vite**: Next-generation build tool with hot module replacement
-- **JavaScript/JSX**: Component-based development with functional programming paradigms
-- **CSS3**: Modern styling with responsive design principles
+Test Case Optimization is the seventh pipeline step and sits between Test Case Generation and Test Code Generation. Its purpose is to identify semantically overlapping test cases, retain representative cases, and reduce unnecessary downstream test-code generation and execution work.
 
-#### AI/ML Integration
-- **Multi-LLM Support**: OpenAI GPT models, Google Gemini Pro, LM Studio, Ollama
-- **Model Orchestration**: Intelligent fallback mechanisms and load balancing
-- **Context Management**: Advanced token management and chunking algorithms
+This module does not simply compare titles or perform exact-text deduplication. It uses the selected language model to evaluate whether test cases exercise the same behavior, conditions, and expected outcome.
 
-### 2.3 System Components
+### Inputs and selection
 
+The optimization interface supports:
+
+- Loading generated test cases by process title
+- Combining test cases from multiple process titles
+- Selecting all cases or an explicit subset
+- Assigning a name to the optimization run
+- Selecting a configured local or API model
+- Supplying a custom optimization prompt
+- Choosing an optimization strategy
+
+The selected process titles, process name, model, prompt state, and optimization type are retained with the session output.
+
+### Optimization strategies
+
+#### Individual optimization
+
+Individual optimization processes test cases serially. Each candidate is compared with the representative cases already retained in the unique set. When the model determines that a candidate is semantically equivalent to a retained case, the candidate is recorded as a duplicate; otherwise, it becomes a new representative case.
+
+This mode is straightforward and produces pair-level comparison information, but the number of model calls can grow significantly with larger test sets.
+
+#### Bulk optimization
+
+Bulk optimization submits the selected test-case set to the model in a consolidated request. The model is asked to return representative indices and duplicate groups. The service accepts several supported JSON response shapes and converts them into the common optimization result structure.
+
+Bulk mode generally requires fewer model requests than serial pairwise processing, but its effectiveness depends on the selected model's context capacity and its ability to return valid structured output.
+
+#### Parallel optimization
+
+Parallel optimization prepares pairwise comparisons for parallel batch processing, aggregates the comparison results, and derives the final unique and duplicate sets. The service includes batch splitting, cross-batch duplicate handling, rate-limit retry behavior, and validation that a test case is not simultaneously classified as unique and duplicate.
+
+The current router enables parallel optimization only for Gemini models. The frontend reflects this constraint and recommends Bulk Optimization when a selected model cannot use the parallel path.
+
+### Results and persistence
+
+An optimization result can contain:
+
+- The original number of selected test cases
+- Representative or unique test cases
+- Duplicate/similar test cases and their matched representative
+- Unique and duplicate counts
+- Reduction statistics
+- Comparison logs or batch metadata, depending on the strategy
+- The model, prompt, process name, process titles, session ID, and optimization type
+
+Results are stored per process title in the `test_case_optimizations` MongoDB collection. A session-level copy is also written under `session_history.processes.test_case_optimization` for traceability across the STLC pipeline.
+
+Stored results can be queried by process title or process name. The API also supports deleting saved results for a process title.
+
+### Process control and monitoring
+
+The module exposes operations for:
+
+- Starting smart selection with `individual`, `bulk`, or `parallel` mode
+- Checking a running process by process ID
+- Listing active optimization processes
+- Requesting cancellation of an active process
+- Exporting a session monitoring report
+- Reading aggregated error statistics
+- Configuring retry behavior
+- Reading or resetting optimization monitoring statistics
+
+The primary API prefix is `/api/test-case-optimization`.
+
+### Interpretation and limitations
+
+- Similarity decisions are model-dependent and may differ between models or prompts.
+- Optimization identifies semantic redundancy; it does not prove requirement coverage or test effectiveness.
+- A representative test should be reviewed before discarding a test that contains distinct data, preconditions, risk, or traceability information.
+- Individual pairwise comparison can approach quadratic growth as the number of test cases increases.
+- Bulk mode is constrained by model context size and structured-output reliability.
+- Parallel mode requires a supported Gemini model and may still be affected by provider quotas and rate limits.
+- Optimization results should remain traceable to their source test cases and requirements, especially in regulated or safety-critical systems.
+
+## Test execution methods
+
+The project contains several execution paths with different semantics and trust levels.
+
+### 1. Standard Execution (MCP and AI provider)
+
+- Generated test code stored in MongoDB can be selected by process or test identifier.
+- The backend sends the test content to the local MCP server through JSON-RPC.
+- The MCP server uses either LM Studio or Gemini as the provider.
+- Terminal-like output and basic pass/fail statistics can be persisted in MongoDB.
+
+The default MCP endpoint is `http://localhost:8001`, and the default LM Studio endpoint is `http://localhost:1234`.
+
+> Standard Execution is an AI/MCP-based execution path. By itself, it is not an operating-system-level remote agent that runs commands on a physical robot computer.
+
+### 2. Docker Process
+
+- Writes test code into a temporary working directory.
+- Starts an isolated container using the configured language image.
+- Collects `stdout`, `stderr`, the exit code, and container metadata.
+- Supports timeouts, additional packages, and environment variables.
+- Removes temporary containers, custom images, and working directories after execution.
+
+Current language mappings:
+
+| Language | Default image |
+|---|---|
+| Python | `python:3.9-slim` |
+| JavaScript | `node:18-alpine` |
+| Java | `openjdk:11-jre-slim` |
+| C# | `mcr.microsoft.com/dotnet/sdk:6.0` |
+| Go | `golang:1.19-alpine` |
+| Rust | `rust:1.70-slim` |
+
+Docker may need to download the selected image during its first execution.
+
+### 3. Parallel Docker Execution
+
+- Splits selected tests into separate Docker jobs.
+- Allows the maximum number of concurrent containers to be configured.
+- Exposes session-based progress and result queries.
+- Supports cancellation of an active parallel execution.
+
+Parallel execution can consume significant CPU and memory. Configure `max_parallel`, timeout, and additional packages according to the capacity of the execution host.
+
+### 4. Docker Sandbox
+
+The sandbox runs test code entered directly in the user interface inside Docker. It does not require selecting a generated test process from the database.
+
+### 5. Robot Simulation
+
+- Provides a container-based simulation path for `generic`, `industrial`, and `collaborative` robot types.
+- Can build a Python environment with NumPy, SciPy, Matplotlib, Robotics Toolbox, and SpatialMath.
+- Does not establish a direct connection to a physical robot controller.
+
+### 6. ROS 2 Docker Execution
+
+- Checks whether the expected ROS 2 Docker container is running.
+- Copies a test script into the container as `/tmp/stlc_<test-id>.py`.
+- Sources the ROS 2 environment and executes the script inside the container.
+- Supports single and batch execution.
+- Can use X11/GUI configuration for visual tests.
+- Collects the exit code, output, errors, and duration.
+
+The ROS 2 image definition and helper scripts are under `docker/`. The compose file in that directory assumes a specific external ROS 2 workspace layout. Review and adjust its build context and volume paths for your own workspace.
+
+### 7. Robot Test Execution (ROS 2 and Gazebo)
+
+The robot test panel can:
+
+- Retrieve generated tests by process name.
+- Run selected tests as a batch.
+- Query session progress and results.
+- Check Gazebo availability through a dedicated endpoint.
+- Store execution records in MongoDB.
+
+This execution path requires a Docker, ROS 2, and Gazebo environment that is accessible to the backend host.
+
+## Execution on a remote robot computer
+
+The project contains a **Remote Robot Execution** user interface and backend service. This feature is a shared-directory deployment protocol, not direct SSH/SFTP-based remote command execution.
+
+### Current workflow
+
+1. STLC Manager creates an execution directory under the supplied local or UNC network path.
+2. It prepares the following directory and metadata structure:
+
+```text
+test_exec_<session>_<timestamp>/
+├── source_files/
+├── results/
+├── logs/
+├── deployment_info.json
+└── execution_status.json
 ```
+
+3. Generated test code is written to `source_files/`.
+4. An external runner or service on the robot computer reads and executes the tests.
+5. The runner writes JSON results to `results/`, writes logs to `logs/`, and updates the status file.
+6. STLC Manager reads the results and aggregates total, passed, failed, and skipped tests together with the pass rate.
+
+### Requirements for a computer in another city
+
+- A VPN or corporate network connection between the two computers
+- A directory on the remote computer exposed through SMB/UNC, for example `\\robot-pc\stlc-tests`
+- Read and write permissions for the operating-system account running the FastAPI backend
+- A separate runner or agent on the remote computer that monitors the directory and executes tests
+- A runner implementation that writes the expected JSON result format and updates `execution_status.json`
+
+### Operations that are not currently automated
+
+- SSH connection and authentication
+- SFTP/SCP file transfer
+- Starting or stopping a process on the remote computer
+- Remote runner installation or updates
+- Durable job queues and retry policies for offline machines
+- Operator approval and safety PLC integration for physical robots
+
+The accurate description of the current feature is therefore:
+
+> Shared-directory-based remote test deployment and result collection are implemented. End-to-end remote execution orchestration still requires a runner on the target computer.
+
+## Architecture and directory structure
+
+```text
 STLC-Manager/
-├── backend/                    # FastAPI Backend Application
-│   ├── app.py                 # Main application entry point
-│   ├── core/                  # Core system components
-│   │   ├── database.py        # MongoDB connection management
-│   │   ├── file_handler.py    # File processing (PDF, DOCX, TXT)
-│   │   ├── model_client.py    # LLM integration and orchestration
-│   │   └── prompt_manager.py  # Prompt management and optimization
-│   ├── stlc/                  # STLC module implementations
-│   │   ├── code_review.py
-│   │   ├── requirement_analysis.py
-│   │   ├── test_planning.py
-│   │   └── [additional modules...]
-│   └── pipeline/              # Pipeline execution management
-├── frontend/                  # React Frontend Application
-│   ├── src/
-│   │   ├── components/        # UI components
-│   │   └── services/          # API service layer
-├── tests/                     # Comprehensive test suite
-│   ├── unit/                  # Unit tests (40+ test cases)
-│   ├── integration/           # Integration tests
-│   ├── performance/           # Performance benchmarks
-│   └── utils/                 # Testing utilities
-└── [configuration files...]
+├── backend/
+│   ├── app.py                    # Main FastAPI application (port 8000)
+│   ├── mcp_server.py             # MCP test execution service (port 8001)
+│   ├── config/                   # Model and optimization configuration
+│   ├── core/                     # MongoDB, file, and prompt infrastructure
+│   ├── models/                   # Robot and test-criteria data models
+│   ├── pipeline/                 # Pipeline order, models, and executor
+│   ├── routers/                  # REST API endpoints
+│   ├── services/                 # Business logic and execution services
+│   ├── stlc/                     # STLC process implementations
+│   ├── templates/                # Docker and output templates
+│   ├── utils/                    # Model client, text, and validation utilities
+│   └── scripts/
+│       ├── diagnostics/          # Read-only inspection tools
+│       ├── experiments/          # Manual debugging and experiments
+│       ├── maintenance/          # Data maintenance and repair tools
+│       └── migrations/           # Database migration tools
+├── frontend/
+│   ├── src/components/           # React components
+│   ├── src/store/                # Redux store and slices
+│   ├── src/services/             # Backend API calls
+│   └── src/hooks/                # Model, API-key, and pipeline hooks
+├── docker/                       # ROS 2 Dockerfile, compose file, and helpers
+├── test_inputs/                  # Sample test inputs
+├── test_results/                 # Experiment and test results
+└── tests/
+    ├── unit/
+    ├── integration/
+    ├── performance/
+    ├── utils/
+    └── results/
 ```
 
-## 3. Implementation Methodology
+Some legacy `test_*.py` files remain in the backend root. Several of them are manual or integration tests that depend on live MongoDB, API, Docker, or model services and have not yet been fully classified under `tests/`.
 
-### 3.1 AI Model Integration
+## Prerequisites
 
-The system employs a sophisticated multi-model architecture:
+Recommended development environment:
 
-- **Primary Models**: OpenAI GPT-4, Google Gemini Pro for complex analysis tasks with API
-- **Specialized Models**: CodeLlama for code generation, DeepSeek for optimization
-- **Local Models**: LM Studio and Ollama for privacy-sensitive operations
-- **Fallback System**: Automatic model switching based on availability and performance metrics (e.g. Token Limits)
+- Python 3.10 or later
+- Node.js 18 or later
+- MongoDB, either local or otherwise made accessible to the application
+- An npm-compatible package manager
 
-### 3.2 Performance Optimization
+Optional integrations:
 
-Key performance enhancements include:
+- LM Studio for local LLM execution
+- A Google Gemini API key for Gemini models
+- Docker Desktop or Docker Engine for container execution
+- ROS 2 Humble, a Gazebo/MoveIt workspace, and a suitable Docker image for robot execution
+- VcXsrv or an equivalent X server for Windows GUI scenarios
 
-- **Intelligent Chunking**: Large file processing with context preservation
-- **Asynchronous Processing**: Non-blocking I/O operations throughout the system
-- **Caching Mechanisms**: MongoDB-based session and result caching
-- **Token Management**: Optimized API usage with cost-effective model selection
+## Installation
 
-## 4. Installation and Configuration
+### 1. Clone the repository
 
-### 4.1 Prerequisites
-
-- Python 3.8 or higher
-- Node.js 16+ with npm
-- MongoDB (local installation or MongoDB Atlas)
-- Git version control system
-
-### 4.2 Setup Instructions
-
-1. **Repository Clone and Setup**
 ```bash
 git clone https://github.com/cembglm/stlc-man.git
 cd STLC-Manager
 ```
 
-2. **Backend Configuration**
-```bash
+Alternative ESOGU organization remote: <https://github.com/ESOGU-SRLAB/STLC-Manager>
+
+### 2. Install backend dependencies
+
+Windows PowerShell:
+
+```powershell
 cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-python app.py
 ```
 
-3. **Frontend Configuration**
+Linux or macOS:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 3. Start MongoDB
+
+Ensure that a local MongoDB server is running on `localhost:27017`. The current primary database name is `stlc_database`.
+
+Example Docker command:
+
+```bash
+docker run -d --name stlc-mongodb -p 27017:27017 mongo:latest
+```
+
+> The current `backend/core/database.py` defines the MongoDB URI directly as `mongodb://localhost:27017`. Changing only `MONGO_URI` in `.env` does not affect that database helper. Centralize the database configuration before using a remote MongoDB deployment.
+
+### 4. Install frontend dependencies
+
 ```bash
 cd frontend
 npm install
+```
+
+## Running the services
+
+MongoDB, the FastAPI backend, and the frontend must run during normal development. Start the MCP service as well when using Standard Execution.
+
+### Terminal 1 — Backend API
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python app.py
+```
+
+Backend: <http://localhost:8000>
+
+Swagger UI: <http://localhost:8000/docs>
+
+### Terminal 2 — MCP server
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python mcp_server.py
+```
+
+MCP health endpoint: <http://localhost:8001/health>
+
+When using a local model with Standard Execution, start the LM Studio OpenAI-compatible server on `http://localhost:1234` and load the selected model.
+
+### Terminal 3 — Frontend
+
+```bash
+cd frontend
 npm run dev
 ```
 
-4. **Database Initialization**
-```bash
-# Local MongoDB
-mongod
+The default Vite URL is <http://localhost:5173>.
 
-# Docker deployment
-docker run -d -p 27017:27017 --name mongodb mongo:latest
+### Quick checks
+
+```text
+GET http://localhost:8000/
+GET http://localhost:8000/api/health/prompts
+GET http://localhost:8000/api/docker-execution/status
+GET http://localhost:8000/api/ros2-execution/status
+GET http://localhost:8000/api/remote-execution/health
+GET http://localhost:8001/health
+GET http://localhost:8001/providers/status
 ```
 
-### 4.3 Environment Variables
+## Configuration
 
-```bash
-# Backend configuration
-MONGO_URI=mongodb://localhost:27017
+Primary backend configuration values:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MODEL_API_BASE_URL` | `http://localhost:1234` | General local model API endpoint |
+| `MODEL_IDENTIFIER` | `llama-3.2-3b-instruct` | General default model |
+| `MCP_SERVER_URL` | `http://localhost:8001` | MCP endpoint used by the pipeline |
+| `MCP_SERVER_PORT` | `8001` | MCP service port |
+| `LM_STUDIO_BASE_URL` | `http://localhost:1234` | LM Studio endpoint used by MCP |
+| `DEFAULT_LM_STUDIO_MODEL` | `llama-3.2-3b-instruct` | Default local model used by MCP |
+
+Example `backend/.env`:
+
+```dotenv
 MODEL_API_BASE_URL=http://localhost:1234
 MODEL_IDENTIFIER=llama-3.2-3b-instruct
-
-# Frontend configuration
-REACT_APP_API_BASE_URL=http://localhost:8000
+MCP_SERVER_URL=http://localhost:8001
+MCP_SERVER_PORT=8001
+LM_STUDIO_BASE_URL=http://localhost:1234
+DEFAULT_LM_STUDIO_MODEL=llama-3.2-3b-instruct
 ```
 
-## 5. Usage Guidelines
+API keys can be entered through the API Key settings in the user interface and are sent to the backend with the relevant requests. Never commit API keys to the repository.
 
-### 5.1 Individual Module Execution
+The frontend has partial support for `VITE_API_BASE_URL`, but several components still use `http://localhost:8000` directly. If the frontend and backend are hosted on different machines, route all frontend API calls through a centralized base URL first.
 
-Each STLC module can be executed independently:
-- Access the specific module through the web interface
-- Upload relevant documentation (PDF, DOCX, TXT formats supported)
-- Configure AI model preferences
-- Execute analysis and review generated outputs
+## Tests and utility scripts
 
-### 5.2 Pipeline Execution
+The primary test structure is under `tests/`:
 
-For comprehensive STLC automation:
-- Select multiple modules through the pipeline interface
-- Configure inter-module dependencies
-- Monitor execution progress through the dashboard
-- Review consolidated results and reports
+```bash
+python -m pytest tests/unit
+python -m pytest tests/integration
+python -m pytest tests/performance
+```
 
-## 6. Testing Framework
+`pytest` is not currently listed in `backend/requirements.txt`. Install the test dependencies separately in your development environment:
 
-### 6.1 Test Categories
+```bash
+pip install pytest pytest-asyncio
+```
 
-- **Unit Tests**: Individual component validation (40+ test cases)
-- **Integration Tests**: System component interaction verification
-- **Performance Tests**: Response time and throughput evaluation
-- **Utilities**: Helper functions and debugging tools
+Some tests use live MongoDB, LM Studio/Gemini, Docker, or running backend endpoints. Review the requirements of each test file before running the entire suite; not every file is a self-contained unit test.
 
-## 7. Security Implementation
+Backend utility scripts are organized under `backend/scripts/`. Run them as modules from the `backend` directory so imports continue to resolve correctly:
 
-The system implements comprehensive security measures:
+```powershell
+cd backend
+python -m scripts.diagnostics.check_routes
+python -m scripts.diagnostics.check_mongo_connection
+```
 
-- **Environment Variable Management**: Sensitive data protection through .env configuration
-- **Input Validation**: Comprehensive validation of all user inputs
-- **Error Handling**: Robust exception management with secure error reporting
-- **Rate Limiting**: API call optimization and abuse prevention
-- **Data Sanitization**: File upload security controls and validation
+Utilities under `maintenance/` and `migrations/` can modify or delete data. Review their source code and target database before running them.
 
-## 8. Contributing Guidelines
+## API and health checks
 
-### 8.1 Module Development
+When FastAPI is running, the current endpoint list is available through Swagger:
 
-1. Navigate to `backend/stlc/` directory
-2. Implement the required `run_step(input_data)` function
-3. Add MongoDB integration for session tracking
-4. Develop corresponding frontend UI components
+- Swagger UI: <http://localhost:8000/docs>
+- OpenAPI JSON: <http://localhost:8000/openapi.json>
 
-### 8.2 Model Integration
+Primary API groups:
 
-1. Update `backend/core/model_client.py` with new model identifiers
-2. Implement comprehensive test cases in `tests/unit/`
-3. Execute performance benchmarks
-4. Update system documentation
+| Prefix | Purpose |
+|---|---|
+| `/api/processes/*` | Run individual STLC steps |
+| `/api/prompts/*` | Read or update module prompts |
+| `/api/models/*` | List and filter configured models |
+| `/api/pipeline/*` | Start, monitor, inspect, or stop a pipeline |
+| `/api/test-execution/*` | MCP and AI-based test execution |
+| `/api/docker-execution/*` | Docker, simulation, and parallel execution |
+| `/api/ros2-execution/*` | ROS 2 container execution |
+| `/api/robot-execution/*` | ROS 2/Gazebo robot test sessions |
+| `/api/remote-execution/*` | Shared-directory deployment and result collection |
+| `/api/test-reporting/*` | Test reporting |
+| `/api/test-closure/*` | Test closure reports |
 
-### 8.3 Quality Assurance
+## Known limitations
 
-All contributions must include:
-- Unit tests with >90% coverage
-- Integration tests for new features
-- Performance benchmarks
-- Documentation updates
+- Remote execution does not use SSH, SFTP, or WinRM; it requires an accessible filesystem or UNC share.
+- The repository does not yet provide a complete target-side runner service for the robot computer.
+- The MongoDB connection in `backend/core/database.py` is fixed to the local address.
+- Frontend API endpoints are not fully centralized, so multi-host deployment requires additional configuration work.
+- `docker/docker-compose.yml` assumes a specific external ROS 2 workspace layout.
+- Some tests require live external services and are not suitable for unattended CI execution as currently written.
+- Legacy backend test scripts have not been completely moved under `tests/`.
+- Python dependency versions are not pinned, so a lock or version-pinning strategy is still needed for reproducible deployments.
+- Standard Execution output and tests actually executed in Docker or ROS 2 should not be treated as having the same evidence level.
 
-## 9. Future Development Roadmap
+## Security considerations
 
-- Real-time collaborative testing environments
-- Advanced analytics and reporting dashboards
-- Comprehensive CI/CD pipeline integrations
-- Multi-language support implementation
-- Enterprise authentication systems
-- Custom model training capabilities
+- Treat generated test code as untrusted code.
+- Docker socket access is highly privileged; do not expose the backend directly to untrusted users.
+- Only trusted users should be allowed to request additional package installation.
+- Apply least-privilege permissions to Remote Execution network shares.
+- Never write API keys to source files, test results, or logs.
+- CORS is intentionally broad for development; restrict allowed origins before production deployment.
+- Physical robot testing requires simulation validation, speed, torque, and workspace limits, an emergency stop, safety PLC integration, and explicit operator approval.
 
-## 10. Acknowledgments
+## Contribution and development workflow
 
-This project builds upon established frameworks and methodologies:
+When adding a feature:
 
-- FastAPI framework for high-performance web development
-- React ecosystem for modern frontend development
-- MongoDB community for database management solutions
-- OpenAI and Google AI research contributions
-- ISTQB testing standards and methodologies
-- IEEE software engineering standards
+1. Keep business logic under `backend/services/`.
+2. Define the HTTP layer under `backend/routers/`.
+3. If the feature joins the pipeline, update `pipeline_controller.py` and `step_adapters.py` together.
+4. Route frontend calls through the centralized API helper whenever possible.
+5. Add tests to the appropriate `unit`, `integration`, or `performance` category.
+6. Document MongoDB schema and session-output changes.
+7. Update this README and the relevant Docker or ROS 2 guide.
 
-## 11. License
+## License
 
-This project is licensed under the Apache License 2.0 License. For detailed information, please refer to the `LICENSE` file in the repository.
-
----
-
-**STLC Manager** - Advancing software testing methodologies through artificial intelligence integration and modern software engineering practices.
+This project is licensed under the [Apache License 2.0](LICENSE).

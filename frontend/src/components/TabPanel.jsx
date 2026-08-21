@@ -9,6 +9,7 @@ import TestCaseGenerationForm from './processes/TestCaseGenerationForm';
 import TestCaseOptimization from './processes/TestCaseOptimization';
 import TestCodeGeneration from './processes/TestCodeGeneration';
 import TestExecutionForm from './processes/TestExecutionForm';
+import RobotTestExecutionPanel from './processes/RobotTestExecutionPanel';
 import TestReportingForm from './processes/TestReportingForm';
 import TestClosureForm from './processes/TestClosureForm';
 import CodeReviewForm from './processes/CodeReviewForm';
@@ -647,6 +648,27 @@ Important:
         </div>
         )}
 
+        {/* Test Execution Method Selector - Only for test-execution */}
+        {processId === 'test-execution' && (
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Execution Method</h3>
+            <TestExecutionMethodSelector
+              method={testExecutionMethod}
+              onMethodChange={onTestExecutionMethodChange}
+              dockerAvailable={dockerAvailable}
+              dockerConfig={dockerConfig}
+              onDockerConfigChange={onDockerConfigChange}
+              robotConfig={robotConfig}
+              onRobotConfigChange={onRobotConfigChange}
+              ros2Available={ros2Available}
+              ros2Config={ros2Config}
+              onRos2ConfigChange={onRos2ConfigChange}
+              ros2ContainerName={ros2ContainerName}
+              selectedProcesses={selectedProcesses}
+            />
+          </div>
+        )}
+
         {/* Process Configuration */}
         <div className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Process Configuration</h3>
@@ -659,6 +681,11 @@ Important:
                   onLoadingChange={handleTestCaseOptimizationLoadingChange}
                   onRunningStateChange={handleTestCaseOptimizationRunningStateChange}
                   onOptimizationResults={handleTestCaseOptimizationResults}
+                />
+              ) : processId === 'test-execution' && testExecutionMethod === 'robot' ? (
+                <RobotTestExecutionPanel
+                  sessionId={sessionId}
+                  disabled={isDisabled}
                 />
               ) : (
                 <FormComponent 

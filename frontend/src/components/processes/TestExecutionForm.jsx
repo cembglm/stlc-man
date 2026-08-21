@@ -12,6 +12,8 @@ import { useSelector } from 'react-redux';
 import PropTypes from 'prop-types';
 import { useModels } from '../../hooks/useModels';
 import DockerExecutionPanel from '../docker/DockerExecutionPanel';
+import ParallelDockerExecutionPanel from '../docker/ParallelDockerExecutionPanel';
+import RemoteExecutionPanel from './RemoteExecutionPanel';
 
 // Custom hook to manage model information
 function useModelInfo(selectedModel) {
@@ -94,7 +96,7 @@ export default function TestExecutionForm({
   const [isLoadingTests, setIsLoadingTests] = useState(false);
   
   // Docker execution states
-  const [executionMode, setExecutionMode] = useState('standard'); // 'standard', 'docker', or 'sandbox'
+  const [executionMode, setExecutionMode] = useState('standard'); // 'standard', 'docker', 'sandbox', or 'remote'
   const [dockerAvailable, setDockerAvailable] = useState(false);
   const [additionalPackages, setAdditionalPackages] = useState('');
   const [dockerTimeout, setDockerTimeout] = useState(300);
@@ -864,6 +866,17 @@ ${result.error || 'Unknown error occurred'}
                 >
                   🚀 Docker Sandbox
                 </button>
+                <button
+                  onClick={() => setExecutionMode('remote')}
+                  className={clsx(
+                    'flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all',
+                    executionMode === 'remote'
+                      ? 'bg-white text-purple-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  )}
+                >
+                  🤖 Remote
+                </button>
               </div>
               
               {/* Docker Status Info */}
@@ -1151,6 +1164,60 @@ ${result.error || 'Unknown error occurred'}
             </div>
           )}
       </div>
+      
+      {/* Parallel Docker Execution Panel - Only show in Docker mode */}
+      {executionMode === 'docker' && selectedProcessName && selectedTests.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
+          <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+            🐳 Parallel Docker Execution
+          </h3>
+          <ParallelDockerExecutionPanel
+            processName={selectedProcessName}
+            selectedTests={selectedTests}
+            additionalPackages={additionalPackages}
+            dockerTimeout={dockerTimeout}
+            onExecutionComplete={(results) => {
+              console.log('Parallel execution completed:', results);
+            }}
+            onSetOutput={onSetOutput}
+          />
+        </div>
+      )}
+      
+      {/* Remote Robot Execution Panel - Only show in Remote mode */}
+      {executionMode === 'remote' && (
+        <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
+          <RemoteExecutionPanel
+            sessionId={sessionId}
+            selectedProcessName={selectedProcessName}
+            testCodes={individualTests.filter(test => selectedTests.includes(test.test_id))}
+            onResultsCollected={(results) => {
+              console.log('Remote execution results collected:', results);
+              // Format and display results in output panel
+              if (onSetOutput && results.aggregated) {
+                const output = `
+# 🤖 Remote Robot Execution Results
+
+## Summary
+- **Total Tests:** ${results.aggregated.total_tests}
+- **Passed:** ${results.aggregated.passed}
+- **Failed:** ${results.aggregated.failed}
+- **Skipped:** ${results.aggregated.skipped}
+- **Pass Rate:** ${results.aggregated.pass_rate}%
+
+## Status
+${results.aggregated.summary}
+
+---
+*Results collected at: ${results.collected_at}*
+                `.trim();
+                
+                onSetOutput(output, 'Test Execution - Remote Robot');
+              }
+            }}
+          />
+        </div>
+      )}
         </>
       )}
     </div>

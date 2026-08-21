@@ -6,10 +6,12 @@ Provides endpoints for containerized test execution including hardware simulatio
 """
 
 import logging
+import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from services.docker_executor import docker_executor
+from services.parallel_docker_executor import parallel_docker_executor
 from core.database import get_database
 from datetime import datetime
 import json
@@ -403,3 +405,189 @@ async def save_docker_execution_result(
     except Exception as e:
         logger.error(f"Failed to save Docker execution result: {str(e)}")
         return None
+
+# ============================================================================
+# PARALLEL DOCKER EXECUTION ENDPOINTS
+# ============================================================================
+
+class ParallelExecutionRequest(BaseModel):
+    """Request model for parallel Docker execution"""
+    process_name: str
+    test_ids: List[str]
+    language: str = "python"
+    max_parallel: int = 5  # Maximum number of parallel containers
+    timeout: int = 300
+    additional_packages: Optional[List[str]] = None
+
+class ParallelExecutionResponse(BaseModel):
+    """Response model for parallel execution"""
+    success: bool
+    session_id: str
+    message: str
+    total_tests: int
+
+class ExecutionProgressResponse(BaseModel):
+    """Response model for execution progress"""
+    session_id: str
+    process_name: str
+    status: str
+    total_tests: int
+    pending: int
+    running: int
+    completed: int
+    failed: int
+    success_rate: float
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    elapsed_time: float
+
+class ExecutionResultsResponse(BaseModel):
+    """Response model for detailed execution results"""
+    session_id: str
+    process_name: str
+    status: str
+    statistics: Dict[str, Any]
+    execution_time: Dict[str, Any]
+    jobs: List[Dict[str, Any]]
+
+@router.post("/parallel/execute", response_model=ParallelExecutionResponse)
+async def execute_parallel_tests(request: ParallelExecutionRequest):
+    """
+    Execute multiple tests in parallel Docker containers
+    
+    This endpoint creates a batch execution session and runs tests concurrently
+    in isolated Docker containers. Perfect for running large test suites efficiently.
+    
+    Features:
+    - Parallel execution with configurable concurrency
+    - Real-time progress monitoring
+    - Automatic resource management
+    - Detailed per-test results
+    """
+    try:
+        if not docker_executor.is_available():
+            raise HTTPException(
+                status_code=503,
+                detail="Docker is not available. Please ensure Docker is installed and running."
+            )
+        
+        if not request.test_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="No test IDs provided"
+            )
+        
+        if request.max_parallel < 1 or request.max_parallel > 20:
+            raise HTTPException(
+                status_code=400,
+                detail="max_parallel must be between 1 and 20"
+            )
+        
+        logger.info(f"🚀 Creating parallel execution session for {len(request.test_ids)} tests")
+        logger.info(f"📦 Config: {request.max_parallel} parallel containers, {request.timeout}s timeout")
+        
+        # Create batch session
+        session_id = await parallel_docker_executor.create_batch_session(
+            process_name=request.process_name,
+            test_ids=request.test_ids,
+            language=request.language,
+            max_parallel=request.max_parallel,
+            timeout=request.timeout,
+            additional_packages=request.additional_packages
+        )
+        
+        # Start execution in background (non-blocking)
+        asyncio.create_task(parallel_docker_executor.execute_batch(session_id))
+        
+        return ParallelExecutionResponse(
+            success=True,
+            session_id=session_id,
+            message=f"Parallel execution started for {len(request.test_ids)} tests",
+            total_tests=len(request.test_ids)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Parallel execution error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/parallel/progress/{session_id}", response_model=ExecutionProgressResponse)
+async def get_execution_progress(session_id: str):
+    """
+    Get real-time progress of a parallel execution session
+    
+    Use this endpoint to monitor the progress of running tests.
+    Call this endpoint periodically (e.g., every 2 seconds) to get live updates.
+    """
+    try:
+        progress = await parallel_docker_executor.get_session_progress(session_id)
+        return ExecutionProgressResponse(**progress)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting progress: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/parallel/results/{session_id}", response_model=ExecutionResultsResponse)
+async def get_execution_results(session_id: str):
+    """
+    Get detailed results of a parallel execution session
+    
+    Returns comprehensive results including:
+    - Overall statistics (pass/fail counts, success rate)
+    - Individual test results with output and errors
+    - Execution timing information
+    """
+    try:
+        results = await parallel_docker_executor.get_session_results(session_id)
+        return ExecutionResultsResponse(**results)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting results: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/parallel/cancel/{session_id}")
+async def cancel_parallel_execution(session_id: str):
+    """
+    Cancel a running parallel execution session
+    """
+    try:
+        await parallel_docker_executor.cancel_session(session_id)
+        
+        return {
+            "success": True,
+            "message": f"Session {session_id} cancelled",
+            "session_id": session_id
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error cancelling session: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/parallel/active-sessions")
+async def get_active_sessions():
+    """
+    Get list of all active parallel execution sessions
+    """
+    try:
+        sessions = []
+        for session_id, session in parallel_docker_executor.active_sessions.items():
+            progress = await parallel_docker_executor.get_session_progress(session_id)
+            sessions.append(progress)
+        
+        return {
+            "success": True,
+            "count": len(sessions),
+            "sessions": sessions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting active sessions: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+

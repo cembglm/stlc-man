@@ -206,15 +206,18 @@ export default function TestCaseGenerationForm({
     try {
       console.log('[TestCaseGeneration] Loading prompt for test type:', testType);
       
-      const response = await fetch(`http://localhost:8000/api/processes/test-scenario-generation/test-type-prompt/${encodeURIComponent(testType)}`);
+      // Use the correct endpoint for test case generation prompt
+      const response = await fetch(`http://localhost:8000/api/prompts/test-case-generation`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const result = await response.json();
-        if (result.status === 'success') {        setProcessPrompt(result.prompt);
-        setCreatePrompts(result.create_prompts || {});
+        if (result.status === 'success') {        
+        setProcessPrompt(result.prompt_text); // Changed from result.prompt to result.prompt_text
+        // Note: create_prompts are not available in this endpoint, so we set empty object
+        setCreatePrompts({});
         setSelectedCreatePrompts([]); // Reset selected prompts
           // Create initial final prompt with JSON structure (enhanced for Test Case Generation)
         const jsonStructure = `
@@ -262,7 +265,7 @@ You MUST respond with a valid JSON object in this exact structure:
     }
 `;
         
-        const initialFinalPrompt = result.prompt + jsonStructure;
+        const initialFinalPrompt = result.prompt_text + jsonStructure; // Changed from result.prompt
         setFinalPrompt(initialFinalPrompt); // Initialize final prompt with main prompt + JSON structure
         
         // Notify parent about initial final prompt
@@ -270,10 +273,10 @@ You MUST respond with a valid JSON object in this exact structure:
           onFinalPromptChange(initialFinalPrompt);
         }
         
-        console.log('[TestCaseGeneration] Loaded prompt:', result.prompt.substring(0, 100) + '...');
-        console.log('[TestCaseGeneration] Loaded create prompts:', Object.keys(result.create_prompts || {}));
+        console.log('[TestCaseGeneration] Loaded prompt:', result.prompt_text.substring(0, 100) + '...'); // Changed from result.prompt
+        console.log('[TestCaseGeneration] Create prompts not available in this endpoint');
       }else {
-        console.warn('[TestCaseGeneration] No prompt found for test type:', testType);
+        console.warn('[TestCaseGeneration] No prompt found in response');
         setProcessPrompt('Prompt bulunamadı');
         setCreatePrompts({});
         setSelectedCreatePrompts([]);

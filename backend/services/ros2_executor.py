@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Image name that identifies the ROS2 container
-ROS2_IMAGE_NAME = "ros2_colcon_workspace:humble"
+ROS2_IMAGE_NAME = "stlc-robot-ros2:latest"
 
 
 class ROS2Executor:
