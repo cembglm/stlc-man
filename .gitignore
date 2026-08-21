@@ -128,7 +128,6 @@ uploads/
 tests/
 /tests/
 *_test.py
-test_results/
 coverage/
 
 # ============== Package Lock Files ==============
