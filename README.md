@@ -1,6 +1,6 @@
 # STLC Manager: An AI-Powered Software Testing Life Cycle Management System
 
-> **Naming and project context:** This system is presented as **STLC Manager** in the author's master's thesis and as **ESOGU DT TOOL** within [MATISSE](https://matisse-kdt.eu/), a European HORIZON-CHIPS-JU research project focused on the model-based engineering and continuous validation of industrial systems using Digital Twins (DTs).
+> **Naming and project context:** This system is referred to as **STLC Manager** in the associated master's thesis and as **ESOGU DT TOOL** within [MATISSE](https://matisse-kdt.eu/), a European research project funded under the Horizon Europe programme through the Chips Joint Undertaking (Grant Agreement No. 101140216). MATISSE focuses on model-based engineering and the continuous verification and validation of industrial systems using Digital Twins (DTs).
 
 STLC Manager is an AI-assisted web application designed to manage the Software Testing Life Cycle (STLC) from source code, requirements, and the outputs of earlier testing phases.
 
