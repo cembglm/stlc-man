@@ -3,7 +3,7 @@ ros2_execution_router.py
 ------------------------
 API Router for ROS2 Docker-based test execution.
 
-Bridges STLC Manager to a running ros2_colcon_workspace:humble container.
+Bridges STLC Manager to a running stlc-robot-ros2:latest container.
 No new containers are created – tests are injected via `docker exec`.
 
 Endpoints
@@ -83,7 +83,7 @@ async def get_ros2_status():
         docker run --rm -it \\
           -e DISPLAY=<hostIp>:0.0 \\
           -e QT_X11_NO_MITSHM=1 \\
-          ros2_colcon_workspace:humble bash
+          stlc-robot-ros2:latest bash
     """
     status = ros2_executor.get_status()
     return status
@@ -102,7 +102,7 @@ async def execute_single(request: ROS2SingleRequest):
             status_code=503,
             detail=(
                 "ROS2 container is not running. "
-                "Start ros2_colcon_workspace:humble first (README_Docker.md Step 4)."
+                "Start stlc-robot-ros2:latest first (README_Docker.md Step 4)."
             ),
         )
 
@@ -130,7 +130,7 @@ async def execute_batch(request: ROS2BatchRequest):
             status_code=503,
             detail=(
                 "ROS2 container is not running. "
-                "Start ros2_colcon_workspace:humble first (README_Docker.md Step 4)."
+                "Start stlc-robot-ros2:latest first (README_Docker.md Step 4)."
             ),
         )
 

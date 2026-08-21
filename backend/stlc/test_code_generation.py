@@ -61,6 +61,47 @@ async def get_test_case_count(process_title: str):
         logger.error(f"Error getting test case count: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/process-names")
+async def get_process_names_with_tests():
+    """
+    Get list of process names that have generated tests
+    Used by Robot Test Execution Panel to populate process dropdown
+    """
+    try:
+        process_names = test_code_service.get_process_names_with_generated_tests()
+        return {
+            "success": True,
+            "process_names": process_names,
+            "count": len(process_names)
+        }
+    except Exception as e:
+        logger.error(f"Error getting process names: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tests/{process_name}")
+async def get_tests_by_process_name(process_name: str):
+    """
+    Get generated tests for a specific process name
+    Used by Robot Test Execution Panel to populate test selection
+    
+    Args:
+        process_name: The process name (environment_name from test code generation)
+        
+    Returns:
+        List of generated tests with test_id, test_case_name, status, test_code
+    """
+    try:
+        tests = test_code_service.get_generated_tests_by_process_name(process_name)
+        return {
+            "success": True,
+            "process_name": process_name,
+            "tests": tests,
+            "count": len(tests)
+        }
+    except Exception as e:
+        logger.error(f"Error getting tests for process {process_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/run")
 async def process_test_code_generation(
     process_title: str = Form(...),

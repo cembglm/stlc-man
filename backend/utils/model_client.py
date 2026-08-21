@@ -15,7 +15,7 @@ backend_dir = os.path.dirname(os.path.dirname(__file__))
 if backend_dir not in sys.path:
     sys.path.append(backend_dir)
 # Import from the config.py file directly
-import config
+from config import MODEL_IDENTIFIER
 import google.generativeai as genai
 import json
 import time
@@ -111,7 +111,7 @@ class LLMClient:
             self.model_name = model_name
         else:
             # Local model için identifier'ı al
-            self.model_name = self.get_model_identifier(model_name) if model_name else "llama-3.2-1b-instruct"
+            self.model_name = self.get_model_identifier(model_name) if model_name else MODEL_IDENTIFIER
         
         self.api_key = api_key  # Gemini API key'i için
         self.use_case = use_case  # 'code_review', 'test_generation', 'test_reporting', etc.
@@ -298,7 +298,7 @@ class LLMClient:
         self.logger.info(f"Getting model identifier for key: {model_key}")
         if not model_key or not isinstance(model_key, str):
             self.logger.warning(f"Invalid model_key: {model_key}, using default model")
-            return "llama-3.2-1b-instruct"  # Default model
+            return MODEL_IDENTIFIER  # Default model from config
         
         # Merkezi konfigürasyondan model mapping'i al
         try:
@@ -351,7 +351,7 @@ class LLMClient:
         self.logger.info(f"Model id from fallback mapping: {model_id}")
         if not model_id:
             self.logger.warning(f"Unknown model_key: {model_key}, using default model")
-            return "llama-3.2-1b-instruct"  # Default model
+            return MODEL_IDENTIFIER  # Default model from config
             
         self.logger.info(f"Selected model (fallback): {model_key} -> {model_id}")
         return model_id

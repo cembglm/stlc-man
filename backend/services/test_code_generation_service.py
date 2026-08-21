@@ -153,24 +153,75 @@ class TestCodeGenerationService:
         """
         Process name'e göre unique test case'leri session_history'den getirir
         Path: session_history->processes->test_case_optimization->output->unique_test_cases
+        OR: session_history->processes->test_case_generation->output->test_cases (fallback)
         """
         try:
-            # Session history'den process_name'e göre test case'leri al
-            query = {
+            # First try: test_case_optimization (optimized test cases)
+            query_optimized = {
                 "processes.test_case_optimization.process_name": process_title
             }
             
-            session = self.session_collection.find_one(query)
+            session = self.session_collection.find_one(query_optimized)
             
             if session:
                 test_case_optimization = session.get("processes", {}).get("test_case_optimization", {})
                 output = test_case_optimization.get("output", {})
                 unique_cases = output.get("unique_test_cases", [])
                 
-                logger.info(f"Found {len(unique_cases)} unique test cases for process '{process_title}' from session_history")
+                logger.info(f"Found {len(unique_cases)} unique test cases for process '{process_title}' from test_case_optimization")
+                return unique_cases
+            
+            # Fallback: test_case_generation (generated test cases without optimization)
+            logger.info(f"No test_case_optimization found, trying test_case_generation for process '{process_title}'")
+            query_generated = {
+                "processes.test_case_generation.selected_process_title": process_title
+            }
+            
+            session = self.session_collection.find_one(query_generated)
+            
+            if session:
+                test_case_generation = session.get("processes", {}).get("test_case_generation", {})
+                output = test_case_generation.get("output", {})
+                
+                # Try two formats:
+                # 1. New format: test_case_results (array of scenario results)
+                test_case_results = output.get("test_case_results", [])
+                
+                # Extract unique test cases from all scenarios
+                unique_cases = []
+                for scenario_result in test_case_results:
+                    test_cases = scenario_result.get("test_cases", [])
+                    for test_case in test_cases:
+                        unique_cases.append({
+                            "test_case_id": test_case.get("test_case_id"),
+                            "title": test_case.get("title"),
+                            "scenario_id": test_case.get("scenario_id"),
+                            "description": test_case.get("description"),
+                            "priority": test_case.get("priority", "Medium"),
+                            "preconditions": test_case.get("preconditions", []),
+                            "steps": test_case.get("steps", []),
+                            "expected_result": test_case.get("expected_result", "")
+                        })
+                
+                # 2. Old format fallback: test_cases (direct array)
+                if not unique_cases:
+                    test_cases = output.get("test_cases", [])
+                    for test_case in test_cases:
+                        unique_cases.append({
+                            "test_case_id": test_case.get("test_case_id"),
+                            "title": test_case.get("title"),
+                            "scenario_id": test_case.get("scenario_id"),
+                            "description": test_case.get("description"),
+                            "priority": test_case.get("priority", "Medium"),
+                            "preconditions": test_case.get("preconditions", []),
+                            "steps": test_case.get("steps", []),
+                            "expected_result": test_case.get("expected_result", "")
+                        })
+                
+                logger.info(f"Found {len(unique_cases)} test cases for process '{process_title}' from test_case_generation")
                 return unique_cases
             else:
-                logger.warning(f"No session found for process name: {process_title}")
+                logger.warning(f"No session found for process name: {process_title} (checked both test_case_optimization and test_case_generation)")
                 return []
             
         except Exception as e:
@@ -819,4 +870,113 @@ Return ONLY the executable test code, no explanations or markdown formatting.
             
         except Exception as e:
             logger.error(f"Error getting available process titles: {str(e)}")
+            return []
+    
+    def get_generated_tests_by_process_name(self, process_name: str) -> List[Dict[str, Any]]:
+        """
+        Get generated tests for a specific process name from session history
+        Path: session_history->processes->test_code_generation->generated_tests
+        
+        Args:
+            process_name: The process name to filter by (process_name field)
+            
+        Returns:
+            List of generated tests with test_id, test_case_name, status, test_code
+        """
+        try:
+            logger.info(f"Fetching generated tests for process: {process_name}")
+            
+            # Query session history for test_code_generation with matching process_name
+            pipeline = [
+                {
+                    "$match": {
+                        "processes.test_code_generation": {"$exists": True},
+                        "processes.test_code_generation.process_name": process_name
+                    }
+                },
+                {
+                    "$project": {
+                        "session_id": 1,
+                        "timestamp": "$processes.test_code_generation.timestamp",
+                        "generated_tests": "$processes.test_code_generation.output.generated_tests",
+                        "process_name": "$processes.test_code_generation.process_name"
+                    }
+                },
+                {
+                    "$sort": {"timestamp": -1}
+                },
+                {
+                    "$limit": 1  # Get the most recent session
+                }
+            ]
+            
+            results = list(self.session_collection.aggregate(pipeline))
+            
+            if not results:
+                logger.warning(f"No generated tests found for process: {process_name}")
+                return []
+            
+            # Extract generated tests from the most recent session
+            latest_session = results[0]
+            generated_tests = latest_session.get("generated_tests", [])
+            
+            # Format the tests for the response
+            formatted_tests = []
+            for test in generated_tests:
+                formatted_test = {
+                    "unique_id": test.get("unique_id", ""),
+                    "test_id": test.get("test_case_id", ""),
+                    "test_case_name": test.get("title", ""),
+                    "status": test.get("status", "unknown"),
+                    "test_code": test.get("code", ""),
+                    "error": test.get("error", None),
+                    "description": test.get("description", ""),
+                    "filename": test.get("filename", "")
+                }
+                formatted_tests.append(formatted_test)
+            
+            logger.info(f"Found {len(formatted_tests)} generated tests for process: {process_name}")
+            return formatted_tests
+            
+        except Exception as e:
+            logger.error(f"Error getting generated tests for process {process_name}: {str(e)}")
+            return []
+    
+    def get_process_names_with_generated_tests(self) -> List[str]:
+        """
+        Get list of unique process names that have generated tests
+        Path: session_history->processes->test_code_generation->process_name
+        
+        Returns:
+            List of unique process names (process_name values)
+        """
+        try:
+            logger.info("Fetching process names with generated tests")
+            
+            # Query for distinct process_name values where test_code_generation exists
+            pipeline = [
+                {
+                    "$match": {
+                        "processes.test_code_generation": {"$exists": True},
+                        "processes.test_code_generation.status": "completed"
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$processes.test_code_generation.process_name"
+                    }
+                },
+                {
+                    "$sort": {"_id": 1}
+                }
+            ]
+            
+            results = list(self.session_collection.aggregate(pipeline))
+            process_names = [r["_id"] for r in results if r.get("_id")]
+            
+            logger.info(f"Found {len(process_names)} process names with generated tests")
+            return process_names
+            
+        except Exception as e:
+            logger.error(f"Error getting process names with generated tests: {str(e)}")
             return []

@@ -760,7 +760,7 @@ async def run_test_execution(
             if not ros2_executor.is_ros2_available():
                 return _err(
                     step_id,
-                    "ROS2 container is not running. Start ros2_colcon_workspace:humble first (README_Docker.md Step 4).",
+                    "ROS2 container is not running. Start stlc-robot-ros2:latest first (README_Docker.md Step 4).",
                     t0,
                 )
 
