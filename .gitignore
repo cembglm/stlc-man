@@ -125,10 +125,7 @@ uploads/
 
 # ============== Test Files ==============
 # Test directories and files
-tests/
-/tests/
 *_test.py
-test_results/
 coverage/
 
 # ============== Package Lock Files ==============
