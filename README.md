@@ -7,6 +7,12 @@
 
 STLC Manager is an AI-assisted web application designed to manage the Software Testing Life Cycle (STLC) from source code, requirements, and the outputs of earlier testing phases.
 
+## STLC Manager paper reproducibility
+
+The curated source artefacts, controlled 60-run experiment, Human Oracle annotations, analysis scripts, machine-readable results, and paper-to-evidence traceability for **“STLC Manager: Benchmarking LLM-Driven Model-to-Test Transformation and Test Case Optimization”** are available in [`paper_reproducibility/`](paper_reproducibility/README.md).
+
+The 60-run full-suite study is the primary revision-time evidence. Earlier Serial results are retained as historical evidence and were not rerun. No publication DOI is asserted before assignment.
+
 The application provides an 11-step workflow that covers code review and requirement analysis, test planning, scenario and test case generation, test code generation, Docker and ROS 2-based execution, reporting, and test closure.
 
 > **Project status:** This project is under active development. Some features require local services, a running Docker daemon, a ROS 2 container, or an external model provider. Additional safety and operator-approval layers are required before running generated tests on physical robots.
