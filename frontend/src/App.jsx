@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
+import { notificationToasterProps, toast } from './utils/notifications';
 import Header from './components/Header';
 import TabPanel from './components/TabPanel';
 import { processes } from './data/processes';
@@ -360,7 +361,7 @@ function AppContents() {
 				const hasRequirementDoc = files.some(file => file.type === 'Requirement Document');
 				const hasCodeOrUML = files.some(file => file.type === 'Source Code' || file.type === 'UML');
 				if (!hasRequirementDoc || !hasCodeOrUML) {
-					window.alert('Bu süreç için hem Requirement Document hem de Source Code veya UML dosyası yüklemelisiniz.');
+					toast.warning('Requirement Document ile birlikte Source Code veya UML dosyası seçin.');
 					setPipelineStatus(prev => ({ ...prev, [processId]: 'idle' }));
 					return;
 				}
@@ -368,7 +369,7 @@ function AppContents() {
 			if (processId === 'code-review' && files.length > 0) {
 				const allRequirementDocs = files.every(file => file.type === 'Requirement Document');
 				if (allRequirementDocs) {
-					window.alert('Code review sadece Requirement Document ile çalıştırılamaz. Lütfen kod dosyası da ekleyin.');
+					toast.warning('Code Review için en az bir kaynak kod dosyası ekleyin.');
 					setPipelineStatus(prev => ({ ...prev, [processId]: 'idle' }));
 					return;
 				}
@@ -380,10 +381,9 @@ function AppContents() {
 			// Windows pop-up ile kullanılan dosyaları göster (Test Case Optimization hariç)
 			if (processId !== 'test-case-optimization') {
 				if (files.length > 0) {
-					const fileNames = files.map(file => file.name || file.file?.name || 'Unnamed File').join('\n');
-					window.alert(`Processing ${processId} with the following files:\n\n${fileNames}`);
+					toast.info(`${processes.find(process => process.id === processId)?.name || processId}: ${files.length} file(s) selected.`);
 				} else {
-					window.alert(`Processing ${processId} with no files selected.`);
+					toast.info(`${processes.find(process => process.id === processId)?.name || processId}: no files selected.`);
 				}
 			}
 	
@@ -426,8 +426,7 @@ function AppContents() {
 				console.log('[App] Running requirement analysis');
 				try {
 					const selectedModel = aiModels[processId] || 'llama3.2:3b';
-					const fileNames = files.map(file => file.name || file.file?.name || 'Unnamed File').join('\n');
-					window.alert(`Requirement Analysis şu model ile çalıştırılıyor: ${selectedModel}\n\nKullanılan dosyalar:\n${fileNames}`);
+					toast.info(`Requirement Analysis is starting with ${selectedModel} and ${files.length} file(s).`);
 					const customPrompt = processPrompts[processId]?.prompt_text || processPrompts[processId]?.content || null;
 					
 					// API key'i al ve geçir (code review ile aynı field kullan)
@@ -492,7 +491,7 @@ function AppContents() {
 			if (!finalPrompt) {
 				const errorMsg = 'Please generate a prompt first before running test scenario generation';
 				console.error('[App] Error:', errorMsg);
-				window.alert(errorMsg);
+				toast.error(errorMsg);
 				throw new Error(errorMsg);
 			}
 			
@@ -622,6 +621,9 @@ function AppContents() {
 				[processId]: 'completed'
 			}));
 			console.log(`[App] Pipeline status set to 'completed' for ${processId}`);
+			if (['code-review', 'requirement-analysis', 'test-planning', 'environment-setup'].includes(processId)) {
+				toast.success(`${processes.find(process => process.id === processId)?.name || processId} completed.`);
+			}
 		} catch (error) {
 			console.error(`[App] Process ${processId} failed: ${error.message}`);
 			setPipelineStatus(prev => ({
@@ -638,6 +640,9 @@ function AppContents() {
 					timestamp: new Date().toISOString()
 				}
 			}));
+			if (['code-review', 'requirement-analysis', 'test-planning', 'environment-setup'].includes(processId)) {
+				toast.error(`${processes.find(process => process.id === processId)?.name || processId} failed: ${error.message}`);
+			}
 		}
 	};
 
@@ -683,7 +688,6 @@ function AppContents() {
 	// Pipeline başlatma fonksiyonu - backend orchestration
 	const handleStartPipeline = async (pipelineConfigs = null) => {
 		console.log('[App] Starting pipeline with configs:', pipelineConfigs);
-		const { toast } = await import('react-hot-toast');
 
 		// Seçilen süreçleri STLC sırasına göre sırala
 		const selectedProcessIds = processes
@@ -1305,31 +1309,7 @@ function AppContents() {
 
 	return (
 		<div className="min-h-screen flex flex-col">
-			<Toaster
-				position="top-center"
-				toastOptions={{
-					duration: 4000,
-					style: {
-						background: '#fff',
-						color: '#333',
-						boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-						borderRadius: '0.5rem',
-						padding: '1rem'
-					},
-					success: {
-						iconTheme: {
-							primary: '#10b981',
-							secondary: '#fff',
-						},
-					},
-					error: {
-						iconTheme: {
-							primary: '#ef4444',
-							secondary: '#fff',
-						},
-					},
-				}}
-			/>
+			<Toaster {...notificationToasterProps} />
 			<Header />
 			<div className="flex-1 flex flex-col overflow-hidden">
 				{validationError && (

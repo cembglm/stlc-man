@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { toast } from 'react-hot-toast';
+import { toast } from '../../utils/notifications';
 import { useSelector } from 'react-redux';
 import PropTypes from 'prop-types';
 import processService from '../../services/processService';
