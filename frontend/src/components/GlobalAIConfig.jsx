@@ -11,8 +11,8 @@ function ModelSelect({ provider, providersById, value, onChange }) {
   const valueIsDiscovered = models.some(model => model.id === value);
   return (
     <select value={value || ''} onChange={event => onChange(event.target.value)} className="min-w-0 flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500">
+      <option value="" disabled>Select a Model</option>
       {value && !valueIsDiscovered && <option value={value}>{value} (configured)</option>}
-      {!models.length && <option value="">Server default model</option>}
       {models.map(model => (
         <option key={model.id} value={model.id}>
           {model.id}{model.context_length ? ` (${Math.round(model.context_length / 1024)}K)` : ''}
@@ -52,14 +52,6 @@ export default function GlobalAIConfig({
     [providers],
   );
 
-  useEffect(() => {
-    const info = providersById[selectedProvider];
-    const discovered = info?.models || [];
-    if (discovered.length && !discovered.some(item => item.id === selectedModel)) {
-      onModelChange?.(info.default_model || discovered[0].id);
-    }
-  }, [providersById, selectedProvider, selectedModel, onModelChange]);
-
   const selectedSteps = processes.filter(process => selectedProcesses.has(process.id));
 
   const changeStepProvider = (stepId, provider) => {
@@ -67,17 +59,15 @@ export default function GlobalAIConfig({
       onStepConfigChange?.(stepId, { provider: '', model: '' });
       return;
     }
-    const info = providersById[provider];
     onStepConfigChange?.(stepId, {
       provider,
-      model: info?.default_model || info?.models?.[0]?.id || '',
+      model: '',
     });
   };
 
   const changeGlobalProvider = provider => {
-    const info = providersById[provider];
     onProviderChange?.(provider);
-    onModelChange?.(info?.default_model || info?.models?.[0]?.id || '');
+    onModelChange?.('');
   };
 
   return (
@@ -118,7 +108,7 @@ export default function GlobalAIConfig({
                       <option value="">Use global</option>
                       {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
                     </select>
-                    <ModelSelect provider={effectiveProvider} providersById={providersById} value={config.provider ? config.model : selectedModel} onChange={model => onStepConfigChange?.(process.id, { ...config, provider: config.provider || effectiveProvider, model })} />
+                    <ModelSelect provider={effectiveProvider} providersById={providersById} value={config.model || ''} onChange={model => onStepConfigChange?.(process.id, { ...config, provider: config.provider || effectiveProvider, model })} />
                   </div>
                 );
               })}

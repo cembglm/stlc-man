@@ -57,7 +57,7 @@ export default function TabPanel({
   selectedFileIds,
   setSelectedFileIds,
   onGeneratePrompt,
-  pipelineModel = 'qwen2.5-7b-instruct-1m',
+  pipelineModel = '',
   onPipelineModelChange,
   pipelineProvider = 'lm_studio',
   onPipelineProviderChange,

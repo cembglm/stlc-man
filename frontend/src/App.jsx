@@ -78,7 +78,7 @@ function AppContents() {
 	const [pipelineResults, setPipelineResults] = useState({});
 
 	// Global pipeline model — single model used for all pipeline steps
-	const [pipelineModel, setPipelineModel] = useState('qwen2.5-7b-instruct-1m');
+	const [pipelineModel, setPipelineModel] = useState('');
 	const [pipelineProvider, setPipelineProvider] = useState('lm_studio');
 	const [pipelineStepAIConfigs, setPipelineStepAIConfigs] = useState({});
 
@@ -708,6 +708,29 @@ function AppContents() {
 			return;
 		}
 
+		if (!pipelineModel) {
+			toast.error('Select a Model before starting the pipeline.', {
+				duration: 5000,
+				position: 'top-center',
+			});
+			return;
+		}
+
+		const incompleteStepModels = selectedProcessIds.filter(stepId => {
+			const config = pipelineStepAIConfigs[stepId];
+			return config?.provider && !config?.model;
+		});
+		if (incompleteStepModels.length > 0) {
+			const names = incompleteStepModels
+				.map(stepId => processes.find(process => process.id === stepId)?.name || stepId)
+				.join(', ');
+			toast.error(`Select a Model for: ${names}`, {
+				duration: 6000,
+				position: 'top-center',
+			});
+			return;
+		}
+
 		// Tüm süreç durumlarını "pending" olarak ayarla
 		setPipelineStatus(prev => {
 			const newStatus = { ...prev };
@@ -731,8 +754,9 @@ function AppContents() {
 			});
 		});
 
-		// Global provider/model with optional per-step overrides.
-		const globalModel = pipelineModel || 'qwen2.5-7b-instruct-1m';
+		// Global provider/model with optional per-step overrides. A model must be
+		// selected explicitly; there is no silent hard-coded fallback in the UI.
+		const globalModel = pipelineModel;
 		// Local provider credentials are configured server-side and never exposed
 		// to the browser. Gemini keys remain available to the legacy direct forms.
 		const globalApiKey = null;
