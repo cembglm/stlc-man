@@ -6,6 +6,7 @@ const FILE_TYPES = [
   'Requirement Document',
   'Source Code',
   'Project AST',
+  'Code Knowledge Graph',
   'UML',
 ];
 
@@ -34,6 +35,14 @@ const isSupportedProjectSource = (file) => {
   const lowerName = (parts.at(-1) || '').toLowerCase();
   const dotIndex = lowerName.lastIndexOf('.');
   return dotIndex >= 0 && SOURCE_EXTENSIONS.has(lowerName.slice(dotIndex));
+};
+
+const isKnowledgeGraph = (file) => {
+  const relativePath = normalizePath(file).toLowerCase();
+  return relativePath.endsWith('/.ua/knowledge-graph.json')
+    || relativePath.endsWith('/.understand-anything/knowledge-graph.json')
+    || relativePath === '.ua/knowledge-graph.json'
+    || relativePath === '.understand-anything/knowledge-graph.json';
 };
 
 export default function FileUpload({ 
@@ -87,6 +96,9 @@ export default function FileUpload({
     const supported = selected.filter(isSupportedProjectSource);
     const accepted = supported.filter(file => !existingPaths.has(normalizePath(file)));
     const duplicateCount = supported.length - accepted.length;
+    const knowledgeGraphs = selected.filter(isKnowledgeGraph);
+    const acceptedGraphs = knowledgeGraphs.filter(file => !existingPaths.has(normalizePath(file)));
+    const graphDuplicateCount = knowledgeGraphs.length - acceptedGraphs.length;
 
     if (accepted.length > 0) {
       await onFileUpload(accepted, 'Source Code', {
@@ -94,11 +106,21 @@ export default function FileUpload({
         uploadSource: 'project-folder',
       });
     }
+    if (acceptedGraphs.length > 0) {
+      // A project should normally contain one active graph. Import all matches
+      // so the user can explicitly choose which one is mapped if both legacy
+      // and current Understand Anything directories exist.
+      await onFileUpload(acceptedGraphs, 'Code Knowledge Graph', {
+        autoMapProcesses: ['test-code-generation'],
+        uploadSource: 'project-folder',
+      });
+    }
     setFolderImportSummary({
       selected: selected.length,
       accepted: accepted.length,
-      ignored: selected.length - supported.length,
-      duplicates: duplicateCount,
+      knowledgeGraphs: acceptedGraphs.length,
+      ignored: selected.length - supported.length - knowledgeGraphs.length,
+      duplicates: duplicateCount + graphDuplicateCount,
       root: normalizePath(selected[0]).split('/')[0] || '',
     });
     event.target.value = '';
@@ -131,7 +153,7 @@ export default function FileUpload({
             <div>
               <h4 className="font-medium text-purple-900">Import Source Project Folder</h4>
               <p className="mt-1 text-sm text-purple-800">
-                Imports supported source files as <strong>Source Code</strong> while preserving relative paths for whole-project AST analysis.
+                Imports supported source files and detects Understand Anything <code>.ua/knowledge-graph.json</code> while preserving relative paths.
               </p>
             </div>
             <label className="inline-flex cursor-pointer items-center justify-center rounded-md bg-purple-700 px-4 py-2 text-sm font-medium text-white hover:bg-purple-800">
@@ -154,12 +176,13 @@ export default function FileUpload({
               <div className="font-medium">{folderImportSummary.root || 'Selected project'}</div>
               <div>
                 {folderImportSummary.accepted} source file(s) imported
+                {folderImportSummary.knowledgeGraphs > 0 ? ` • ${folderImportSummary.knowledgeGraphs} knowledge graph(s) imported` : ''}
                 {folderImportSummary.ignored > 0 ? ` • ${folderImportSummary.ignored} ignored` : ''}
                 {folderImportSummary.duplicates > 0 ? ` • ${folderImportSummary.duplicates} duplicate(s) skipped` : ''}
               </div>
-              {folderImportSummary.accepted > 0 && (
+              {(folderImportSummary.accepted > 0 || folderImportSummary.knowledgeGraphs > 0) && (
                 <div className="mt-1 text-xs text-purple-700">
-                  Automatically mapped to Scenario, Test Case, and Test Code Generation.
+                  Source files are mapped to generation steps; knowledge graphs are mapped only to Test Code Generation.
                 </div>
               )}
             </div>

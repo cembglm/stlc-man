@@ -162,7 +162,7 @@ export const processes = [
       'Ensure generated test codes are ready to run without modifications',
       'Support multiple programming languages (Python, JavaScript, Java, C#, etc.)'
     ],
-    inputs: ['Unique Test Cases', 'Source Code', 'Environment Setup Results'],
+    inputs: ['Unique Test Cases', 'Source Code', 'Project AST', 'Code Knowledge Graph', 'Environment Setup Results'],
     output: 'Executable Test Code Files',
     defaultPrompt: 'Generate executable test code based on unique test cases, source code analysis, and environment setup configuration.',
     dependencies: ['test-case-optimization', 'environment-setup']

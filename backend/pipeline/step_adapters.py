@@ -303,7 +303,6 @@ async def run_test_scenario_generation(
             is_project_structure_file,
             parse_project_structure,
         )
-
         cfg = _get_step_config(req, step_id)
         files = _files_for_step(req, step_id)
         manifest_file = next(
@@ -592,6 +591,10 @@ async def run_test_code_generation(
             is_project_structure_file,
             parse_project_structure,
         )
+        from services.knowledge_graph_service import (
+            is_knowledge_graph_file,
+            parse_knowledge_graph,
+        )
 
         cfg = _get_step_config(req, step_id)
         model = cfg.get("model", "qwen2.5-7b-instruct-1m")
@@ -628,9 +631,20 @@ async def run_test_code_generation(
             ),
             None,
         )
+        knowledge_graph_file = next(
+            (
+                item for item in files
+                if item is not capability_file
+                and item is not project_ast_file
+                and is_knowledge_graph_file(item.name, item.type)
+            ),
+            None,
+        )
         source_files = [
             item for item in files
-            if item is not capability_file and item is not project_ast_file
+            if item is not capability_file
+            and item is not project_ast_file
+            and item is not knowledge_graph_file
         ]
         upload_files = await _make_upload_files(source_files)
         capability_contract = (
@@ -648,6 +662,13 @@ async def run_test_code_generation(
                 for item in source_files
             ])
         )
+        knowledge_graph = (
+            parse_knowledge_graph(
+                knowledge_graph_file.content or "",
+                knowledge_graph_file.name,
+            )
+            if knowledge_graph_file else None
+        )
 
         service = TestCodeGenerationService()
         result = await service.generate_test_codes(
@@ -663,6 +684,7 @@ async def run_test_code_generation(
             max_test_cases=max_test_cases,
             capability_contract=capability_contract,
             project_structure=project_structure,
+            knowledge_graph=knowledge_graph,
             max_input_tokens=max_input_tokens,
         )
         if not result.get("success", False):
