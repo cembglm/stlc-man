@@ -133,10 +133,31 @@ def test_real_pipeline_path_emits_pipeline_and_module_lifecycle(monkeypatch):
         await pipeline_router._run_pipeline_background(request, request.selected_steps, state, asyncio.Event())
         assert state["status"] == "completed"
         assert [event[0] for event in emitted] == [
-            "pipeline.started", "module.started", "module.completed", "pipeline.completed",
+            "pipeline.started", "module.started", "module.completed", "pipeline.progress",
+            "pipeline.completed",
         ]
         assert emitted[2][1]["metrics"]["scenario_count"] == 1
+        assert emitted[3][1]["progress"] == 100
     asyncio.run(exercise())
+
+
+def test_every_pipeline_step_has_a_monitoring_module():
+    from pipeline.pipeline_controller import PIPELINE_DEPENDENCIES
+
+    assert set(pipeline_router._MONITORING_MODULES) == set(PIPELINE_DEPENDENCIES)
+
+
+def test_execution_pipeline_metrics_are_normalized():
+    result = StepResult(
+        step_id="test-execution",
+        status=PipelineStepStatus.COMPLETED,
+        output={"summary": {"total": 4, "successful": 3, "failed": 1}},
+    )
+    assert pipeline_router._result_metrics("test-execution", result) == {
+        "total": 4,
+        "passed": 3,
+        "failed": 1,
+    }
 
 
 def test_monitoring_endpoint_authentication(monkeypatch):

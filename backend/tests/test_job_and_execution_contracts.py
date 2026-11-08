@@ -26,6 +26,17 @@ from services.execution_client import (  # noqa: E402
 from services.job_service import JobNotFoundError, JobService  # noqa: E402
 
 
+def _approved_capability_contract():
+    contract = json.loads((BACKEND_DIR.parent / "robot_capabilities.json").read_text(encoding="utf-8"))
+    contract["meta"]["approval"] = {
+        "approved": True,
+        "approved_by": "test-suite",
+        "approved_at": "2026-11-07",
+        "notes": "Test fixture only.",
+    }
+    return contract
+
+
 def test_job_lifecycle_failure_and_concurrency():
     async def exercise():
         service = JobService()
@@ -239,6 +250,7 @@ def test_ssh_docker_adapter_uploads_and_runs_verified_ros2_command(tmp_path):
         host="ifarlab",
         remote_dir="~/stlc_runs",
         image="ros2-exec-harness:0.3.2",
+        capability_contract=_approved_capability_contract(),
         identity_file=tmp_path / "id_ed25519_ifarlab",
         password="",
         timeout_seconds=60,
@@ -265,19 +277,18 @@ def test_ssh_docker_adapter_uploads_and_runs_verified_ros2_command(tmp_path):
     assert (result.passed, result.failed) == (1, 0)
     assert len(calls) == 3
     assert calls[0][0][0] == "ssh"
-    assert "docker image inspect ros2-exec-harness:0.3.2" in calls[0][0][-1]
+    assert "test -x" in calls[0][0][-1]
+    assert "run_test.sh" in calls[0][0][-1]
     assert calls[1][0][0] == "scp"
     assert calls[1][0][-1].startswith("ifarlab:~/stlc_runs/exec-")
     remote_command = calls[2][0][-1]
-    assert "--network host" in remote_command
-    assert "--ipc=host" in remote_command
-    assert "FASTDDS_BUILTIN_TRANSPORTS=UDPv4" in remote_command
+    assert "run_test.sh" in remote_command
+    assert "exec-" in remote_command
     assert not remote_command.startswith("timeout ")
-    assert "python3 -m pytest" not in remote_command
-    assert remote_command.endswith("python3 /harness_ws/generated_script.py")
+    assert "docker run" not in remote_command
     assert calls[2][1] is None
-    assert "/harness_ws/generated_script.py:ro" in remote_command
     assert result.artifacts[0]["sha256"]
+    assert result.artifacts[0]["capability_sha256"]
 
 
 def test_ssh_docker_adapter_reports_remote_container_failure():
@@ -285,6 +296,7 @@ def test_ssh_docker_adapter_reports_remote_container_failure():
         host="ifarlab",
         remote_dir="~/stlc_runs",
         image="ros2-exec-harness:0.3.2",
+        capability_contract=_approved_capability_contract(),
         password="",
         timeout_seconds=20,
         connect_timeout_seconds=5,
@@ -299,7 +311,9 @@ def test_ssh_docker_adapter_reports_remote_container_failure():
         return next(responses)
 
     client._run_command = fake_run
-    result = asyncio.run(client.submit(ExecutionRequest(test_code="while True: pass")))
+    result = asyncio.run(client.submit(ExecutionRequest(
+        test_code="def test_timeout():\n    assert True\n"
+    )))
     assert result.status == "blocked"
     assert result.verdict == "blocked"
     assert result.failed == 0
@@ -308,6 +322,26 @@ def test_ssh_docker_adapter_reports_remote_container_failure():
     assert result.exit_code == 124
     assert result.reset_status == "homed"
     assert "timed out" in result.logs
+
+
+def test_ssh_adapter_blocks_capability_version_mismatch_before_network():
+    client = SshDockerExecutionClient(
+        host="ifarlab",
+        remote_dir="~/stlc_runs",
+        image="ros2-exec-harness:0.3.2",
+        capability_contract=_approved_capability_contract(),
+        password="",
+    )
+
+    async def unexpected_network(*_args, **_kwargs):
+        raise AssertionError("network must not be used after a capability version mismatch")
+
+    client._run_command = unexpected_network
+    with pytest.raises(ValueError, match="capability version"):
+        asyncio.run(client.submit(ExecutionRequest(
+            test_code="def test_robot():\n    assert True\n",
+            metadata={"capability_sha256": "stale-contract"},
+        )))
 
 
 def test_pipeline_ssh_docker_sends_generated_test_codes(monkeypatch):

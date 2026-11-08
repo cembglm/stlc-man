@@ -19,6 +19,7 @@ import EnvironmentSetupForm from './processes/EnvironmentSetupForm';
 import ApiSettingsModal from './ApiSettingsModal';
 import PipelineFileSelector from './PipelineFileSelector';
 import GlobalAIConfig from './GlobalAIConfig';
+import { toast } from '../utils/notifications';
 import TestExecutionMethodSelector from './TestExecutionMethodSelector';
 import PipelineResultsPanel from './PipelineResultsPanel';
 
@@ -57,8 +58,12 @@ export default function TabPanel({
   selectedFileIds,
   setSelectedFileIds,
   onGeneratePrompt,
-  pipelineModel = 'qwen2.5-7b-instruct-1m',
+  pipelineModel = '',
   onPipelineModelChange,
+  pipelineProvider = 'lm_studio',
+  onPipelineProviderChange,
+  pipelineStepAIConfigs = {},
+  onPipelineStepAIConfigChange,
   testExecutionMethod = 'ai',
   onTestExecutionMethodChange,
   dockerAvailable = false,
@@ -390,7 +395,7 @@ export default function TabPanel({
       // TestCaseOptimizationForm'un processPrompt state'ini güncelle
       setTestCaseOptimizationFormState(prev => ({ ...prev, prompt: tempPrompt }));
       setEditingPrompt(null);
-      alert('Test Case Optimization prompt saved for this session.');
+      toast.success('Test Case Optimization prompt saved for this session.');
       return;
     }
     
@@ -400,7 +405,7 @@ export default function TabPanel({
       isTemporary: true
     });
     setEditingPrompt(null);
-    alert('Prompt saved locally. This will be used only for this session.');
+    toast.success('Prompt saved locally for this session.');
   };
   
   const handleBackToBasePrompt = async (processId) => {
@@ -438,7 +443,7 @@ Important:
       
       setTestCaseOptimizationFormState(prev => ({ ...prev, prompt: defaultPrompt }));
       setEditingPrompt(null);
-      alert('Restored to default Test Case Optimization prompt.');
+      toast.info('Restored the default Test Case Optimization prompt.');
       return;
     }
     
@@ -465,7 +470,7 @@ Important:
         const data = await response.json();
         setTempPrompt(data.prompt_text || data.base_prompt);
       } catch (error) {
-        alert('Base prompt alınamadı: ' + error.message);
+        toast.error(`Base prompt could not be loaded: ${error.message}`);
       }
       return;
     }
@@ -479,7 +484,7 @@ Important:
       const data = await response.json();
       setTempPrompt(data.prompt);
     } catch (error) {
-      alert('Base prompt alınamadı: ' + error.message);
+      toast.error(`Base prompt could not be loaded: ${error.message}`);
     }
   };
 
@@ -616,14 +621,14 @@ Important:
                             // Eğer zaten bir Source Code seçilmişse
                             const hasSourceCode = selectedFiles.some(f => f.type === 'Source Code');
                             if (hasSourceCode) {
-                              window.alert('Bu süreç için zaten Source Code seçilmiş. UML ve Source Code aynı anda seçilemez.');
+                              toast.warning('UML and Source Code cannot be selected together for this step.');
                               return;
                             }
                           } else if (fileType === 'Source Code') {
                             // Eğer zaten bir UML seçilmişse
                             const hasUML = selectedFiles.some(f => f.type === 'UML');
                             if (hasUML) {
-                              window.alert('Bu süreç için zaten UML seçilmiş. UML ve Source Code aynı anda seçilemez.');
+                              toast.warning('UML and Source Code cannot be selected together for this step.');
                               return;
                             }
                           }
@@ -902,7 +907,7 @@ Important:
                     onClick={() => {
                       // Eğer herhangi bir process çalışıyorsa ve aktif tab o değilse, geçişe izin verme
                       if (anyProcessRunning && tab.id !== activeTab && isCurrentTabRunning) {
-                        alert('Bir süreç çalışırken başka bir taba geçemezsiniz.');
+                        toast.warning('Wait for the running step to finish before changing tabs.');
                         return;
                       }
                       setActiveTab(tab.id);
@@ -985,8 +990,14 @@ Important:
 
                 {/* Global AI Model — single dropdown, applied to every step */}
                 <GlobalAIConfig
+                  selectedProvider={pipelineProvider}
+                  onProviderChange={onPipelineProviderChange}
                   selectedModel={pipelineModel}
                   onModelChange={onPipelineModelChange}
+                  processes={processes}
+                  selectedProcesses={selectedProcesses}
+                  stepConfigs={pipelineStepAIConfigs}
+                  onStepConfigChange={onPipelineStepAIConfigChange}
                 />
 
                 {/* Test Execution Method — AI / Docker / Robot Simulation */}
@@ -1130,7 +1141,7 @@ Important:
                     
                     // File validation for other processes
                     if (relevantFiles.length === 0) {
-                      window.alert('Please select files for this process');
+                      toast.warning('Select files for this step before running it.');
                       return;
                     }
                     

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { toast } from 'react-hot-toast';
+import { toast } from '../../utils/notifications';
 import PropTypes from 'prop-types';
 
 export default function TestCaseGenerationForm({ onRun, process, sessionId }) {

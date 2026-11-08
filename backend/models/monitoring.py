@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class MonitoringEventType(str, Enum):
     PIPELINE_STARTED = "pipeline.started"
+    PIPELINE_PROGRESS = "pipeline.progress"
     PIPELINE_COMPLETED = "pipeline.completed"
     PIPELINE_FAILED = "pipeline.failed"
     MODULE_STARTED = "module.started"
@@ -23,11 +24,17 @@ class MonitoringEventType(str, Enum):
 
 class MonitoringModule(str, Enum):
     ARTIFACT_INGESTION = "artifact_ingestion"
+    CODE_REVIEW = "code_review"
+    REQUIREMENT_ANALYSIS = "requirement_analysis"
+    TEST_PLANNING = "test_planning"
     ENVIRONMENT_SETUP = "environment_setup"
     SCENARIO_GENERATION = "scenario_generation"
     TEST_CASE_GENERATION = "test_case_generation"
+    TEST_CASE_OPTIMIZATION = "test_case_optimization"
     TEST_CODE_GENERATION = "test_code_generation"
     TEST_EXECUTION = "test_execution"
+    TEST_REPORTING = "test_reporting"
+    TEST_CLOSURE = "test_closure"
 
 
 class MonitoringError(BaseModel):

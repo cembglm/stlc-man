@@ -4,12 +4,13 @@
     "title": "IFARLAB UR10e (sim) capabilities for STLC Manager test generation",
     "status": "DRAFT - requires manual approval (see approval block)",
     "generated_at": "2026-09-29",
-    "generated_from": "static read of ros2-exec-harness:0.2.0 + IFARLAB config files + live param dump of the /sim stack (hil_test_whole_unified.launch.py digital_twin:=true use_fake_hardware:=true) taken 2026-09-29",
+    "updated_at": "2026-11-04",
+    "generated_from": "static read of ros2-exec-harness:0.2.0 + IFARLAB config files + live param dump of the /sim stack (hil_test_whole_unified.launch.py digital_twin:=true use_fake_hardware:=true) taken 2026-09-29; updated 2026-11-04: the persistent stack is now ifarlab_digital_twin.launch.py (simulation only: Gazebo + /sim controllers + /sim MoveIt, no real-robot or fake-hardware nodes). Its /sim side is copied from hil_test_whole_unified.launch.py; verified on 2026-11-04 with the same /sim nodes, the same 5 active controllers, harness reset, a motion script and STLC tests run through ros2-exec-harness:0.3.2",
     "approval": {
-      "approved": true,
-      "approved_by": "Cem Süha Yılmaz",
-      "approved_at": "2026-09-29",
-      "notes": "Approved for use in STLC Manager test generation. The file is pinned to a specific image and source hashes; if any hash changes, the file must be regenerated and re-approved."
+      "approved": false,
+      "approved_by": null,
+      "approved_at": null,
+      "notes": null
     },
     "evidence_legend": {
       "code": "read from the Python source inside the image",
@@ -31,7 +32,8 @@
         "sim_ifarlab_moveit_config/config/whole_cell_sim.srdf": "637995e1a4129f37be6ff249ba7574003f02b34cf44f3ec31f19c797090d301c",
         "sim_ifarlab_moveit_config/config/moveit_controllers.yaml": "d4887646848e1c7c00ea04721817ec10176e76bb3405994453c2f6ad020024de",
         "sim_ifarlab_moveit_config/config/ompl_planning.yaml": "9f0ed0e5e983673f7969f7ad5d5be5fc00a777de091df9182134f0e5619c4f27",
-        "my_robot_cell_control/config/whole_cell_sim_controllers.yaml": "27bef7a159b2e9d8e95c34939a0f07557ec80d72afb5648364c3fcacf885f1fc"
+        "my_robot_cell_control/config/whole_cell_sim_controllers.yaml": "27bef7a159b2e9d8e95c34939a0f07557ec80d72afb5648364c3fcacf885f1fc",
+        "my_robot_cell_control/launch/ifarlab_digital_twin.launch.py": "2d156a5b8f80a8adbd17587baed1ede8693b9b3343ae6adb2386f363fba01f09"
       },
       "rule": "If any hash no longer matches, this file is stale and must be regenerated and re-approved."
     }
@@ -82,6 +84,8 @@
     "evidence": "config (live /sim param dump) + code (robots/ur.py)",
     "robot": "Universal Robots UR10e mounted on a 1-axis linear rail (prismatic joint) - 7 DOF total, simulated in Gazebo Harmonic",
     "ros_namespace": "/sim",
+    "only_sim_interfaces_exist": "Only /sim topics, services and actions exist (plus Gazebo bridge infrastructure). There are no non-namespaced robot interfaces: no real or fake-hardware move_group, controller_manager, joint_states or compute_fk/compute_ik. Generated code must use /sim only.",
+    "ros_domain": "The twin and the harness container share a ROS_DOMAIN_ID set by IFARLAB (the default 0 for a single twin). Generated code must not set or change ROS_DOMAIN_ID or GZ_PARTITION.",
     "moveit_config_package": "sim_ifarlab_moveit_config (use_gripper:=false, use_vacuum_gripper:=false)",
     "planning_group": "sim_ur10e",
     "planning_frame": "world",
@@ -111,7 +115,7 @@
     },
     "end_effector_tooling": "NONE in this configuration: no gripper, no vacuum. A SICK camera and a cable channel are mounted as fixed links on the flange (collision only, no API).",
     "other_robots_in_same_scene": "Kawasaki RS005L on an AGV (group sim_kawasaki) shares the /sim planning scene. It is an obstacle for the UR10e; it is NOT controllable through the allowed API.",
-    "persistent_stack_required": "ros2 launch my_robot_cell_control hil_test_whole_unified.launch.py digital_twin:=true use_fake_hardware:=true must be running on IFARLAB; if it is not, every motion call warns 'not yet available' and returns without moving."
+    "persistent_stack_required": "ros2 launch my_robot_cell_control ifarlab_digital_twin.launch.py must be running on IFARLAB (it starts only the simulation: Gazebo, the /sim controllers and the /sim move_group). If it is not running, every motion call warns 'not yet available' and returns without moving."
   },
   "api": {
     "principle": "Closed world. Only the imports, classes, methods and attributes listed here exist. Anything not listed must be treated as nonexistent.",
@@ -311,7 +315,7 @@
         "configuration"
       ],
       "exists_but_do_not_use": {
-        "moveit2.compute_fk / compute_ik / *_async": "Calls the NON-namespaced /compute_fk and /compute_ik, i.e. the other (real/fake-hardware) move_group with different joint names. Measured: 'Service compute_fk is not yet available' from the container.",
+        "moveit2.compute_fk / compute_ik / *_async": "Calls the NON-namespaced /compute_fk and /compute_ik. ifarlab_digital_twin.launch.py starts no non-namespaced move_group, so these services never appear and the calls fail ('Service compute_fk is not yet available'). Under the old hil_test_whole_unified stack they reached the fake-hardware move_group with different joint names.",
         "pymoveit2_sim.MoveIt2Gripper / GripperInterface / GripperCommand": "No gripper in this configuration (use_gripper:=false).",
         "pymoveit2_sim.MoveIt2Servo": "No servo_node is running.",
         "pymoveit2_real / pymoveit2_kawasaki_real": "Drive REAL hardware. Never import in STLC tests.",

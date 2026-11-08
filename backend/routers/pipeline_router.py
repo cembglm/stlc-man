@@ -31,6 +31,7 @@ from pipeline.pipeline_models import (
 )
 from pipeline.step_adapters import execute_step
 from services.monitoring_event_service import monitoring_event_service
+from services.model_provider_service import model_provider_context, normalize_provider
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +48,17 @@ _pipeline_states: Dict[str, Dict[str, Any]] = {}
 _stop_events: Dict[str, asyncio.Event] = {}
 
 _MONITORING_MODULES = {
+    "code-review": "code_review",
+    "requirement-analysis": "requirement_analysis",
+    "test-planning": "test_planning",
     "environment-setup": "environment_setup",
     "test-scenario-generation": "scenario_generation",
     "test-case-generation": "test_case_generation",
+    "test-case-optimization": "test_case_optimization",
     "test-code-generation": "test_code_generation",
     "test-execution": "test_execution",
+    "test-reporting": "test_reporting",
+    "test-closure": "test_closure",
 }
 
 
@@ -69,6 +76,25 @@ def _result_metrics(step_id: str, result: StepResult) -> Dict[str, Any]:
     elif step_id == "test-code-generation":
         tests = output.get("generated_tests") or output.get("test_cases") or []
         metrics["generated_test_count"] = len(tests) if isinstance(tests, list) else 0
+    elif step_id == "test-execution":
+        summary = output.get("summary") or {}
+        metrics.update({
+            "total": int(summary.get("total", 0)),
+            "passed": int(summary.get("successful", summary.get("passed", 0))),
+            "failed": int(summary.get("failed", 0)),
+        })
+    elif step_id == "test-case-optimization":
+        data = output.get("data")
+        if isinstance(data, list):
+            metrics["selected_test_count"] = len(data)
+        elif isinstance(data, dict):
+            selected = data.get("selected_test_cases") or data.get("selected_tests") or []
+            if isinstance(selected, list):
+                metrics["selected_test_count"] = len(selected)
+    elif step_id == "test-reporting":
+        metrics["report_generated"] = bool(output.get("report_session_id"))
+    elif step_id == "test-closure":
+        metrics["closure_generated"] = bool(output.get("closure_session_id"))
     return metrics
 
 
@@ -150,17 +176,31 @@ async def _run_pipeline_background(
         })
         logger.info(f"[Pipeline] Starting step: {step_id}")
         module = _MONITORING_MODULES.get(step_id)
+        step_cfg = req.step_configs.get(step_id)
+        step_provider = normalize_provider(
+            getattr(step_cfg, "provider", None) or req.global_provider
+        )
+        step_model = (
+            getattr(step_cfg, "model", None)
+            or req.provider_models.get(step_provider)
+            or (req.global_model if step_provider == normalize_provider(req.global_provider) else None)
+        )
         step_started = time.monotonic()
         if module:
             await monitoring_event_service.emit_safely(
                 "module.started", session_id=req.session_id, process_title=req.process_title,
                 module=module, status="running",
-                progress=(state["steps_completed"] / max(len(ordered_steps), 1)) * 100,
-                metadata={"step_id": step_id, "model": req.global_model},
+                progress=0,
+                metadata={
+                    "step_id": step_id,
+                    "provider": step_provider,
+                    "model": step_model,
+                },
             )
 
         try:
-            result: StepResult = await execute_step(step_id, req, previous_results)
+            with model_provider_context(step_provider):
+                result: StepResult = await execute_step(step_id, req, previous_results)
         except Exception as exc:
             logger.error(f"[Pipeline] Unhandled exception in step {step_id}: {exc}", exc_info=True)
             result = StepResult(
@@ -187,8 +227,19 @@ async def _run_pipeline_background(
                     "module.completed", session_id=req.session_id, process_title=req.process_title,
                     module=module, status="completed", progress=100,
                     duration_ms=int((time.monotonic() - step_started) * 1000),
-                    metrics=_result_metrics(step_id, result), metadata={"step_id": step_id},
+                    metrics=_result_metrics(step_id, result),
+                    metadata={
+                        "step_id": step_id,
+                        "provider": step_provider,
+                        "model": step_model,
+                    },
                 )
+            await monitoring_event_service.emit_safely(
+                "pipeline.progress", session_id=req.session_id, process_title=req.process_title,
+                status="running",
+                progress=(state["steps_completed"] / max(len(ordered_steps), 1)) * 100,
+                metadata={"completed_step": step_id, "steps_total": len(ordered_steps)},
+            )
         else:
             # Step failed – stop the pipeline
             _push_event(state, "step_failed", {

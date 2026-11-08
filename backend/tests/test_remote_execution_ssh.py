@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 import sys
 
@@ -8,6 +9,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 import routers.remote_execution_router as remote_router  # noqa: E402
+import services.execution_client as execution_module  # noqa: E402
 from services.execution_client import (  # noqa: E402
     ExecutionRequest,
     ExecutionResult,
@@ -15,22 +17,39 @@ from services.execution_client import (  # noqa: E402
 )
 
 
+def _approved_capability_contract():
+    contract = json.loads((BACKEND_DIR.parent / "robot_capabilities.json").read_text(encoding="utf-8"))
+    contract["meta"]["approval"] = {
+        "approved": True,
+        "approved_by": "test-suite",
+        "approved_at": "2026-11-07",
+        "notes": "Test fixture only.",
+    }
+    return contract
+
+
 def test_password_configuration_uses_noninteractive_password_transport(monkeypatch):
     client = SshDockerExecutionClient(
         host="ifarlab",
         remote_dir="~/stlc_runs",
         image="ros2-exec-harness:0.3.2",
+        capability_contract=_approved_capability_contract(),
         password="configured-secret",
         timeout_seconds=60,
         connect_timeout_seconds=5,
     )
     captured = {}
 
-    def fake_password_submit(request, execution_id, filename, remote_file, started_at, checksum):
+    def fake_password_submit(
+        request, execution_id, filename, remote_file, started_at, checksum,
+        validation_report, capability_info,
+    ):
         captured.update({
             "request": request,
             "filename": filename,
             "remote_file": remote_file,
+            "validation_report": validation_report,
+            "capability_info": capability_info,
         })
         return ExecutionResult(
             execution_id=execution_id,
@@ -40,6 +59,10 @@ def test_password_configuration_uses_noninteractive_password_transport(monkeypat
         )
 
     monkeypatch.setattr(client, "_submit_with_password", fake_password_submit)
+    async def run_inline(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(execution_module.asyncio, "to_thread", run_inline)
     result = asyncio.run(client.submit(ExecutionRequest(
         test_code="print('remote')",
         language="python",
@@ -105,12 +128,10 @@ def test_remote_execution_endpoint_runs_all_selected_files(monkeypatch):
     assert response["results"][0]["artifacts"][0]["remote_path"].endswith("TC-1.py")
 
 
-def test_pytest_framework_uses_harness_python_entrypoint():
-    request = ExecutionRequest(test_code="def test_ok(): assert True", framework="pytest")
-
-    assert SshDockerExecutionClient._runner_command(request) == [
-        "python3", "/harness_ws/generated_script.py"
-    ]
+def test_pool_runner_path_is_shell_safe():
+    assert SshDockerExecutionClient._shell_path(
+        "~/colcon_ws/src/docker_harness/twins/run_test.sh"
+    ) == '"$HOME/colcon_ws/src/docker_harness/twins/run_test.sh"'
 
 
 def test_harness_exit_codes_have_distinct_test_verdicts():
@@ -120,6 +141,8 @@ def test_harness_exit_codes_have_distinct_test_verdicts():
         2: ("error", "error", 0, 0, 1, 0, 0),
         5: ("not_executed", "not_executed", 0, 0, 0, 0, 1),
         124: ("blocked", "blocked", 0, 0, 0, 1, 0),
+        3: ("infrastructure_error", "infrastructure_error", 0, 0, 1, 0, 0),
+        64: ("infrastructure_error", "infrastructure_error", 0, 0, 1, 0, 0),
     }
 
     for exit_code, values in expected.items():
@@ -133,6 +156,19 @@ def test_harness_exit_codes_have_distinct_test_verdicts():
             result["blocked"],
             result["not_executed"],
         ) == values
+
+
+def test_runner_metadata_is_parsed_from_harness_header():
+    metadata = SshDockerExecutionClient._runner_metadata(
+        "[harness] twin=7 domain=17 container=stlc-twin7-exec-abc "
+        "log=/home/ifarlab/stlc_runs/logs/exec-abc.twin7.log\n"
+    )
+    assert metadata == {
+        "twin_id": 7,
+        "ros_domain_id": 17,
+        "container_name": "stlc-twin7-exec-abc",
+        "remote_log": "/home/ifarlab/stlc_runs/logs/exec-abc.twin7.log",
+    }
 
 
 def test_remote_execution_does_not_submit_generation_oracle_rejections(monkeypatch):

@@ -50,6 +50,16 @@ class Settings:
     model_api_base_url: str
     model_identifier: str
     model_api_key: Optional[str]
+    default_model_provider: str
+    lm_studio_base_url: str
+    lm_studio_api_key: Optional[str]
+    lm_studio_timeout_seconds: int
+    lm_studio_max_concurrency: int
+    colibri_base_url: str
+    colibri_api_key: Optional[str]
+    colibri_model_identifier: Optional[str]
+    colibri_timeout_seconds: int
+    colibri_max_concurrency: int
     cors_origins: List[str]
     api_auth_enabled: bool
     app_api_key: Optional[str]
@@ -60,7 +70,10 @@ class Settings:
     execution_adapter: str
     ssh_execution_host: Optional[str]
     ssh_execution_remote_dir: str
+    ssh_execution_runner: str
     ssh_execution_image: str
+    ssh_execution_capability_file: Path
+    ssh_execution_max_concurrency: int
     ssh_execution_identity_file: Optional[Path]
     ssh_execution_password: Optional[str]
     ssh_execution_connect_timeout_seconds: int
@@ -85,6 +98,25 @@ class Settings:
                 "Wildcard CORS is not allowed while API authentication is enabled"
             )
 
+        max_ssh_concurrency = _as_int("SSH_EXECUTION_MAX_CONCURRENCY", 16)
+        if max_ssh_concurrency < 1 or max_ssh_concurrency > 50:
+            raise ValueError("SSH_EXECUTION_MAX_CONCURRENCY must be between 1 and 50")
+
+        default_model_provider = os.getenv(
+            "DEFAULT_MODEL_PROVIDER", "lm_studio"
+        ).strip().lower()
+        if default_model_provider not in {"lm_studio", "colibri"}:
+            raise ValueError("DEFAULT_MODEL_PROVIDER must be 'lm_studio' or 'colibri'")
+
+        lm_studio_max_concurrency = _as_int("LM_STUDIO_MAX_CONCURRENCY", 4)
+        colibri_max_concurrency = _as_int("COLIBRI_MAX_CONCURRENCY", 1)
+        if lm_studio_max_concurrency < 1:
+            raise ValueError("LM_STUDIO_MAX_CONCURRENCY must be at least 1")
+        if colibri_max_concurrency < 1:
+            raise ValueError("COLIBRI_MAX_CONCURRENCY must be at least 1")
+
+        default_capability_file = Path(__file__).resolve().parents[2] / "robot_capabilities.json"
+
         return cls(
             app_host=os.getenv("APP_HOST", "0.0.0.0"),
             app_port=_as_int("APP_PORT", 8100),
@@ -96,6 +128,23 @@ class Settings:
             model_api_base_url=os.getenv("MODEL_API_BASE_URL", "http://localhost:1234"),
             model_identifier=os.getenv("MODEL_IDENTIFIER", "llama-3.2-3b-instruct"),
             model_api_key=os.getenv("MODEL_API_KEY") or None,
+            default_model_provider=default_model_provider,
+            lm_studio_base_url=os.getenv(
+                "LM_STUDIO_BASE_URL",
+                os.getenv("MODEL_API_BASE_URL", "http://localhost:1234"),
+            ),
+            lm_studio_api_key=(
+                os.getenv("LM_STUDIO_API_KEY")
+                or os.getenv("MODEL_API_KEY")
+                or None
+            ),
+            lm_studio_timeout_seconds=_as_int("LM_STUDIO_TIMEOUT_SECONDS", 600),
+            lm_studio_max_concurrency=lm_studio_max_concurrency,
+            colibri_base_url=os.getenv("COLIBRI_BASE_URL", "http://localhost:8011"),
+            colibri_api_key=os.getenv("COLIBRI_API_KEY") or None,
+            colibri_model_identifier=os.getenv("COLIBRI_MODEL_IDENTIFIER") or None,
+            colibri_timeout_seconds=_as_int("COLIBRI_TIMEOUT_SECONDS", 3600),
+            colibri_max_concurrency=colibri_max_concurrency,
             cors_origins=origins,
             api_auth_enabled=auth_enabled,
             app_api_key=api_key,
@@ -106,7 +155,15 @@ class Settings:
             execution_adapter=os.getenv("EXECUTION_ADAPTER", "http").strip().lower(),
             ssh_execution_host=os.getenv("SSH_EXECUTION_HOST") or None,
             ssh_execution_remote_dir=os.getenv("SSH_EXECUTION_REMOTE_DIR", "~/stlc_runs"),
+            ssh_execution_runner=os.getenv(
+                "SSH_EXECUTION_RUNNER",
+                "~/colcon_ws/src/docker_harness/twins/run_test.sh",
+            ),
             ssh_execution_image=os.getenv("SSH_EXECUTION_IMAGE", "ros2-exec-harness:0.3.2"),
+            ssh_execution_capability_file=Path(
+                os.getenv("SSH_EXECUTION_CAPABILITY_FILE", str(default_capability_file))
+            ),
+            ssh_execution_max_concurrency=max_ssh_concurrency,
             ssh_execution_identity_file=(
                 Path(os.environ["SSH_EXECUTION_IDENTITY_FILE"])
                 if os.getenv("SSH_EXECUTION_IDENTITY_FILE")

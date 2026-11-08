@@ -9,6 +9,14 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any, Optional
 import logging
+import asyncio
+import aiohttp
+
+from services.model_provider_service import (
+    SUPPORTED_MODEL_PROVIDERS,
+    get_provider_config,
+    normalize_provider,
+)
 
 # Merkezi model konfigürasyonunu import et
 from config.models_config import (
@@ -31,6 +39,72 @@ router = APIRouter(
     prefix="/api/models",
     tags=["models"]
 )
+
+
+async def _inspect_provider(provider: str) -> Dict[str, Any]:
+    config = get_provider_config(provider)
+    headers = {"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
+    result: Dict[str, Any] = {
+        "id": config.name,
+        "label": config.label,
+        "base_url": config.base_url,
+        "configured": bool(config.base_url),
+        "connected": False,
+        "models": [],
+        "default_model": config.default_model,
+        "timeout_seconds": config.timeout_seconds,
+        "max_concurrency": config.max_concurrency,
+        "error": None,
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+            async with session.get(f"{config.api_url}/models") as response:
+                if response.status != 200:
+                    body = await response.text()
+                    raise RuntimeError(f"HTTP {response.status}: {body[:160]}")
+                payload = await response.json()
+                result["models"] = [
+                    {
+                        "id": item.get("id"),
+                        "context_length": (
+                            item.get("context_length")
+                            or item.get("max_context_length")
+                            or item.get("max_model_len")
+                            or item.get("n_ctx")
+                        ),
+                    }
+                    for item in payload.get("data", [])
+                    if item.get("id")
+                ]
+                result["connected"] = True
+                if not result["default_model"] and result["models"]:
+                    result["default_model"] = result["models"][0]["id"]
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, RuntimeError) as exc:
+        result["error"] = str(exc)
+    return result
+
+
+@router.get("/providers")
+async def get_model_providers():
+    """Discover configured LM Studio and Colibri instances and loaded models."""
+    providers = await asyncio.gather(
+        *(_inspect_provider(provider) for provider in SUPPORTED_MODEL_PROVIDERS)
+    )
+    return {
+        "success": True,
+        "default_provider": get_provider_config().name,
+        "providers": providers,
+    }
+
+
+@router.get("/providers/{provider}")
+async def get_model_provider(provider: str):
+    try:
+        normalized = normalize_provider(provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"success": True, "provider": await _inspect_provider(normalized)}
 
 @router.get("/")
 async def get_all_models(

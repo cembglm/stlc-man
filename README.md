@@ -442,6 +442,33 @@ GET http://localhost:8001/providers/status
 
 ## Configuration
 
+### LM Studio and Colibri providers
+
+The pipeline supports LM Studio and Colibri as separate OpenAI-compatible local
+providers. The Pipeline screen discovers loaded models from each provider and
+allows a global provider/model plus a provider/model override for every STLC
+step. A step set to **Use global** inherits the global selection.
+
+For Docker Compose, run LM Studio on port `1234` and Colibri on port `8011` on
+the host, then configure `.env`:
+
+```env
+DEFAULT_MODEL_PROVIDER=lm_studio
+LM_STUDIO_BASE_URL=http://host.docker.internal:1234
+LM_STUDIO_TIMEOUT_SECONDS=600
+LM_STUDIO_MAX_CONCURRENCY=4
+
+COLIBRI_BASE_URL=http://host.docker.internal:8011
+COLIBRI_API_KEY=
+COLIBRI_TIMEOUT_SECONDS=3600
+COLIBRI_MAX_CONCURRENCY=1
+```
+
+When the backend runs directly on Windows, replace `host.docker.internal` with
+`127.0.0.1`. Colibri authentication is sent as a Bearer token when
+`COLIBRI_API_KEY` is set. Keep concurrency at `1` unless the Colibri server was
+started with enough KV slots and host RAM for parallel generations.
+
 Primary backend configuration values:
 
 | Variable | Default | Purpose |
@@ -899,40 +926,53 @@ EXECUTION_ADAPTER=ssh_docker
 SSH_EXECUTION_HOST=ifarlab
 SSH_EXECUTION_REMOTE_DIR=~/stlc_runs
 SSH_EXECUTION_IMAGE=ros2-exec-harness:0.3.2
+SSH_EXECUTION_RUNNER=~/colcon_ws/src/docker_harness/twins/run_test.sh
+SSH_EXECUTION_CAPABILITY_FILE=C:\\path\\to\\STLC-Manager\\robot_capabilities.json
+SSH_EXECUTION_MAX_CONCURRENCY=16
 SSH_EXECUTION_IDENTITY_FILE=C:\\Users\\matisse\\.ssh\\id_ed25519_ifarlab
 # Optional fallback when unattended key authentication is unavailable.
 SSH_EXECUTION_PASSWORD=
 EXECUTION_TIMEOUT_SECONDS=300
 ```
 
-This adapter performs a read-only target preflight, transfers each generated
-Python test with SCP, and invokes the harness over SSH using `--network host`,
-`--ipc=host`, and `FASTDDS_BUILTIN_TRANSPORTS=UDPv4`. The uploaded script is
-mounted read-only and remote execution is bounded by the harness itself. OpenSSH host
-keys must already be trusted. When the backend itself runs in Docker, mount the
+This adapter validates each generated Python test against the approved capability
+contract immediately before dispatch, performs a read-only target preflight,
+transfers the test with SCP, and invokes IFARLAB's `run_test.sh`. The runner selects
+and locks a healthy twin, supplies its ROS domain to the harness container, records
+the remote log, and owns the timeout and robot reset. STLC never selects a twin or
+sets `ROS_DOMAIN_ID`/`GZ_PARTITION`. OpenSSH host keys must already be trusted. The
+CLI transport uses `ServerAliveInterval=30` and `ServerAliveCountMax=4`. When the
+backend itself runs in Docker, mount the
 SSH config, private key, and `known_hosts` read-only into the `stlc` user's home
 and set `SSH_EXECUTION_IDENTITY_FILE` to that in-container key path.
 If a password is required, keep `SSH_EXECUTION_PASSWORD` only in the untracked
 server `.env`; it is never returned to the frontend or monitoring events.
 
-Remote tests follow a single-file contract: newly generated code may import
-public APIs from installed packages, but may not import package `examples/`
-scripts, relative sibling files, or `sim_robot_goal`. Required helper/controller
-classes must be included in the generated test file. Test-code generation
-validates this contract, attempts one automatic correction, and rejects
-remaining violations before uploading code to IFARLAB.
+Remote tests follow a single-file, closed-world contract. Imports and robot APIs
+must be explicitly declared by the approved `robot_capabilities.json`; relative
+imports, undeclared APIs, robot mocks, unbounded loops, and changes to twin-isolation
+environment variables are rejected. Test-code generation validates this contract,
+attempts one automatic correction, and the SSH adapter repeats the deterministic
+validation immediately before SCP. Any validation error prevents upload.
+The same gate is available for operators as
+`python validate_generated.py <generated.py> --caps robot_capabilities.json`;
+exit code 0 is required before dispatch.
 
 For previously generated records, `ros2-exec-harness:0.2.0` and newer retain a
 compatibility export for `sim_robot_goal`; the SSH execution adapter permits
-that import only for those compatible image versions. Files submitted from the
-Test Execution remote panel are passed to the harness as `python3 <file>.py`.
-The 0.3.x entrypoint detects test functions and runs pytest itself, ensuring its
-timeout and post-test robot reset always remain active.
+that import only for those compatible image versions and only when the active
+capability contract declares it. Files submitted from the Test Execution remote
+panel are passed to `run_test.sh <file>.py`; the pool runner then invokes the
+0.3.x harness entrypoint so its timeout and post-test robot reset remain active.
 The current IFARLAB runner image is `ros2-exec-harness:0.3.2`. It owns the
 per-test runtime limit and returns pytest-compatible exit codes: 0 passed, 1
 failed, 2 collection/import error, 5 no tests collected, and 124 harness timeout.
-STLC does not wrap the remote `docker run` call in another timeout. Result data
-also exposes the final `[harness] reset: status=...` value when present.
+STLC does not wrap the remote runner call in another timeout. Result data exposes
+the selected twin, ROS domain, container name, IFARLAB log path, validation report,
+and final `[harness] reset: status=...` value when present. Exit codes 3 and 64 are
+classified as infrastructure errors rather than product-test failures. Pipeline
+and remote-panel dispatch use a configurable semaphore, defaulting to 16 concurrent
+SSH calls.
 
 Robot-focused generation can also receive a separate `robot_capabilities.json`
 from the Test Code Generation form. The contract must contain `schema_version`,
@@ -985,11 +1025,13 @@ fanned out to live subscribers inside the backend process.
 - Filters: `process_id`, `process_title`, `session_id`, `job_id`,
   `execution_id`, `module`, `event_type`, `status`, and `since`
 
-The event taxonomy is `pipeline.started|completed|failed`,
+The event taxonomy is `pipeline.started|progress|completed|failed`,
 `module.started|progress|completed|failed`, and
 `execution.submitted|started|completed|failed`. Module values are
-`artifact_ingestion`, `environment_setup`, `scenario_generation`,
-`test_case_generation`, `test_code_generation`, and `test_execution`.
+`artifact_ingestion`, `code_review`, `requirement_analysis`, `test_planning`,
+`environment_setup`, `scenario_generation`, `test_case_generation`,
+`test_case_optimization`, `test_code_generation`, `test_execution`,
+`test_reporting`, and `test_closure`.
 Events contain correlation IDs, status/progress, duration, small metrics and
 sanitized metadata; generated code, prompts, artifacts, and credentials are
 excluded.
@@ -1007,6 +1049,8 @@ curl -N -H "Authorization: Bearer $APP_API_KEY" \
 `MONITORING_EVENT_RETENTION_DAYS` controls the MongoDB TTL (30 by default, 0
 disables expiry). SSE fan-out and asynchronous jobs are process-local: use one
 worker for ordered live delivery, and reconstruct state from REST history after
-a restart or reconnect. MongoDB history remains authoritative across restarts.
+a restart or reconnect. The SSE endpoint sends a comment heartbeat every 15
+seconds while idle so reverse proxies do not mistake a quiet workflow for a
+dead connection. MongoDB history remains authoritative across restarts.
 Any monitoring consumer is deployed independently; none is required to build,
 start, or operate STLC Manager.

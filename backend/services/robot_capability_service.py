@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -14,6 +15,18 @@ MAX_CAPABILITY_BYTES = 2 * 1024 * 1024
 
 class RobotCapabilityError(ValueError):
     """Raised when a robot capability document is missing required safety data."""
+
+
+def load_robot_capability_file(path: Path) -> Tuple[Dict[str, Any], bytes]:
+    """Load an approved capability contract from the configured canonical file."""
+    capability_path = Path(path)
+    try:
+        raw = capability_path.read_bytes()
+    except OSError as exc:
+        raise RobotCapabilityError(
+            f"Robot capability contract could not be read from {capability_path}: {exc}"
+        ) from exc
+    return parse_robot_capability_json(raw, capability_path.name), raw
 
 
 def parse_robot_capability_json(raw: bytes, filename: str = "robot_capabilities.json") -> Dict[str, Any]:
@@ -52,7 +65,14 @@ def parse_robot_capability_json(raw: bytes, filename: str = "robot_capabilities.
 def capability_descriptor(contract: Dict[str, Any], raw: Optional[bytes] = None) -> Dict[str, Any]:
     meta = contract.get("meta", {})
     image = meta.get("pinned_sources", {}).get("image", {})
-    encoded = raw if raw is not None else json.dumps(contract, sort_keys=True).encode("utf-8")
+    # Hash the semantic JSON rather than its whitespace/line-ending representation so
+    # generation and dispatch calculate the same version identifier on every platform.
+    encoded = json.dumps(
+        contract,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
     return {
         "schema_version": contract.get("schema_version"),
         "title": meta.get("title"),
@@ -184,6 +204,34 @@ def _inside_pytest_raises(node: ast.AST, parent: Dict[ast.AST, ast.AST]) -> bool
     return False
 
 
+def _call_name(call: ast.Call) -> str:
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return ""
+
+
+def _allowed_import_catalog(contract: Dict[str, Any]) -> Tuple[Set[str], Dict[str, Set[str]]]:
+    allowed_roots: Set[str] = set()
+    allowed_from: Dict[str, Set[str]] = {}
+    for statement in contract.get("api", {}).get("allowed_imports", []):
+        import_match = re.fullmatch(r"import\s+([\w.]+)", statement.strip())
+        if import_match:
+            allowed_roots.add(import_match.group(1).split(".", 1)[0])
+            continue
+        from_match = re.fullmatch(r"from\s+([\w.]+)\s+import\s+(\w+)", statement.strip())
+        if from_match:
+            module, name = from_match.groups()
+            allowed_from.setdefault(module, set()).add(name)
+    return allowed_roots, allowed_from
+
+
+def _loop_has_exit(node: ast.While) -> bool:
+    return any(isinstance(child, (ast.Break, ast.Return)) for child in ast.walk(node))
+
+
 def validate_generated_code_against_capabilities(
     code: str,
     contract: Dict[str, Any],
@@ -212,6 +260,8 @@ def validate_generated_code_against_capabilities(
                 f"Capability controller '{node.name}' must be imported from the approved runtime; "
                 "redefining or copying the system under test inside the test file is forbidden."
             )
+
+    allowed_import_roots, allowed_from_imports = _allowed_import_catalog(contract)
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
@@ -466,6 +516,72 @@ def validate_generated_code_against_capabilities(
         if isinstance(node, ast.ImportFrom) and node.module == "unittest.mock":
             issues.append("Mocking robot/controller APIs is forbidden by the capability contract.")
 
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".", 1)[0]
+                if root not in allowed_import_roots:
+                    issues.append(
+                        f"Import '{alias.name}' is not declared in capability api.allowed_imports."
+                    )
+
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            root = module.split(".", 1)[0]
+            for alias in node.names:
+                if module in allowed_from_imports:
+                    if alias.name not in allowed_from_imports[module]:
+                        issues.append(
+                            f"Import 'from {module} import {alias.name}' is not declared in "
+                            "capability api.allowed_imports."
+                        )
+                elif root not in allowed_import_roots:
+                    issues.append(
+                        f"Import 'from {module} import {alias.name}' is not declared in "
+                        "capability api.allowed_imports."
+                    )
+
+        if isinstance(node, ast.Call) and _call_name(node) in {"patch", "Mock", "MagicMock"}:
+            issues.append("Mocking robot/controller APIs is forbidden by the capability contract.")
+
+        if isinstance(node, ast.While):
+            endless = (
+                isinstance(node.test, ast.Constant) and node.test.value is True
+            ) or (
+                isinstance(node.test, ast.Call) and _call_name(node.test) == "ok"
+            )
+            if endless and not _loop_has_exit(node):
+                issues.append("Unbounded loop is forbidden; every generated run must terminate.")
+
+        if isinstance(node, ast.Call) and _call_name(node) == "main":
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "pytest"
+            ):
+                for child in ast.walk(node):
+                    if (
+                        isinstance(child, ast.Constant)
+                        and isinstance(child.value, str)
+                        and child.value.startswith("--html")
+                    ):
+                        issues.append("pytest-html is not installed in the IFARLAB harness image.")
+
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if not isinstance(target, ast.Subscript):
+                    continue
+                owner = target.value
+                key = target.slice
+                if (
+                    isinstance(owner, ast.Attribute)
+                    and owner.attr == "environ"
+                    and isinstance(key, ast.Constant)
+                    and key.value in {"ROS_DOMAIN_ID", "GZ_PARTITION"}
+                ):
+                    issues.append(
+                        f"Generated code must not set {key.value}; IFARLAB assigns twin isolation."
+                    )
+
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -497,3 +613,68 @@ def validate_generated_code_against_capabilities(
             issues.append("spin_once() belongs to rclpy, not to the controller/node instance.")
 
     return list(dict.fromkeys(issues))
+
+
+def validate_generated_code_report(
+    code: str,
+    contract: Dict[str, Any],
+) -> Dict[str, List[str]]:
+    """Return the final pre-dispatch validation report for IFARLAB execution."""
+    from utils.standalone_test_validation import validate_standalone_python
+
+    image_tag = (
+        contract.get("meta", {})
+        .get("pinned_sources", {})
+        .get("image", {})
+        .get("tag", "")
+    )
+    from utils.standalone_test_validation import supports_legacy_sim_robot_goal
+
+    errors = validate_standalone_python(
+        code,
+        allow_legacy_sim_robot_goal=supports_legacy_sim_robot_goal(image_tag),
+    )
+    errors.extend(validate_generated_code_against_capabilities(code, contract))
+
+    warnings: List[str] = []
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return {"errors": list(dict.fromkeys(errors)), "warnings": warnings}
+
+    scaling_limit = contract.get("limits", {}).get("scaling", {}).get(
+        "recommended_max_for_tests", 1.0
+    )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            value = _literal_number(node.value)
+            if value is None:
+                continue
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr in {"max_velocity", "max_acceleration"}
+                    and 0 < value <= 1
+                    and value > float(scaling_limit)
+                ):
+                    warnings.append(
+                        f"{target.attr}={value:g} is above recommended_max_for_tests={scaling_limit}."
+                    )
+        if isinstance(node, ast.Call) and _call_name(node) == "sleep" and node.args:
+            duration = _literal_number(node.args[0])
+            if duration is not None and duration > 60:
+                warnings.append(
+                    f"time.sleep({duration:g}) consumes a large part of the harness timeout."
+                )
+
+    if not any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+        for node in ast.walk(tree)
+    ):
+        warnings.append("No test_ function found; the harness will run the file as a plain script.")
+
+    return {
+        "errors": list(dict.fromkeys(errors)),
+        "warnings": list(dict.fromkeys(warnings)),
+    }

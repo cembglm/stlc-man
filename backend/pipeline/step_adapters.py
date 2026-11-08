@@ -33,21 +33,31 @@ logger = logging.getLogger(__name__)
 
 def _get_step_config(req: PipelineRunRequest, step_id: str) -> dict:
     """Return merged config: step-specific overrides on top of global defaults."""
-    from core.settings import get_settings
+    from services.model_provider_service import get_provider_config, normalize_provider
 
     cfg = req.step_configs.get(step_id)
-    base = {
-        "model": req.global_model or get_settings().model_identifier,
-        "api_key": req.global_api_key,
-        "process_title": req.process_title,
-    }
+    override = {}
     if cfg:
         override = (
             cfg.model_dump(exclude_none=True)
             if hasattr(cfg, "model_dump")
             else cfg.dict(exclude_none=True)
         )
-        base.update(override)
+
+    provider = normalize_provider(override.get("provider") or req.global_provider)
+    provider_config = get_provider_config(provider)
+    model = override.get("model") or req.provider_models.get(provider)
+    if not model and provider == normalize_provider(req.global_provider):
+        model = req.global_model
+    model = model or provider_config.default_model
+
+    base = {
+        "model": model,
+        "provider": provider,
+        "api_key": req.global_api_key,
+        "process_title": req.process_title,
+    }
+    base.update(override)
     return base
 
 
@@ -691,6 +701,14 @@ async def run_test_execution(
 
         tcg_data = doc.get("processes", {}).get("test_code_generation", {}).get("output", {})
         generated_tests = tcg_data.get("generated_tests", [])
+        capability_info = (
+            tcg_data.get("capability_contract")
+            or (
+                tcg_data.get("data", {}).get("capability_contract")
+                if isinstance(tcg_data.get("data"), dict)
+                else None
+            )
+        )
 
         if not generated_tests:
             return _err(step_id, "No generated test code found for execution", t0)
@@ -712,37 +730,72 @@ async def run_test_execution(
                 )
 
             remote_timeout = cfg.get("remote_timeout") or 300
-            execution_results = []
-            for test_item in generated_tests:
+            max_concurrency = int(cfg.get("ssh_max_concurrency") or 16)
+            if not 1 <= max_concurrency <= 50:
+                return _err(step_id, "ssh_max_concurrency must be between 1 and 50", t0)
+            semaphore = asyncio.Semaphore(max_concurrency)
+
+            async def execute_remote_item(test_item):
                 code = test_item.get("code") or test_item.get("test_code", "")
                 if not code:
-                    continue
+                    return None
                 test_id = test_item.get("test_case_id", test_item.get("id", "unknown"))
+                eligibility = test_item.get("execution_eligibility", "eligible")
+                if eligibility != "eligible":
+                    return {
+                        "test_id": test_id,
+                        "status": "not_executed",
+                        "verdict": "invalid",
+                        "error": test_item.get("eligibility_reason") or eligibility,
+                    }
                 try:
-                    result = await client.submit(ExecutionRequest(
-                        test_code=code,
-                        language="python",
-                        test_case_id=str(test_id),
-                        session_id=req.session_id,
-                        process_title=cfg.get("process_title") or req.process_title,
-                        metadata={"source": "stlc_pipeline"},
-                        configuration={"timeout_seconds": remote_timeout},
-                    ))
+                    async with semaphore:
+                        result = await client.submit(ExecutionRequest(
+                            test_code=code,
+                            language="python",
+                            test_case_id=str(test_id),
+                            session_id=req.session_id,
+                            process_title=cfg.get("process_title") or req.process_title,
+                            metadata={
+                                "source": "stlc_pipeline",
+                                **(
+                                    {"capability_sha256": capability_info["sha256"]}
+                                    if capability_info and capability_info.get("sha256")
+                                    else {}
+                                ),
+                            },
+                            configuration={"timeout_seconds": remote_timeout},
+                        ))
                     succeeded = result.status == "completed" and result.failed == 0
-                    execution_results.append({
+                    return {
                         "test_id": test_id,
                         "status": "success" if succeeded else "error",
+                        "verdict": result.verdict,
                         "output": result.logs or "",
                         "error": result.error,
                         "execution_id": result.execution_id,
+                        "exit_code": result.exit_code,
+                        "reset_status": result.reset_status,
+                        "twin_id": result.twin_id,
+                        "ros_domain_id": result.ros_domain_id,
+                        "container_name": result.container_name,
+                        "remote_log": result.remote_log,
+                        "validation_report": result.validation_report,
                         "artifacts": result.artifacts,
-                    })
+                    }
                 except Exception as exc:
-                    execution_results.append({
+                    return {
                         "test_id": test_id,
                         "status": "error",
                         "error": str(exc),
-                    })
+                    }
+
+            execution_results = [
+                item for item in await asyncio.gather(*(
+                    execute_remote_item(test_item) for test_item in generated_tests
+                ))
+                if item is not None
+            ]
 
         elif execution_method == "ros2":
             # ---- ROS2 Docker Execution ----

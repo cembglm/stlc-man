@@ -21,6 +21,12 @@ import json
 import time
 import asyncio
 from typing import Dict, Optional
+from services.model_provider_service import (
+    get_current_provider,
+    get_provider_config,
+    normalize_provider,
+    provider_slot,
+)
 
 # Logger ayarları (hataları ve bilgileri takip etmek için)
 logger = logging.getLogger(__name__)
@@ -95,12 +101,14 @@ class LLMClient:
         }
     }
     
-    def __init__(self, model_name=None, api_key=None, use_case=None):
+    def __init__(self, model_name=None, api_key=None, use_case=None, provider=None):
         # Logger'ı en başta tanımla (hata yakalamada kullanılacak)
         self.logger = logging.getLogger("LLMClient")
         
-        base_url = MODEL_API_BASE_URL.rstrip("/")
-        self.api_url = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+        self.provider = normalize_provider(provider or get_current_provider())
+        self.provider_config = get_provider_config(self.provider)
+        self.api_url = self.provider_config.api_url
+        self.timeout_seconds = self.provider_config.timeout_seconds
         # Default model kullan veya parametre olarak verilen modeli al
         self.original_key = model_name  # Original key'i sakla (frontend'den gelen key)
         
@@ -110,17 +118,22 @@ class LLMClient:
         # Local modeller için model identifier'ı al, Gemini için direkt kullan
         if self.is_gemini:
             self.model_name = model_name
+        elif self.provider == "colibri":
+            # Colibri returns the exact loadable model id from /v1/models. Do
+            # not run it through LM Studio's legacy alias mapping.
+            self.model_name = model_name or self.provider_config.default_model or MODEL_IDENTIFIER
         else:
             # Local model için identifier'ı al
             self.model_name = self.get_model_identifier(model_name) if model_name else MODEL_IDENTIFIER
         
-        self.api_key = api_key or MODEL_API_KEY  # Request override, then server configuration
+        self.api_key = api_key or self.provider_config.api_key
         self.use_case = use_case  # 'code_review', 'test_generation', 'test_reporting', etc.
         
         self.logger.info(f"🔧 [LLMClient] Initialized:")
         self.logger.info(f"   - Original key: {self.original_key}")
         self.logger.info(f"   - Model name: {self.model_name}")
         self.logger.info(f"   - Use case: {use_case}")
+        self.logger.info(f"   - Provider: {self.provider}")
         self.logger.info(f"   - Is Gemini: {self.is_gemini}")
         
         self.is_api_based = self.is_gemini  # Şu an sadece Gemini API tabanlı, gelecekte genişletilebilir
@@ -297,6 +310,10 @@ class LLMClient:
     def get_model_identifier(self, model_key):
         """Frontend'den gelen model anahtarına göre gerçek model identifier'ını döndürür"""
         self.logger.info(f"Getting model identifier for key: {model_key}")
+        if self.provider == "colibri":
+            # Colibri model ids are server-defined and may include repository
+            # paths; LM Studio's legacy aliases must never rewrite them.
+            return model_key or self.provider_config.default_model or MODEL_IDENTIFIER
         if not model_key or not isinstance(model_key, str):
             self.logger.warning(f"Invalid model_key: {model_key}, using default model")
             return MODEL_IDENTIFIER  # Default model from config
@@ -407,14 +424,15 @@ class LLMClient:
         target_id = (model_identifier or self.model_name or "").lower()
 
         try:
-            async with aiohttp.ClientSession() as session:
+            headers = self._request_headers()
+            async with aiohttp.ClientSession(headers=headers) as session:
                 async with session.get(
                     f"{self.api_url}/models",
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as response:
                     if response.status != 200:
                         self.logger.warning(
-                            f"LM Studio /v1/models returned status {response.status}, "
+                            f"{self.provider_config.label} /v1/models returned status {response.status}, "
                             f"using default context length {DEFAULT_CONTEXT_LENGTH}"
                         )
                         return DEFAULT_CONTEXT_LENGTH
@@ -435,7 +453,7 @@ class LLMClient:
                             if ctx and isinstance(ctx, (int, float)) and ctx > 0:
                                 ctx_int = int(ctx)
                                 self.logger.info(
-                                    f"✅ Model context length from LM Studio: \"{m.get('id')}\" -> {ctx_int} tokens"
+                                    f"✅ Model context length from {self.provider_config.label}: \"{m.get('id')}\" -> {ctx_int} tokens"
                                 )
                                 return ctx_int
                             # context_length alanı yoksa model specs'e bak
@@ -449,14 +467,14 @@ class LLMClient:
                                 return ctx_int
 
                     self.logger.warning(
-                        f"Context length not found in LM Studio response for model '{target_id}'. "
+                        f"Context length not found in {self.provider_config.label} response for model '{target_id}'. "
                         f"Returning default {DEFAULT_CONTEXT_LENGTH}"
                     )
                     return DEFAULT_CONTEXT_LENGTH
 
         except asyncio.TimeoutError:
             self.logger.warning(
-                f"Timeout querying LM Studio for context length, using default {DEFAULT_CONTEXT_LENGTH}"
+                f"Timeout querying {self.provider_config.label} for context length, using default {DEFAULT_CONTEXT_LENGTH}"
             )
             return DEFAULT_CONTEXT_LENGTH
         except Exception as e:
@@ -528,6 +546,11 @@ class LLMClient:
         ]
         error_lower = error_message.lower()
         return any(keyword in error_lower for keyword in overflow_keywords)
+
+    def _request_headers(self) -> Dict[str, str]:
+        if not self.api_key:
+            return {}
+        return {"Authorization": f"Bearer {self.api_key}"}
     
     async def _generate_with_chunking(
         self, 
@@ -663,9 +686,13 @@ class LLMClient:
             )
             return await self._generate_response_internal(prompt, temperature, max_tokens)
         
-        # LM Studio için context overflow kontrolü
-        # Prompt çok uzunsa, otomatik chunking yap
-        CONTEXT_LIMIT_CHARS = 6000  # ~1500 tokens (4096 limitinde input+output için güvenli)
+        # Determine a prompt budget from the active server's reported context
+        # window. This keeps legacy small models safe while allowing Colibri's
+        # 32K/64K contexts to receive substantially larger inputs intact.
+        context_length = await self.get_model_context_length()
+        reserved_output = min(max_tokens, max(context_length // 3, 1024))
+        input_tokens = max(context_length - reserved_output - 1024, 1500)
+        CONTEXT_LIMIT_CHARS = min(max(input_tokens * 3, 6000), 200000)
         
         if len(prompt) > CONTEXT_LIMIT_CHARS:
             self.logger.warning(f"⚠️ Prompt too long ({len(prompt)} chars > {CONTEXT_LIMIT_CHARS}). Using automatic chunking.")
@@ -699,7 +726,7 @@ class LLMClient:
 
     async def _generate_response_internal(self, prompt, temperature=0.7, max_tokens=8192):
         """Internal method that does the actual API call without chunking"""
-        # LM Studio için - model_name zaten __init__'de identifier'a çevrildi
+        # OpenAI-compatible local provider request.
         actual_model = self.model_name
         
         # LM Studio için doğru mesaj formatı - user role kullanmalıyız
@@ -711,58 +738,59 @@ class LLMClient:
         }
             
         try:
-            self.logger.info(f"📤 [LM Studio] Sending request to model: {actual_model}")
-            self.logger.debug(f"[LM Studio] Request payload: {payload}")
-            self.logger.info(f"[LM Studio] API URL: {self.api_url}/chat/completions")
-            self.logger.info(f"[LM Studio] Prompt length: {len(prompt)} chars")
-            self.logger.info(f"[LM Studio] Temperature: {temperature}, Max tokens: {max_tokens}")
+            label = self.provider_config.label
+            self.logger.info(f"📤 [{label}] Sending request to model: {actual_model}")
+            self.logger.debug(f"[{label}] Request payload: {payload}")
+            self.logger.info(f"[{label}] API URL: {self.api_url}/chat/completions")
+            self.logger.info(f"[{label}] Prompt length: {len(prompt)} chars")
+            self.logger.info(f"[{label}] Temperature: {temperature}, Max tokens: {max_tokens}")
             
-            # Use aiohttp for async requests without timeout for complex operations
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.api_url}/chat/completions",
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=600)  # 10-minute timeout for large models
-                ) as response:
-                    self.logger.info(f"[LM Studio] Response status: {response.status}")
+            headers = self._request_headers()
+            async with provider_slot(self.provider):
+                async with aiohttp.ClientSession(headers=headers) as session:
+                    async with session.post(
+                        f"{self.api_url}/chat/completions",
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
+                    ) as response:
+                        self.logger.info(f"[{label}] Response status: {response.status}")
                     
-                    # Log response body for debugging if error
-                    if response.status != 200:
-                        error_body = await response.text()
-                        self.logger.error(f"❌ [LM Studio] Error response body: {error_body}")
-                        self.logger.error(f"❌ [LM Studio] Request model: {actual_model}")
-                        self.logger.error(f"❌ [LM Studio] Verify model is loaded in LM Studio")
+                        # Log response body for debugging if error
+                        if response.status != 200:
+                            error_body = await response.text()
+                            self.logger.error(f"❌ [{label}] Error response body: {error_body}")
+                            self.logger.error(f"❌ [{label}] Request model: {actual_model}")
+                            self.logger.error(f"❌ [{label}] Verify model is loaded")
                         
-                        # Check if it's a context overflow error before raising
-                        if self._is_context_overflow_error(error_body):
-                            self.logger.warning(f"🚨 Context overflow detected in error response")
+                            if self._is_context_overflow_error(error_body):
+                                self.logger.warning("🚨 Context overflow detected in error response")
                         
-                        raise aiohttp.ClientResponseError(
-                            request_info=response.request_info,
-                            history=response.history,
-                            status=response.status,
-                            message=f"LM Studio error: {error_body[:200]}"
-                        )
+                            raise aiohttp.ClientResponseError(
+                                request_info=response.request_info,
+                                history=response.history,
+                                status=response.status,
+                                message=f"{label} error: {error_body[:200]}"
+                            )
                     
-                    response_json = await response.json()
-                    self.logger.debug(f"[LM Studio] Response JSON keys: {list(response_json.keys())}")
+                        response_json = await response.json()
+                        self.logger.debug(f"[{label}] Response JSON keys: {list(response_json.keys())}")
                     
-                    if "choices" not in response_json or not response_json["choices"]:
-                        self.logger.error(f"❌ [LM Studio] Invalid response format: {response_json}")
-                        raise ValueError("Invalid response format from LM Studio API")
+                        if "choices" not in response_json or not response_json["choices"]:
+                            self.logger.error(f"❌ [{label}] Invalid response format: {response_json}")
+                            raise ValueError(f"Invalid response format from {label} API")
                     
-                    result = response_json["choices"][0]["message"]["content"]
-                    self.logger.info(f"✅ [LM Studio] Successfully generated response (length: {len(result)} chars)")
-                    return result
+                        result = response_json["choices"][0]["message"]["content"]
+                        self.logger.info(f"✅ [{label}] Successfully generated response (length: {len(result)} chars)")
+                        return result
                     
         except asyncio.TimeoutError as e:
-            self.logger.error(f"⏰ [LM Studio] Timeout error with model {actual_model}: {str(e)}")
-            raise TimeoutError(f"LM Studio API request timed out")
+            self.logger.error(f"⏰ [{self.provider_config.label}] Timeout error with model {actual_model}: {str(e)}")
+            raise TimeoutError(f"{self.provider_config.label} API request timed out")
         except aiohttp.ClientError as e:
-            self.logger.error(f"❌ [LM Studio] Client Error with model {actual_model}: {str(e)}")
+            self.logger.error(f"❌ [{self.provider_config.label}] Client Error with model {actual_model}: {str(e)}")
             raise
         except Exception as e:
-            self.logger.error(f"❌ [LM Studio] Unexpected error with model {actual_model}: {str(e)}")
+            self.logger.error(f"❌ [{self.provider_config.label}] Unexpected error with model {actual_model}: {str(e)}")
             raise
 
     def _sanitize_prompt_for_gemini(self, prompt):

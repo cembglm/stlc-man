@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
-import toast from 'react-hot-toast';
+import { toast } from '../utils/notifications';
 import { 
   DocumentIcon,
   DocumentTextIcon,

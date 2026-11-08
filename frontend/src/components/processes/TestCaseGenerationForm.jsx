@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { toast } from 'react-hot-toast';
+import { toast } from '../../utils/notifications';
 import PropTypes from 'prop-types';
 import { useSelector } from 'react-redux';
 import { useModels } from '../../hooks/useModels';

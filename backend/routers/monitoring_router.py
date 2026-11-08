@@ -1,5 +1,6 @@
 """Authenticated REST history and SSE stream for generic STLC telemetry."""
 
+import asyncio
 from datetime import datetime
 import json
 from typing import Optional
@@ -54,10 +55,25 @@ async def stream_events(
     async def generate():
         for event in service.recent_after(last_event_id, filters):
             yield encode(event)
-        async for event in service.subscribe(filters):
-            if await request.is_disconnected():
-                break
-            yield encode(event)
+        subscription = service.subscribe(filters)
+        next_event = asyncio.create_task(anext(subscription))
+        try:
+            while not await request.is_disconnected():
+                done, _ = await asyncio.wait({next_event}, timeout=15)
+                if not done:
+                    yield ": keep-alive\n\n"
+                    continue
+                try:
+                    event = next_event.result()
+                except StopAsyncIteration:
+                    break
+                yield encode(event)
+                next_event = asyncio.create_task(anext(subscription))
+        finally:
+            if not next_event.done():
+                next_event.cancel()
+                await asyncio.gather(next_event, return_exceptions=True)
+            await subscription.aclose()
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache",

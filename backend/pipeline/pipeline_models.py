@@ -30,6 +30,7 @@ class StepConfig(BaseModel):
     # None means inherit PipelineRunRequest.global_model. A concrete default here
     # previously overwrote an explicitly selected global model.
     model: Optional[str] = None
+    provider: Optional[str] = None
     custom_prompt: Optional[str] = None
     api_key: Optional[str] = None
 
@@ -65,6 +66,7 @@ class StepConfig(BaseModel):
     ros2_visual_count: Optional[int] = 0               # ROS2: number of tests to run with GUI visible
     ros2_timeout: Optional[int] = 120                  # ROS2: per-test timeout in seconds
     remote_timeout: Optional[int] = 300                # SSH/Docker ROS2: per-test timeout in seconds
+    ssh_max_concurrency: Optional[int] = 16            # IFARLAB twin-pool dispatch limit
 
     # Test Reporting specific
     analysis_depth: Optional[str] = "detailed"
@@ -79,6 +81,8 @@ class PipelineRunRequest(BaseModel):
         description="Mapping of step_id -> list of files for that step"
     )
     global_model: Optional[str] = None
+    global_provider: Optional[str] = None
+    provider_models: Dict[str, str] = Field(default_factory=dict)
     global_api_key: Optional[str] = None
     process_title: str = Field(..., description="The process title used for test scenario / test case naming")
     step_configs: Dict[str, StepConfig] = Field(
