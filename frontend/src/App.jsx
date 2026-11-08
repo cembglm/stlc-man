@@ -79,6 +79,12 @@ function AppContents() {
 
 	// Global pipeline model — single model used for all pipeline steps
 	const [pipelineModel, setPipelineModel] = useState('qwen2.5-7b-instruct-1m');
+	const [pipelineProvider, setPipelineProvider] = useState('lm_studio');
+	const [pipelineStepAIConfigs, setPipelineStepAIConfigs] = useState({});
+
+	const handlePipelineStepAIConfigChange = React.useCallback((stepId, config) => {
+		setPipelineStepAIConfigs(prev => ({ ...prev, [stepId]: config }));
+	}, []);
 
 	// Test Execution Method (pipeline) — "ai" | "docker" | "robot" | "ros2" | "ssh_docker"
 	const [testExecutionMethod, setTestExecutionMethod] = useState('ai');
@@ -725,16 +731,22 @@ function AppContents() {
 			});
 		});
 
-		// Single global model — all steps use the same model, no per-step overrides
+		// Global provider/model with optional per-step overrides.
 		const globalModel = pipelineModel || 'qwen2.5-7b-instruct-1m';
-		const globalApiKey = apiKeys?.gemini || null;
+		// Local provider credentials are configured server-side and never exposed
+		// to the browser. Gemini keys remain available to the legacy direct forms.
+		const globalApiKey = null;
 
 		// Minimal per-step configs — only model, everything else uses backend defaults.
 		// For test-execution, also include selected execution method and its sub-config.
 		const stepConfigs = {};
 		selectedProcessIds.forEach(stepId => {
+			const aiConfig = pipelineStepAIConfigs[stepId] || {};
+			const providerConfig = aiConfig.provider
+				? { provider: aiConfig.provider, ...(aiConfig.model ? { model: aiConfig.model } : {}) }
+				: {};
 			if (stepId === 'test-execution') {
-				const execCfg = { model: globalModel, execution_method: testExecutionMethod };
+				const execCfg = { ...providerConfig, execution_method: testExecutionMethod };
 				if (testExecutionMethod === 'docker') {
 					execCfg.execution_language = dockerConfig.language || 'python';
 					execCfg.docker_timeout = dockerConfig.timeout || 300;
@@ -753,7 +765,7 @@ function AppContents() {
 				}
 				stepConfigs[stepId] = execCfg;
 			} else {
-				stepConfigs[stepId] = { model: globalModel };
+				stepConfigs[stepId] = providerConfig;
 			}
 		});
 
@@ -766,6 +778,7 @@ function AppContents() {
 			selected_steps: selectedProcessIds,
 			files: filesPayload,
 			global_model: globalModel,
+			global_provider: pipelineProvider,
 			global_api_key: globalApiKey,
 			step_configs: stepConfigs,
 		};
@@ -1314,6 +1327,10 @@ function AppContents() {
 					onEnvironmentNameUpdate={handleEnvironmentNameUpdate}
 					pipelineModel={pipelineModel}
 					onPipelineModelChange={setPipelineModel}
+					pipelineProvider={pipelineProvider}
+					onPipelineProviderChange={setPipelineProvider}
+					pipelineStepAIConfigs={pipelineStepAIConfigs}
+					onPipelineStepAIConfigChange={handlePipelineStepAIConfigChange}
 					testExecutionMethod={testExecutionMethod}
 					onTestExecutionMethodChange={setTestExecutionMethod}
 					dockerAvailable={dockerAvailable}

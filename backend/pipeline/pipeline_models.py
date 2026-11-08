@@ -30,6 +30,7 @@ class StepConfig(BaseModel):
     # None means inherit PipelineRunRequest.global_model. A concrete default here
     # previously overwrote an explicitly selected global model.
     model: Optional[str] = None
+    provider: Optional[str] = None
     custom_prompt: Optional[str] = None
     api_key: Optional[str] = None
 
@@ -80,6 +81,8 @@ class PipelineRunRequest(BaseModel):
         description="Mapping of step_id -> list of files for that step"
     )
     global_model: Optional[str] = None
+    global_provider: Optional[str] = None
+    provider_models: Dict[str, str] = Field(default_factory=dict)
     global_api_key: Optional[str] = None
     process_title: str = Field(..., description="The process title used for test scenario / test case naming")
     step_configs: Dict[str, StepConfig] = Field(

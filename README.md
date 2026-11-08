@@ -442,6 +442,33 @@ GET http://localhost:8001/providers/status
 
 ## Configuration
 
+### LM Studio and Colibri providers
+
+The pipeline supports LM Studio and Colibri as separate OpenAI-compatible local
+providers. The Pipeline screen discovers loaded models from each provider and
+allows a global provider/model plus a provider/model override for every STLC
+step. A step set to **Use global** inherits the global selection.
+
+For Docker Compose, run LM Studio on port `1234` and Colibri on port `8011` on
+the host, then configure `.env`:
+
+```env
+DEFAULT_MODEL_PROVIDER=lm_studio
+LM_STUDIO_BASE_URL=http://host.docker.internal:1234
+LM_STUDIO_TIMEOUT_SECONDS=600
+LM_STUDIO_MAX_CONCURRENCY=4
+
+COLIBRI_BASE_URL=http://host.docker.internal:8011
+COLIBRI_API_KEY=
+COLIBRI_TIMEOUT_SECONDS=3600
+COLIBRI_MAX_CONCURRENCY=1
+```
+
+When the backend runs directly on Windows, replace `host.docker.internal` with
+`127.0.0.1`. Colibri authentication is sent as a Bearer token when
+`COLIBRI_API_KEY` is set. Keep concurrency at `1` unless the Colibri server was
+started with enough KV slots and host RAM for parallel generations.
+
 Primary backend configuration values:
 
 | Variable | Default | Purpose |

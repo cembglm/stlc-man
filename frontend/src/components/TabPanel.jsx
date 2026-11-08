@@ -59,6 +59,10 @@ export default function TabPanel({
   onGeneratePrompt,
   pipelineModel = 'qwen2.5-7b-instruct-1m',
   onPipelineModelChange,
+  pipelineProvider = 'lm_studio',
+  onPipelineProviderChange,
+  pipelineStepAIConfigs = {},
+  onPipelineStepAIConfigChange,
   testExecutionMethod = 'ai',
   onTestExecutionMethodChange,
   dockerAvailable = false,
@@ -985,8 +989,14 @@ Important:
 
                 {/* Global AI Model — single dropdown, applied to every step */}
                 <GlobalAIConfig
+                  selectedProvider={pipelineProvider}
+                  onProviderChange={onPipelineProviderChange}
                   selectedModel={pipelineModel}
                   onModelChange={onPipelineModelChange}
+                  processes={processes}
+                  selectedProcesses={selectedProcesses}
+                  stepConfigs={pipelineStepAIConfigs}
+                  onStepConfigChange={onPipelineStepAIConfigChange}
                 />
 
                 {/* Test Execution Method — AI / Docker / Robot Simulation */}

@@ -31,6 +31,7 @@ from pipeline.pipeline_models import (
 )
 from pipeline.step_adapters import execute_step
 from services.monitoring_event_service import monitoring_event_service
+from services.model_provider_service import model_provider_context, normalize_provider
 
 logger = logging.getLogger(__name__)
 
@@ -175,17 +176,31 @@ async def _run_pipeline_background(
         })
         logger.info(f"[Pipeline] Starting step: {step_id}")
         module = _MONITORING_MODULES.get(step_id)
+        step_cfg = req.step_configs.get(step_id)
+        step_provider = normalize_provider(
+            getattr(step_cfg, "provider", None) or req.global_provider
+        )
+        step_model = (
+            getattr(step_cfg, "model", None)
+            or req.provider_models.get(step_provider)
+            or (req.global_model if step_provider == normalize_provider(req.global_provider) else None)
+        )
         step_started = time.monotonic()
         if module:
             await monitoring_event_service.emit_safely(
                 "module.started", session_id=req.session_id, process_title=req.process_title,
                 module=module, status="running",
                 progress=0,
-                metadata={"step_id": step_id, "model": req.global_model},
+                metadata={
+                    "step_id": step_id,
+                    "provider": step_provider,
+                    "model": step_model,
+                },
             )
 
         try:
-            result: StepResult = await execute_step(step_id, req, previous_results)
+            with model_provider_context(step_provider):
+                result: StepResult = await execute_step(step_id, req, previous_results)
         except Exception as exc:
             logger.error(f"[Pipeline] Unhandled exception in step {step_id}: {exc}", exc_info=True)
             result = StepResult(
@@ -212,7 +227,12 @@ async def _run_pipeline_background(
                     "module.completed", session_id=req.session_id, process_title=req.process_title,
                     module=module, status="completed", progress=100,
                     duration_ms=int((time.monotonic() - step_started) * 1000),
-                    metrics=_result_metrics(step_id, result), metadata={"step_id": step_id},
+                    metrics=_result_metrics(step_id, result),
+                    metadata={
+                        "step_id": step_id,
+                        "provider": step_provider,
+                        "model": step_model,
+                    },
                 )
             await monitoring_event_service.emit_safely(
                 "pipeline.progress", session_id=req.session_id, process_title=req.process_title,

@@ -1,86 +1,138 @@
-import React from 'react';
-import { SparklesIcon } from '@heroicons/react/24/outline';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
-/**
- * Global AI Configuration — minimal, single-model selector for the pipeline.
- * The chosen model is applied to every pipeline step automatically.
- *
- * Props:
- *   selectedModel   {string}   controlled model id
- *   onModelChange   {fn}       called with new model id on change
- */
-export default function GlobalAIConfig({ selectedModel = 'qwen2.5-7b-instruct-1m', onModelChange }) {
-  const availableModels = [
-    // API Models (External)
-    { id: 'gemini-2.5-flash',              name: 'Gemini 2.5 Flash',         provider: 'Google',    type: 'api' },
-    { id: 'gemini-2.5-pro',                name: 'Gemini 2.5 Pro',           provider: 'Google',    type: 'api' },
-    { id: 'gemini-1.5-pro',                name: 'Gemini 1.5 Pro',           provider: 'Google',    type: 'api' },
-    { id: 'gemini-1.5-flash',              name: 'Gemini 1.5 Flash',         provider: 'Google',    type: 'api' },
-    // Local Models (LM Studio)
-    { id: 'codegeex4:9b',                  name: 'CodeGeeX4 (9B)',           provider: 'LM Studio', type: 'local' },
-    { id: 'codellama:7b',                  name: 'Code Llama (7B)',          provider: 'LM Studio', type: 'local' },
-    { id: 'deepseek-coder:6.7b',           name: 'DeepSeek Coder (6.7B)',   provider: 'LM Studio', type: 'local' },
-    { id: 'gemma2:2b',                     name: 'Gemma 2 (2B)',             provider: 'LM Studio', type: 'local' },
-    { id: 'gemma3:4b',                     name: 'Gemma 3 (4B)',             provider: 'LM Studio', type: 'local' },
-    { id: 'google/gemma-3-12b',            name: 'Gemma 3 (12B)',           provider: 'LM Studio', type: 'local' },
-    { id: 'llama3.2:3b',                   name: 'Llama 3.2 (3B)',          provider: 'LM Studio', type: 'local' },
-    { id: 'qwen2.5:7b',                    name: 'Qwen 2.5 (7B)',           provider: 'LM Studio', type: 'local' },
-    { id: 'qwen2.5-7b-instruct-1m',                 name: 'Qwen 2.5 (7B-1M)',        provider: 'LM Studio', type: 'local' },
-    { id: 'qwen2.5-coder:3b',              name: 'Qwen 2.5 Coder (3B)',     provider: 'LM Studio', type: 'local' },
-    { id: 'qwen/qwen3-14b',                name: 'Qwen 3 (14B)',            provider: 'LM Studio', type: 'local' },
-    { id: 'stable-code:3b',                name: 'Stable Code (3B)',         provider: 'LM Studio', type: 'local' },
-    { id: 'starcoder2:7b',                 name: 'StarCoder 2 (7B)',         provider: 'LM Studio', type: 'local' },
-    { id: 'meta/llama-3.3-70b',            name: 'Llama 3.3 (70B)',         provider: 'LM Studio', type: 'local' },
-    { id: 'mistralai/codestral-22b-v0.1',  name: 'Codestral (22B)',          provider: 'LM Studio', type: 'local' },
-    { id: 'openai/gpt-oss-20b',            name: 'GPT OSS (20B)',            provider: 'LM Studio', type: 'local' },
-    { id: 'qwen/qwq-32b',                  name: 'QwQ (32B)',                provider: 'LM Studio', type: 'local' },
-    { id: 'codellama:70b-instruct',        name: 'CodeLlama 70B Instruct',  provider: 'LM Studio', type: 'local' },
-    { id: 'kimi-dev:72b',                  name: 'Kimi Dev 72B',             provider: 'LM Studio', type: 'local' },
-    { id: 'openai/gpt-oss-120b',           name: 'GPT OSS 120B',             provider: 'LM Studio', type: 'local' },
-    { id: 'deepseek-r1-distill:32b',       name: 'DeepSeek R1 Distill 32B', provider: 'LM Studio', type: 'local' },
-    { id: 'google/gemma-3-27b',            name: 'Google Gemma 3 27B',      provider: 'LM Studio', type: 'local' },
-    { id: 'qwen/qwen3-coder-30b',          name: 'Qwen 3 Coder 30B',        provider: 'LM Studio', type: 'local' },
-    { id: 'deepseek/deepseek-r1-qwen3-8b', name: 'DeepSeek R1 Qwen3 8B',   provider: 'LM Studio', type: 'local' },
-  ];
+const FALLBACK_PROVIDERS = [
+  { id: 'lm_studio', label: 'LM Studio', connected: false, models: [] },
+  { id: 'colibri', label: 'Colibri', connected: false, models: [] },
+];
 
-  const selected = availableModels.find(m => m.id === selectedModel);
-  const isLocal   = selected?.type === 'local';
+function ModelSelect({ provider, providersById, value, onChange }) {
+  const models = providersById[provider]?.models || [];
+  const valueIsDiscovered = models.some(model => model.id === value);
+  return (
+    <select value={value || ''} onChange={event => onChange(event.target.value)} className="min-w-0 flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500">
+      {value && !valueIsDiscovered && <option value={value}>{value} (configured)</option>}
+      {!models.length && <option value="">Server default model</option>}
+      {models.map(model => (
+        <option key={model.id} value={model.id}>
+          {model.id}{model.context_length ? ` (${Math.round(model.context_length / 1024)}K)` : ''}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+export default function GlobalAIConfig({
+  selectedProvider = 'lm_studio', onProviderChange, selectedModel = '', onModelChange,
+  processes = [], selectedProcesses = new Set(), stepConfigs = {}, onStepConfigChange,
+}) {
+  const [providers, setProviders] = useState(FALLBACK_PROVIDERS);
+  const [loading, setLoading] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState('');
+
+  const refresh = async () => {
+    setLoading(true);
+    setDiscoveryError('');
+    try {
+      const response = await fetch('/api/models/providers');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      setProviders(payload.providers || FALLBACK_PROVIDERS);
+    } catch (error) {
+      setDiscoveryError(`Provider discovery failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const providersById = useMemo(
+    () => Object.fromEntries(providers.map(provider => [provider.id, provider])),
+    [providers],
+  );
+
+  useEffect(() => {
+    const info = providersById[selectedProvider];
+    const discovered = info?.models || [];
+    if (discovered.length && !discovered.some(item => item.id === selectedModel)) {
+      onModelChange?.(info.default_model || discovered[0].id);
+    }
+  }, [providersById, selectedProvider, selectedModel, onModelChange]);
+
+  const selectedSteps = processes.filter(process => selectedProcesses.has(process.id));
+
+  const changeStepProvider = (stepId, provider) => {
+    if (!provider) {
+      onStepConfigChange?.(stepId, { provider: '', model: '' });
+      return;
+    }
+    const info = providersById[provider];
+    onStepConfigChange?.(stepId, {
+      provider,
+      model: info?.default_model || info?.models?.[0]?.id || '',
+    });
+  };
+
+  const changeGlobalProvider = provider => {
+    const info = providersById[provider];
+    onProviderChange?.(provider);
+    onModelChange?.(info?.default_model || info?.models?.[0]?.id || '');
+  };
 
   return (
-    <div className="border rounded-lg bg-white shadow-sm">
-      <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 flex items-center space-x-3 rounded-t-lg">
-        <SparklesIcon className="h-5 w-5 text-purple-600 flex-shrink-0" />
-        <div>
-          <h3 className="font-semibold text-gray-900 text-sm">AI Model</h3>
-          <p className="text-xs text-gray-500">Applied to every pipeline step</p>
+    <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
+      <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <SparklesIcon className="h-5 w-5 text-purple-600" />
+          <div><h3 className="font-semibold text-gray-900 text-sm">AI Provider & Model</h3><p className="text-xs text-gray-500">Global default with optional per-step overrides</p></div>
         </div>
+        <button type="button" onClick={refresh} disabled={loading} className="p-2 text-purple-700 hover:bg-purple-100 rounded-lg disabled:opacity-50" title="Refresh providers">
+          <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
-      <div className="px-4 py-3 flex items-center gap-3">
-        <select
-          value={selectedModel}
-          onChange={e => onModelChange?.(e.target.value)}
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-        >
-          <optgroup label="API Models (External)">
-            {availableModels.filter(m => m.type === 'api').map(model => (
-              <option key={model.id} value={model.id}>{model.name} ({model.provider})</option>
-            ))}
-          </optgroup>
-          <optgroup label="Local Models (LM Studio)">
-            {availableModels.filter(m => m.type === 'local').map(model => (
-              <option key={model.id} value={model.id}>{model.name}</option>
-            ))}
-          </optgroup>
-        </select>
+      <div className="p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3">
+          <select value={selectedProvider} onChange={event => changeGlobalProvider(event.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500">
+            {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label} {provider.connected ? '●' : '○'}</option>)}
+          </select>
+          <ModelSelect provider={selectedProvider} providersById={providersById} value={selectedModel} onChange={onModelChange} />
+        </div>
 
-        <span className={`text-xs font-medium px-2 py-1 rounded-full flex-shrink-0 ${
-          isLocal
-            ? 'bg-green-100 text-green-700'
-            : 'bg-blue-100 text-blue-700'
-        }`}>
-          {isLocal ? 'Local' : 'API'}
-        </span>
+        {discoveryError && <p className="text-xs text-amber-700">{discoveryError}</p>}
+
+        <div className="border-t pt-3 overflow-x-auto">
+          <div className="min-w-[620px]">
+            <div className="grid grid-cols-[minmax(150px,1fr)_150px_minmax(180px,1fr)] gap-2 px-2 pb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <span>Pipeline step</span><span>Provider</span><span>Model</span>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {selectedSteps.map(process => {
+                const config = stepConfigs[process.id] || {};
+                const effectiveProvider = config.provider || selectedProvider;
+                return (
+                  <div key={process.id} className="grid grid-cols-[minmax(150px,1fr)_150px_minmax(180px,1fr)] gap-2 items-center py-2 px-2">
+                    <span className="text-sm text-gray-700 truncate" title={process.name}>{process.name}</span>
+                    <select value={config.provider || ''} onChange={event => changeStepProvider(process.id, event.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-xs">
+                      <option value="">Use global</option>
+                      {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
+                    </select>
+                    <ModelSelect provider={effectiveProvider} providersById={providersById} value={config.provider ? config.model : selectedModel} onChange={model => onStepConfigChange?.(process.id, { ...config, provider: config.provider || effectiveProvider, model })} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 text-xs">
+          {providers.map(provider => (
+            <span key={provider.id} className={`px-2 py-1 rounded-full ${provider.connected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+              {provider.label}: {provider.connected ? `${provider.models.length} model` : 'offline'}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );

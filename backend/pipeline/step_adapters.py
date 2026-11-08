@@ -33,21 +33,31 @@ logger = logging.getLogger(__name__)
 
 def _get_step_config(req: PipelineRunRequest, step_id: str) -> dict:
     """Return merged config: step-specific overrides on top of global defaults."""
-    from core.settings import get_settings
+    from services.model_provider_service import get_provider_config, normalize_provider
 
     cfg = req.step_configs.get(step_id)
-    base = {
-        "model": req.global_model or get_settings().model_identifier,
-        "api_key": req.global_api_key,
-        "process_title": req.process_title,
-    }
+    override = {}
     if cfg:
         override = (
             cfg.model_dump(exclude_none=True)
             if hasattr(cfg, "model_dump")
             else cfg.dict(exclude_none=True)
         )
-        base.update(override)
+
+    provider = normalize_provider(override.get("provider") or req.global_provider)
+    provider_config = get_provider_config(provider)
+    model = override.get("model") or req.provider_models.get(provider)
+    if not model and provider == normalize_provider(req.global_provider):
+        model = req.global_model
+    model = model or provider_config.default_model
+
+    base = {
+        "model": model,
+        "provider": provider,
+        "api_key": req.global_api_key,
+        "process_title": req.process_title,
+    }
+    base.update(override)
     return base
 
 
