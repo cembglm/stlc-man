@@ -5,6 +5,7 @@ API Router for remote/local test execution folder management.
 Enables robot-based test execution scenarios.
 """
 
+import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from services.remote_execution_service import RemoteExecutionService
 from services.execution_client import ExecutionRequest, SshDockerExecutionClient
+from core.settings import get_settings
 from utils.standalone_test_validation import supports_legacy_sim_robot_goal
 from datetime import datetime
 
@@ -147,9 +149,11 @@ async def get_remote_runner_status():
             "configured": client.is_configured,
             "host": client.host,
             "remote_dir": client.remote_dir,
+            "runner": client.runner,
             "image": client.image,
             "authentication": "password" if client.password else "ssh_key",
             "legacy_sim_robot_goal_supported": supports_legacy_sim_robot_goal(client.image),
+            **client.capability_status(),
         }
     except Exception as exc:
         return {"success": False, "configured": False, "error": str(exc)}
@@ -165,15 +169,16 @@ async def execute_remote_tests(request: ExecuteRemoteTestsRequest):
             detail="Remote execution is not configured. Set SSH_EXECUTION_HOST.",
         )
 
-    results = []
-    for item in request.test_files:
+    semaphore = asyncio.Semaphore(get_settings().ssh_execution_max_concurrency)
+
+    async def execute_item(item: RemoteTestFile) -> Dict[str, Any]:
         oracle_failed = item.oracle is not None and item.oracle.get("passed") is False
         if item.execution_eligibility != "eligible" or oracle_failed:
             reason = (
                 item.eligibility_reason
                 or "Generation oracle rejected this test; remote execution was not started."
             )
-            results.append({
+            return {
                 "test_id": item.test_id,
                 "filename": item.filename,
                 "status": "not_executed",
@@ -188,20 +193,20 @@ async def execute_remote_tests(request: ExecuteRemoteTestsRequest):
                 "exit_code": None,
                 "reset_status": None,
                 "artifacts": [],
-            })
-            continue
+            }
         try:
-            result = await client.submit(ExecutionRequest(
-                test_code=item.content,
-                language="python",
-                framework="pytest",
-                test_case_id=item.test_id,
-                session_id=request.session_id,
-                process_title=request.process_name,
-                metadata={"filename": item.filename, "source": "test_execution_remote"},
-                configuration={"timeout_seconds": request.timeout_seconds},
-            ))
-            results.append({
+            async with semaphore:
+                result = await client.submit(ExecutionRequest(
+                    test_code=item.content,
+                    language="python",
+                    framework="pytest",
+                    test_case_id=item.test_id,
+                    session_id=request.session_id,
+                    process_title=request.process_name,
+                    metadata={"filename": item.filename, "source": "test_execution_remote"},
+                    configuration={"timeout_seconds": request.timeout_seconds},
+                ))
+            return {
                 "test_id": item.test_id,
                 "filename": item.filename,
                 "execution_id": result.execution_id,
@@ -216,10 +221,15 @@ async def execute_remote_tests(request: ExecuteRemoteTestsRequest):
                 "error": result.error,
                 "exit_code": result.exit_code,
                 "reset_status": result.reset_status,
+                "twin_id": result.twin_id,
+                "ros_domain_id": result.ros_domain_id,
+                "container_name": result.container_name,
+                "remote_log": result.remote_log,
+                "validation_report": result.validation_report,
                 "artifacts": result.artifacts,
                 "started_at": result.started_at,
                 "finished_at": result.finished_at,
-            })
+            }
         except Exception as exc:
             logger.error(
                 "Remote test %s failed: %s: %s",
@@ -227,7 +237,7 @@ async def execute_remote_tests(request: ExecuteRemoteTestsRequest):
                 type(exc).__name__,
                 str(exc)[:1000],
             )
-            results.append({
+            return {
                 "test_id": item.test_id,
                 "filename": item.filename,
                 "status": "error",
@@ -242,11 +252,13 @@ async def execute_remote_tests(request: ExecuteRemoteTestsRequest):
                 "exit_code": None,
                 "reset_status": None,
                 "artifacts": [],
-            })
+            }
+
+    results = list(await asyncio.gather(*(execute_item(item) for item in request.test_files)))
 
     def result_verdict(item: Dict[str, Any]) -> str:
         if item.get("verdict"):
-            return item["verdict"]
+            return "error" if item["verdict"] == "infrastructure_error" else item["verdict"]
         if item.get("failed", 0) > 0:
             return "failed"
         if item.get("status") == "completed":

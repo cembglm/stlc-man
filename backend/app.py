@@ -247,6 +247,14 @@ async def startup_event():
     else:
         logger.info("Prompt initialization skipped by configuration")
 
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Flush best-effort monitoring persistence tasks before process exit."""
+    from services.monitoring_event_service import monitoring_event_service
+
+    await monitoring_event_service.drain()
+
 if __name__ == "__main__":
     uvicorn.run(
         "app:app",

@@ -60,7 +60,10 @@ class Settings:
     execution_adapter: str
     ssh_execution_host: Optional[str]
     ssh_execution_remote_dir: str
+    ssh_execution_runner: str
     ssh_execution_image: str
+    ssh_execution_capability_file: Path
+    ssh_execution_max_concurrency: int
     ssh_execution_identity_file: Optional[Path]
     ssh_execution_password: Optional[str]
     ssh_execution_connect_timeout_seconds: int
@@ -85,6 +88,12 @@ class Settings:
                 "Wildcard CORS is not allowed while API authentication is enabled"
             )
 
+        max_ssh_concurrency = _as_int("SSH_EXECUTION_MAX_CONCURRENCY", 16)
+        if max_ssh_concurrency < 1 or max_ssh_concurrency > 50:
+            raise ValueError("SSH_EXECUTION_MAX_CONCURRENCY must be between 1 and 50")
+
+        default_capability_file = Path(__file__).resolve().parents[2] / "robot_capabilities.json"
+
         return cls(
             app_host=os.getenv("APP_HOST", "0.0.0.0"),
             app_port=_as_int("APP_PORT", 8100),
@@ -106,7 +115,15 @@ class Settings:
             execution_adapter=os.getenv("EXECUTION_ADAPTER", "http").strip().lower(),
             ssh_execution_host=os.getenv("SSH_EXECUTION_HOST") or None,
             ssh_execution_remote_dir=os.getenv("SSH_EXECUTION_REMOTE_DIR", "~/stlc_runs"),
+            ssh_execution_runner=os.getenv(
+                "SSH_EXECUTION_RUNNER",
+                "~/colcon_ws/src/docker_harness/twins/run_test.sh",
+            ),
             ssh_execution_image=os.getenv("SSH_EXECUTION_IMAGE", "ros2-exec-harness:0.3.2"),
+            ssh_execution_capability_file=Path(
+                os.getenv("SSH_EXECUTION_CAPABILITY_FILE", str(default_capability_file))
+            ),
+            ssh_execution_max_concurrency=max_ssh_concurrency,
             ssh_execution_identity_file=(
                 Path(os.environ["SSH_EXECUTION_IDENTITY_FILE"])
                 if os.getenv("SSH_EXECUTION_IDENTITY_FILE")

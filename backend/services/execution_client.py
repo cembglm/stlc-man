@@ -16,6 +16,11 @@ import aiohttp
 from pydantic import BaseModel, Field
 
 from core.settings import Settings, get_settings
+from services.robot_capability_service import (
+    capability_descriptor,
+    load_robot_capability_file,
+    validate_generated_code_report,
+)
 from utils.standalone_test_validation import (
     require_standalone_python,
     supports_legacy_sim_robot_goal,
@@ -53,6 +58,11 @@ class ExecutionResult(BaseModel):
     error: Optional[str] = None
     exit_code: Optional[int] = None
     reset_status: Optional[str] = None
+    twin_id: Optional[int] = None
+    ros_domain_id: Optional[int] = None
+    container_name: Optional[str] = None
+    remote_log: Optional[str] = None
+    validation_report: Optional[Dict[str, Any]] = None
     artifacts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
@@ -119,18 +129,27 @@ class SshDockerExecutionClient(ExecutionAdapter):
         r"^\[harness\]\s+reset:\s+status=([A-Za-z0-9_-]+)",
         re.MULTILINE,
     )
+    _RUNNER_HEADER_PATTERN = re.compile(
+        r"^\[harness\]\s+twin=(\d+)\s+domain=(\d+)\s+container=(\S+)\s+log=(\S+)",
+        re.MULTILINE,
+    )
     _EXIT_CODE_ERRORS = {
         1: "Remote pytest reported at least one failed test (exit code 1)",
         2: "Remote pytest collection/import failed (exit code 2)",
         5: "Remote pytest collected no tests (exit code 5)",
         124: "Remote harness stopped the test after its 10-minute limit (exit code 124)",
+        3: "IFARLAB reported that no twin became available (exit code 3)",
+        64: "IFARLAB rejected the runner invocation (exit code 64)",
     }
 
     def __init__(
         self,
         host: Optional[str] = None,
         remote_dir: Optional[str] = None,
+        runner: Optional[str] = None,
         image: Optional[str] = None,
+        capability_file: Optional[Path] = None,
+        capability_contract: Optional[Dict[str, Any]] = None,
         identity_file: Optional[Path] = None,
         password: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
@@ -139,7 +158,12 @@ class SshDockerExecutionClient(ExecutionAdapter):
         settings = get_settings()
         self.host = host if host is not None else settings.ssh_execution_host
         self.remote_dir = remote_dir or settings.ssh_execution_remote_dir
+        self.runner = runner or settings.ssh_execution_runner
         self.image = image or settings.ssh_execution_image
+        self.capability_file = Path(
+            capability_file or settings.ssh_execution_capability_file
+        )
+        self._provided_capability_contract = capability_contract
         self.identity_file = (
             Path(identity_file)
             if identity_file is not None
@@ -164,6 +188,11 @@ class SshDockerExecutionClient(ExecutionAdapter):
             or ".." in self.remote_dir.split("/")
         ):
             raise ValueError("SSH_EXECUTION_REMOTE_DIR contains unsupported characters")
+        if (
+            not self._REMOTE_DIR_PATTERN.fullmatch(self.runner)
+            or ".." in self.runner.split("/")
+        ):
+            raise ValueError("SSH_EXECUTION_RUNNER contains unsupported characters")
         if not self._IMAGE_PATTERN.fullmatch(self.image):
             raise ValueError("SSH_EXECUTION_IMAGE contains unsupported characters")
         if self.timeout_seconds <= 0 or self.connect_timeout_seconds <= 0:
@@ -174,6 +203,8 @@ class SshDockerExecutionClient(ExecutionAdapter):
             "-o", "BatchMode=yes",
             "-o", f"ConnectTimeout={self.connect_timeout_seconds}",
             "-o", "StrictHostKeyChecking=yes",
+            "-o", "ServerAliveInterval=30",
+            "-o", "ServerAliveCountMax=4",
         ]
         if self.identity_file:
             options.extend(["-i", str(self.identity_file)])
@@ -190,19 +221,31 @@ class SshDockerExecutionClient(ExecutionAdapter):
             return '"$HOME/' + path[2:] + '"'
         return shlex.quote(path)
 
-    @staticmethod
-    def _volume_mount(path: str) -> str:
-        container_path = "/harness_ws/generated_script.py:ro"
-        if path.startswith("~/"):
-            return f'"$HOME/{path[2:]}:{container_path}"'
-        return shlex.quote(f"{path}:{container_path}")
+    def _capability_contract(self) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        if self._provided_capability_contract is not None:
+            contract = self._provided_capability_contract
+            descriptor = capability_descriptor(contract)
+        else:
+            contract, raw = load_robot_capability_file(self.capability_file)
+            descriptor = capability_descriptor(contract, raw)
+        pinned_image = descriptor.get("image_tag")
+        if pinned_image and self.image and pinned_image != self.image:
+            raise ValueError(
+                f"Robot capability contract is pinned to {pinned_image}, but SSH_EXECUTION_IMAGE "
+                f"is {self.image}."
+            )
+        return contract, descriptor
 
-    @staticmethod
-    def _runner_command(request: ExecutionRequest) -> List[str]:
-        # Harness 0.3.x must receive the file through its python entrypoint.
-        # entrypoint.sh detects test_* definitions and invokes pytest itself;
-        # calling pytest directly would bypass the harness timeout and reset.
-        return ["python3", "/harness_ws/generated_script.py"]
+    def capability_status(self) -> Dict[str, Any]:
+        """Return non-sensitive readiness details for the dispatch safety contract."""
+        try:
+            _contract, descriptor = self._capability_contract()
+            return {"capability_ready": True, "capability": descriptor}
+        except Exception as exc:
+            return {
+                "capability_ready": False,
+                "capability_error": str(exc),
+            }
 
     async def _run_command(
         self,
@@ -240,6 +283,19 @@ class SshDockerExecutionClient(ExecutionAdapter):
             reset_status,
         )
 
+    @classmethod
+    def _runner_metadata(cls, logs: str) -> Dict[str, Any]:
+        match = cls._RUNNER_HEADER_PATTERN.search(logs or "")
+        if not match:
+            return {}
+        twin_id, domain_id, container_name, remote_log = match.groups()
+        return {
+            "twin_id": int(twin_id),
+            "ros_domain_id": int(domain_id),
+            "container_name": container_name,
+            "remote_log": remote_log,
+        }
+
     @staticmethod
     def _classify_exit_code(return_code: int) -> Dict[str, Any]:
         """Translate harness exit codes into an ISTQB-style test verdict.
@@ -268,6 +324,11 @@ class SshDockerExecutionClient(ExecutionAdapter):
                 "status": "blocked", "verdict": "blocked", "passed": 0,
                 "failed": 0, "errors": 0, "blocked": 1, "not_executed": 0,
             }
+        if return_code in {3, 64}:
+            return {
+                "status": "infrastructure_error", "verdict": "infrastructure_error",
+                "passed": 0, "failed": 0, "errors": 1, "blocked": 0, "not_executed": 0,
+            }
         return {
             "status": "error", "verdict": "error", "passed": 0,
             "failed": 0, "errors": 1, "blocked": 0, "not_executed": 0,
@@ -285,6 +346,25 @@ class SshDockerExecutionClient(ExecutionAdapter):
             request.test_code,
             allow_legacy_sim_robot_goal=supports_legacy_sim_robot_goal(self.image),
         )
+        capability_contract, capability_info = self._capability_contract()
+        expected_capability_sha = request.metadata.get("capability_sha256")
+        if (
+            expected_capability_sha
+            and expected_capability_sha != capability_info["sha256"]
+        ):
+            raise ValueError(
+                "Generated test capability version does not match the approved dispatch "
+                "contract; regenerate the test before IFARLAB execution."
+            )
+        validation_report = validate_generated_code_report(
+            request.test_code,
+            capability_contract,
+        )
+        if validation_report["errors"]:
+            raise ValueError(
+                "IFARLAB pre-dispatch validation failed: "
+                + " ".join(validation_report["errors"])
+            )
 
         execution_id = f"exec-{uuid.uuid4().hex}"
         filename = f"{execution_id}.py"
@@ -308,13 +388,15 @@ class SshDockerExecutionClient(ExecutionAdapter):
                 remote_file,
                 started_at,
                 checksum,
+                validation_report,
+                capability_info,
             )
 
         ssh_base = ["ssh", *self._connection_options(), self.host]
 
         preflight = (
             f"test -d {self._shell_path(self.remote_dir)} && "
-            f"docker image inspect {shlex.quote(self.image)} >/dev/null"
+            f"test -x {self._shell_path(self.runner)}"
         )
         preflight_code, preflight_output = await self._run_command(
             [*ssh_base, preflight], self.connect_timeout_seconds + 5
@@ -341,11 +423,8 @@ class SshDockerExecutionClient(ExecutionAdapter):
             raise RuntimeError("SCP upload failed: " + upload_output.strip()[:1000])
 
         remote_command = " ".join([
-            "docker", "run", "--rm", "--network", "host", "--ipc=host",
-            "-e", "FASTDDS_BUILTIN_TRANSPORTS=UDPv4",
-            "-v", self._volume_mount(remote_file),
-            shlex.quote(self.image),
-            *self._runner_command(request),
+            self._shell_path(self.runner),
+            self._shell_path(remote_file),
         ])
         return_code, logs = await self._run_command(
             [*ssh_base, remote_command],
@@ -356,6 +435,7 @@ class SshDockerExecutionClient(ExecutionAdapter):
         if upload_output.strip():
             logs = f"{upload_output.strip()}\n{logs}".strip()
         error, reset_status = self._result_metadata(return_code, logs)
+        runner_metadata = self._runner_metadata(logs)
         logger.info(
             "Remote harness execution finished: execution_id=%s exit_code=%s reset_status=%s",
             execution_id,
@@ -372,10 +452,13 @@ class SshDockerExecutionClient(ExecutionAdapter):
             error=error,
             exit_code=return_code,
             reset_status=reset_status,
+            validation_report=validation_report,
+            **runner_metadata,
             artifacts=[{
                 "name": filename,
                 "remote_path": remote_file,
                 "sha256": checksum,
+                "capability_sha256": capability_info["sha256"],
             }],
         )
 
@@ -387,6 +470,8 @@ class SshDockerExecutionClient(ExecutionAdapter):
         remote_file: str,
         started_at: str,
         checksum: str,
+        validation_report: Dict[str, Any],
+        capability_info: Dict[str, Any],
     ) -> ExecutionResult:
         """Run one upload/execution using Paramiko for non-interactive passwords."""
         try:
@@ -429,7 +514,7 @@ class SshDockerExecutionClient(ExecutionAdapter):
 
             preflight = (
                 f"test -d {self._shell_path(self.remote_dir)} && "
-                f"docker image inspect {shlex.quote(self.image)} >/dev/null"
+                f"test -x {self._shell_path(self.runner)}"
             )
             _, preflight_stdout, preflight_stderr = client.exec_command(
                 preflight, timeout=self.connect_timeout_seconds + 5
@@ -457,11 +542,8 @@ class SshDockerExecutionClient(ExecutionAdapter):
                 sftp.close()
 
             remote_command = " ".join([
-                "docker", "run", "--rm", "--network", "host", "--ipc=host",
-                "-e", "FASTDDS_BUILTIN_TRANSPORTS=UDPv4",
-                "-v", shlex.quote(f"{expanded_remote_file}:/harness_ws/generated_script.py:ro"),
-                shlex.quote(self.image),
-                *self._runner_command(request),
+                self._shell_path(self.runner),
+                shlex.quote(expanded_remote_file),
             ])
             _, stdout, stderr = client.exec_command(
                 remote_command, timeout=None
@@ -474,6 +556,7 @@ class SshDockerExecutionClient(ExecutionAdapter):
         finished_at = datetime.now(timezone.utc).isoformat()
         classification = self._classify_exit_code(return_code)
         error, reset_status = self._result_metadata(return_code, logs)
+        runner_metadata = self._runner_metadata(logs)
         logger.info(
             "Remote harness execution finished: execution_id=%s exit_code=%s reset_status=%s",
             execution_id,
@@ -489,10 +572,13 @@ class SshDockerExecutionClient(ExecutionAdapter):
             error=error,
             exit_code=return_code,
             reset_status=reset_status,
+            validation_report=validation_report,
+            **runner_metadata,
             artifacts=[{
                 "name": filename,
                 "remote_path": remote_file,
                 "sha256": checksum,
+                "capability_sha256": capability_info["sha256"],
             }],
         )
 
@@ -509,7 +595,9 @@ def create_execution_client(settings: Optional[Settings] = None) -> ExecutionAda
         return SshDockerExecutionClient(
             host=settings.ssh_execution_host,
             remote_dir=settings.ssh_execution_remote_dir,
+            runner=settings.ssh_execution_runner,
             image=settings.ssh_execution_image,
+            capability_file=settings.ssh_execution_capability_file,
             identity_file=settings.ssh_execution_identity_file,
             password=settings.ssh_execution_password,
             timeout_seconds=settings.execution_timeout_seconds,

@@ -65,6 +65,7 @@ class StepConfig(BaseModel):
     ros2_visual_count: Optional[int] = 0               # ROS2: number of tests to run with GUI visible
     ros2_timeout: Optional[int] = 120                  # ROS2: per-test timeout in seconds
     remote_timeout: Optional[int] = 300                # SSH/Docker ROS2: per-test timeout in seconds
+    ssh_max_concurrency: Optional[int] = 16            # IFARLAB twin-pool dispatch limit
 
     # Test Reporting specific
     analysis_depth: Optional[str] = "detailed"

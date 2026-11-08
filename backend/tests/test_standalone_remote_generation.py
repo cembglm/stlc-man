@@ -15,6 +15,7 @@ from services.robot_capability_service import (  # noqa: E402
     RobotCapabilityError,
     parse_robot_capability_json,
     validate_generated_code_against_capabilities,
+    validate_generated_code_report,
 )
 from utils.standalone_test_validation import (  # noqa: E402
     supports_legacy_sim_robot_goal,
@@ -145,6 +146,33 @@ def test_validator_allows_legacy_import_only_for_compatible_harness():
         code,
         allow_legacy_sim_robot_goal=True,
     ) == []
+
+
+def test_ifarlab_dispatch_report_rejects_mocking_and_undeclared_imports():
+    report = validate_generated_code_report(
+        "import unittest.mock as mock\n"
+        "def test_robot():\n"
+        "    robot = mock.MagicMock()\n"
+        "    assert robot is not None\n",
+        _approved_capability_contract(),
+    )
+
+    assert any("not declared" in issue for issue in report["errors"])
+    assert any("Mocking robot/controller APIs" in issue for issue in report["errors"])
+
+
+def test_ifarlab_dispatch_report_rejects_twin_isolation_changes():
+    contract = _approved_capability_contract()
+    contract["api"]["allowed_imports"].append("import os")
+    report = validate_generated_code_report(
+        "import os\n"
+        "os.environ['ROS_DOMAIN_ID'] = '99'\n"
+        "def test_robot():\n"
+        "    assert True\n",
+        contract,
+    )
+
+    assert any("must not set ROS_DOMAIN_ID" in issue for issue in report["errors"])
 
 
 def test_generation_prompt_requires_self_contained_remote_code():
