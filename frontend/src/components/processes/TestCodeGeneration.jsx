@@ -204,8 +204,11 @@ const TestCodeGeneration = ({
       fileProcessMappings[f.id]?.includes('test-code-generation')
     );
 
-    const sourceFiles = selectedFiles.filter(file => file.type !== 'Project AST');
+    const sourceFiles = selectedFiles.filter(
+      file => !['Project AST', 'Code Knowledge Graph'].includes(file.type)
+    );
     const projectAstFile = selectedFiles.find(file => file.type === 'Project AST') || null;
+    const knowledgeGraphFile = selectedFiles.find(file => file.type === 'Code Knowledge Graph') || null;
 
     if (sourceFiles.length === 0) {
       toast.error('Please select at least one source file');
@@ -240,6 +243,7 @@ const TestCodeGeneration = ({
       model: model,
       selected_files: sourceFiles,
       project_ast_file: projectAstFile,
+      knowledge_graph_file: knowledgeGraphFile,
       environment_name: environmentName,
       sessionId: sessionId, // Add session ID from props
       prompt: effectivePrompt,
@@ -283,13 +287,21 @@ const TestCodeGeneration = ({
       estimateForm.append('custom_prompt', effectivePrompt || '');
       estimateForm.append('max_input_tokens', String(maxInputTokens));
       selectedFiles.forEach((selectedFile) => {
-        if (selectedFile?.file && selectedFile.type !== 'Project AST') {
+        if (selectedFile?.file && !['Project AST', 'Code Knowledge Graph'].includes(selectedFile.type)) {
           estimateForm.append('files', selectedFile.file, selectedFile.name);
         }
       });
       const mappedProjectAst = selectedFiles.find(file => file.type === 'Project AST');
       if (mappedProjectAst?.file) {
         estimateForm.append('project_ast_file', mappedProjectAst.file, mappedProjectAst.name);
+      }
+      const mappedKnowledgeGraph = selectedFiles.find(file => file.type === 'Code Knowledge Graph');
+      if (mappedKnowledgeGraph?.file) {
+        estimateForm.append(
+          'knowledge_graph_file',
+          mappedKnowledgeGraph.file,
+          mappedKnowledgeGraph.name
+        );
       }
       if (capabilityFile) {
         estimateForm.append('capability_file', capabilityFile, capabilityFile.name);
@@ -364,6 +376,13 @@ const TestCodeGeneration = ({
             'project_ast_file',
             formDataObj.project_ast_file.file,
             formDataObj.project_ast_file.name
+          );
+        }
+        if (formDataObj.knowledge_graph_file?.file) {
+          formData.append(
+            'knowledge_graph_file',
+            formDataObj.knowledge_graph_file.file,
+            formDataObj.knowledge_graph_file.name
           );
         }
         
@@ -593,6 +612,22 @@ const TestCodeGeneration = ({
           <p className="text-sm text-gray-600">
             Upload a compact AST manifest from the Files tab with type <strong>Project AST</strong> and map it to this step. If omitted, the backend derives the manifest automatically from mapped Python source files.
           </p>
+        </div>
+
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h2 className="text-lg font-semibold mb-2">Code Knowledge Graph Context</h2>
+          <p className="text-sm text-gray-600">
+            Map an Understand Anything <code>.ua/knowledge-graph.json</code> file with type <strong>Code Knowledge Graph</strong>. STLC Manager selects a small, relevant subgraph for each test case and uses it for architecture and dependency context; Project AST remains authoritative for executable symbols.
+          </p>
+          {selectedFiles.find(file => file.type === 'Code Knowledge Graph') ? (
+            <div className="mt-3 rounded-md bg-green-50 p-3 text-sm text-green-800">
+              Using {selectedFiles.find(file => file.type === 'Code Knowledge Graph').name}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-md bg-gray-50 p-3 text-sm text-gray-600">
+              No knowledge graph mapped. Generation will continue with source code and Project AST.
+            </div>
+          )}
         </div>
 
         <div className="bg-white p-4 rounded-lg shadow">

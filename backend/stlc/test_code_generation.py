@@ -23,6 +23,12 @@ from services.project_structure_service import (
     parse_project_structure,
     project_structure_prompt_context,
 )
+from services.knowledge_graph_service import (
+    KnowledgeGraphError,
+    knowledge_graph_prompt_context,
+    parse_knowledge_graph,
+    select_knowledge_context,
+)
 
 router = APIRouter()
 logger = logging.getLogger("test_code_generation")
@@ -88,6 +94,18 @@ async def _load_project_structure(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+async def _load_knowledge_graph(knowledge_graph_file: Optional[UploadFile]):
+    if knowledge_graph_file is None:
+        return None
+    try:
+        return parse_knowledge_graph(
+            await knowledge_graph_file.read(),
+            knowledge_graph_file.filename or "knowledge-graph.json",
+        )
+    except KnowledgeGraphError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/token-estimate")
 async def estimate_test_code_generation_tokens(
     process_title: str = Form(...),
@@ -96,6 +114,7 @@ async def estimate_test_code_generation_tokens(
     custom_prompt: Optional[str] = Form(None),
     capability_file: Optional[UploadFile] = File(None),
     project_ast_file: Optional[UploadFile] = File(None),
+    knowledge_graph_file: Optional[UploadFile] = File(None),
     max_input_tokens: int = Form(64000),
 ):
     """Estimate the exact per-test prompt size before starting generation."""
@@ -104,6 +123,7 @@ async def estimate_test_code_generation_tokens(
     service = _service()
     capability_contract = await _load_capability_contract(capability_file)
     project_structure = await _load_project_structure(project_ast_file, files)
+    knowledge_graph = await _load_knowledge_graph(knowledge_graph_file)
     test_cases = service.get_unique_test_cases_by_process_title(process_title)
     if not test_cases:
         raise HTTPException(status_code=404, detail="No test cases found for the selected process")
@@ -158,6 +178,7 @@ async def estimate_test_code_generation_tokens(
             custom_prompt,
             capability_contract,
             project_structure,
+            select_knowledge_context(knowledge_graph, test_case_info, project_structure),
         )
         per_case.append({
             "test_case_id": test_case_info["id"],
@@ -177,6 +198,23 @@ async def estimate_test_code_generation_tokens(
             capability_prompt_context(capability_contract) if capability_contract else ""
         ),
         "project_ast": count_tokens(project_structure_prompt_context(project_structure)),
+        "code_knowledge_graph": max(
+            (
+                count_tokens(
+                    knowledge_graph_prompt_context(
+                        select_knowledge_context(knowledge_graph, {
+                            "id": item.get("TestCaseID", ""),
+                            "title": item.get("Title", ""),
+                            "description": item.get("Description", ""),
+                            "objective": item.get("Objective", ""),
+                            "steps": item.get("TestSteps", []) or [],
+                        }, project_structure)
+                    )
+                )
+                for item in test_cases
+            ),
+            default=0,
+        ),
     }
     return {
         "success": True,
@@ -295,6 +333,7 @@ async def process_test_code_generation(
     max_test_cases: Optional[int] = Form(None),
     capability_file: Optional[UploadFile] = File(None),
     project_ast_file: Optional[UploadFile] = File(None),
+    knowledge_graph_file: Optional[UploadFile] = File(None),
     max_input_tokens: int = Form(64000),
 ):
     """
@@ -331,6 +370,7 @@ async def process_test_code_generation(
         
         capability_contract = await _load_capability_contract(capability_file)
         project_structure = await _load_project_structure(project_ast_file, files)
+        knowledge_graph = await _load_knowledge_graph(knowledge_graph_file)
         result = await _service().generate_test_codes(
             process_title=process_title,
             environment_session_id=environment_session_id,
@@ -344,6 +384,7 @@ async def process_test_code_generation(
             max_test_cases=max_test_cases,
             capability_contract=capability_contract,
             project_structure=project_structure,
+            knowledge_graph=knowledge_graph,
             max_input_tokens=max_input_tokens,
         )
         
@@ -369,6 +410,7 @@ async def generate_test_code(
     max_test_cases: Optional[int] = Form(None),
     capability_file: Optional[UploadFile] = File(None),
     project_ast_file: Optional[UploadFile] = File(None),
+    knowledge_graph_file: Optional[UploadFile] = File(None),
     max_input_tokens: int = Form(64000),
 ):
     """
@@ -402,6 +444,7 @@ async def generate_test_code(
         
         capability_contract = await _load_capability_contract(capability_file)
         project_structure = await _load_project_structure(project_ast_file, files)
+        knowledge_graph = await _load_knowledge_graph(knowledge_graph_file)
         result = await _service().generate_test_codes(
             process_title=process_title,
             environment_session_id=environment_session_id,
@@ -415,6 +458,7 @@ async def generate_test_code(
             max_test_cases=max_test_cases,
             capability_contract=capability_contract,
             project_structure=project_structure,
+            knowledge_graph=knowledge_graph,
             max_input_tokens=max_input_tokens,
         )
         

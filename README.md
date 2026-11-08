@@ -1003,9 +1003,82 @@ generation. Generated Python is checked against project imports and inferred
 class-method calls; an undeclared project symbol triggers the existing one-shot
 repair prompt and remains ineligible for execution if the repair still fails.
 
+Test Code Generation can additionally consume an
+[Understand Anything](https://github.com/Egonex-AI/Understand-Anything) code
+knowledge graph. Generate `.ua/knowledge-graph.json` in the system-under-test
+repository, then import the project folder or upload the JSON with file type
+`Code Knowledge Graph`. STLC selects a bounded, test-specific subgraph for each
+test case instead of sending the complete graph. Names, summaries, relationships,
+frameworks, and architectural intent provide semantic context, but are treated
+as untrusted, non-authoritative documentation: they cannot authorize a symbol or
+API absent from selected source, Project AST, or the approved robot capability
+contract. The legacy `.understand-anything/knowledge-graph.json` path is also
+recognized. Graph generation is intentionally external; STLC only validates,
+filters, and consumes an existing JSON artifact.
+
+### Using Understand Anything on another computer
+
+This integration is portable: after cloning STLC Manager on another computer,
+Understand Anything can be installed in that computer's coding agent and run
+inside any separate system-under-test repository. STLC Manager does not require
+Understand Anything to run in the STLC repository and does not invoke it as a
+subprocess. It consumes the graph produced in the project being tested.
+
+Install Understand Anything using its official installer, then restart the
+coding CLI or IDE so the skill is discovered:
+
+```powershell
+# Windows PowerShell
+iwr -useb https://raw.githubusercontent.com/Egonex-AI/Understand-Anything/main/install.ps1 | iex
+```
+
+```bash
+# macOS / Linux; explicitly install for Codex
+curl -fsSL https://raw.githubusercontent.com/Egonex-AI/Understand-Anything/main/install.sh | bash -s codex
+```
+
+Open the system-under-test repository as the current project and generate its
+graph. Codex uses the `$` skill prefix; most other supported agents use the `/`
+prefix:
+
+```text
+# Codex
+$understand
+
+# Claude Code and most slash-command platforms
+/understand
+```
+
+The command produces `<project>/.ua/knowledge-graph.json`. Existing projects
+that already use `.understand-anything/` continue writing the graph there. In
+STLC Manager, open **Files**, choose **Select Project Folder**, and select the
+system-under-test root. Supported source files are imported normally and the
+graph is detected as `Code Knowledge Graph`, then mapped to Test Code Generation.
+It can also be uploaded manually with that file type.
+
+Large repositories are supported without placing the full graph in every LLM
+request: STLC ranks nodes for each test case, includes the strongest matches and
+their one-hop relationships, and caps the selected prompt context. The uploaded
+artifact is validated with limits of 25 MB, 100,000 nodes, and 300,000 edges. For
+graphs beyond those limits or very large monorepos, analyze the relevant service
+or package instead of the entire repository:
+
+```text
+/understand path/to/service
+```
+
+The initial whole-project analysis may use substantial model tokens. Later
+`/understand` runs are incremental, and `/understand --auto-update` can keep the
+graph synchronized after commits. Before generating release tests, refresh the
+graph when its `project.gitCommitHash` does not match the tested source revision.
+Project AST and the selected source remain authoritative for executable symbols;
+the knowledge graph improves semantic selection but cannot make a nonexistent
+API valid.
+
 The Files tab also provides **Select Project Folder**. Folder import preserves
 relative paths, marks supported files as `Source Code`, and automatically maps
-them to Scenario, Test Case, and Test Code Generation. Common dependency,
+them to Scenario, Test Case, and Test Code Generation. A discovered Understand
+Anything graph is imported separately and mapped only to Test Code Generation. Common dependency,
 environment, build, VCS, cache, coverage, and editor directories are ignored.
 For Python projects, the selected root directory is removed from importable
 module names while the original path remains in the manifest; `.py` and `.pyi`
