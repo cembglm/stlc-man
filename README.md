@@ -309,10 +309,12 @@ STLC-Manager/
 │   ├── src/store/                # Redux store and slices
 │   ├── src/services/             # Backend API calls
 │   └── src/hooks/                # Model, API-key, and pipeline hooks
+├── config/                       # Environment template and robot capability contract
 ├── docker/                       # ROS 2 Dockerfile, compose file, and helpers
-├── test_inputs/                  # Sample test inputs
-├── test_results/                 # Experiment and test results
+├── scripts/                      # Operator and external-integration utilities
+├── paper_reproducibility/        # Curated experiment evidence and reproducibility package
 └── tests/
+    ├── fixtures/                 # Sample source and requirement inputs
     ├── unit/
     ├── integration/
     ├── performance/
@@ -592,7 +594,7 @@ under `/api/v1`; existing UI endpoints remain unchanged.
 
 ### Running locally
 
-MongoDB is required. Copy `.env.example` to `.env`, adjust the values, then:
+MongoDB is required. Copy `config/.env.example` to `.env`, adjust the values, then:
 
 ```bash
 python -m pip install -r backend/requirements.txt
@@ -624,7 +626,7 @@ use `localhost` there for a database running in another container.
 The root Compose file starts the backend and its required MongoDB dependency:
 
 ```bash
-cp .env.example .env
+cp config/.env.example .env
 # Edit .env before continuing.
 docker compose up -d --build
 docker compose ps
@@ -633,7 +635,7 @@ docker compose ps
 PowerShell equivalent for the first command:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item config/.env.example .env
 ```
 
 For a server deployment, set `API_AUTH_ENABLED=true`, generate a strong
@@ -927,7 +929,7 @@ SSH_EXECUTION_HOST=ifarlab
 SSH_EXECUTION_REMOTE_DIR=~/stlc_runs
 SSH_EXECUTION_IMAGE=ros2-exec-harness:0.3.2
 SSH_EXECUTION_RUNNER=~/colcon_ws/src/docker_harness/twins/run_test.sh
-SSH_EXECUTION_CAPABILITY_FILE=C:\\path\\to\\STLC-Manager\\robot_capabilities.json
+SSH_EXECUTION_CAPABILITY_FILE=C:\\path\\to\\STLC-Manager\\config\\robot_capabilities.json
 SSH_EXECUTION_MAX_CONCURRENCY=16
 SSH_EXECUTION_IDENTITY_FILE=C:\\Users\\matisse\\.ssh\\id_ed25519_ifarlab
 # Optional fallback when unattended key authentication is unavailable.
@@ -955,7 +957,7 @@ environment variables are rejected. Test-code generation validates this contract
 attempts one automatic correction, and the SSH adapter repeats the deterministic
 validation immediately before SCP. Any validation error prevents upload.
 The same gate is available for operators as
-`python validate_generated.py <generated.py> --caps robot_capabilities.json`;
+`python scripts/validate_generated.py <generated.py> --caps config/robot_capabilities.json`;
 exit code 0 is required before dispatch.
 
 For previously generated records, `ros2-exec-harness:0.2.0` and newer retain a

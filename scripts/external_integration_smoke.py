@@ -183,7 +183,12 @@ def run(args):
 
 
 def parse_args():
-    repo_fixture = Path(__file__).resolve().parents[1] / "test_inputs" / "Functional_and_NonFunctional_Requirements.txt"
+    repo_fixture = (
+        Path(__file__).resolve().parents[1]
+        / "tests"
+        / "fixtures"
+        / "Functional_and_NonFunctional_Requirements.txt"
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=os.getenv("STLC_BASE_URL", "http://localhost:8100"))
     parser.add_argument("--api-key", default=os.getenv("STLC_API_KEY"))

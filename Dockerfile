@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-client 
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
-COPY robot_capabilities.json /app/robot_capabilities.json
+COPY config/robot_capabilities.json /app/robot_capabilities.json
 RUN mkdir -p /app/data/artifacts /app/data/uploads && \
     useradd --create-home --uid 10001 stlc && \
     chown -R stlc:stlc /app

@@ -27,7 +27,9 @@ from services.job_service import JobNotFoundError, JobService  # noqa: E402
 
 
 def _approved_capability_contract():
-    contract = json.loads((BACKEND_DIR.parent / "robot_capabilities.json").read_text(encoding="utf-8"))
+    contract = json.loads(
+        (BACKEND_DIR.parent / "config" / "robot_capabilities.json").read_text(encoding="utf-8")
+    )
     contract["meta"]["approval"] = {
         "approved": True,
         "approved_by": "test-suite",

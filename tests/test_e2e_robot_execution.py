@@ -25,7 +25,7 @@ PROCESS_TITLE = "E2E Robot Test - UR10e Joint Control"
 MODEL = "llama-3.2-3b-instruct"
 SOURCE_FILE_PATH = Path(os.getenv(
     "STLC_E2E_SOURCE_FILE",
-    str(Path(__file__).parent.parent / "test_inputs" / "ProductDetection.cpp"),
+    str(Path(__file__).parent / "fixtures" / "ProductDetection.cpp"),
 ))
 
 # Colors for terminal output

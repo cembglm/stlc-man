@@ -46,7 +46,7 @@ def _await_job(client: TestClient, job_id: str, timeout_seconds: int = 240):
 def test_real_headless_generation_chain():
     process_title = f"headless-audit-{uuid.uuid4().hex[:10]}"
     model = os.getenv("HEADLESS_E2E_MODEL", "llama-3.2-3b-instruct")
-    source_path = REPO_DIR / "test_inputs" / "Functional_and_NonFunctional_Requirements.txt"
+    source_path = REPO_DIR / "tests" / "fixtures" / "Functional_and_NonFunctional_Requirements.txt"
     source_content = source_path.read_text(encoding="utf-8")
 
     with TestClient(app) as client:
