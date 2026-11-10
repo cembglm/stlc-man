@@ -40,7 +40,7 @@ MAX_PARALLEL = 5
 # Repository-owned fixture; override without introducing a local repository dependency.
 SOURCE_FILE_PATH = os.getenv(
     "STLC_E2E_SOURCE_FILE",
-    str(Path(__file__).parent.parent / "test_inputs" / "ProductDetection.cpp"),
+    str(Path(__file__).parent / "fixtures" / "ProductDetection.cpp"),
 )
 
 # MongoDB Configuration

@@ -118,6 +118,10 @@ uploads/
 /backend/uploads/
 /frontend/uploads/
 
+# Generated application and legacy experiment outputs
+/artifacts/
+/test_results/
+
 # Data files
 *.db
 *.sqlite

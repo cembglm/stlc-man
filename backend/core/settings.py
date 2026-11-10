@@ -115,7 +115,9 @@ class Settings:
         if colibri_max_concurrency < 1:
             raise ValueError("COLIBRI_MAX_CONCURRENCY must be at least 1")
 
-        default_capability_file = Path(__file__).resolve().parents[2] / "robot_capabilities.json"
+        default_capability_file = (
+            Path(__file__).resolve().parents[2] / "config" / "robot_capabilities.json"
+        )
 
         return cls(
             app_host=os.getenv("APP_HOST", "0.0.0.0"),

@@ -4,6 +4,9 @@ Bu klasör STLC Manager projesinin tüm test dosyalarını organize edilmiş şe
 
 ## Klasör Yapısı
 
+### `/fixtures`
+Testlerde ve smoke-test akışlarında kullanılan örnek kaynak kodu, gereksinim ve model girdileri.
+
 ### `/unit`
 Birim testleri - Her bir fonksiyon veya sınıfın ayrı ayrı test edildiği dosyalar:
 - API testleri (`test_api_*.py`)

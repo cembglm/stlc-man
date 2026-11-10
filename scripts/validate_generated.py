@@ -6,7 +6,7 @@ It delegates to the same combined validator used by the backend immediately
 before SCP, so command-line and application decisions cannot drift apart.
 
 Usage:
-    python validate_generated.py generated.py [--caps robot_capabilities.json] [--json]
+    python scripts/validate_generated.py generated.py [--caps config/robot_capabilities.json] [--json]
 
 Exit codes:
     0  validation passed (warnings may be present)
@@ -24,7 +24,7 @@ import sys
 from typing import Any, Dict, List, Tuple
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parent
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = REPOSITORY_ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
@@ -57,7 +57,7 @@ def main() -> int:
     parser.add_argument(
         "--caps",
         type=Path,
-        default=REPOSITORY_ROOT / "robot_capabilities.json",
+        default=REPOSITORY_ROOT / "config" / "robot_capabilities.json",
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
