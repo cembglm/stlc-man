@@ -79,6 +79,7 @@ class Settings:
     ssh_execution_connect_timeout_seconds: int
     monitoring_enabled: bool
     monitoring_event_retention_days: int
+    ifarlab_inbox_dir: Path
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -177,6 +178,7 @@ class Settings:
             ),
             monitoring_enabled=_as_bool("MONITORING_ENABLED", True),
             monitoring_event_retention_days=_as_int("MONITORING_EVENT_RETENTION_DAYS", 30),
+            ifarlab_inbox_dir=Path(os.getenv("IFARLAB_INBOX_DIR", "ifarlab_inbox")),
         )
 
 

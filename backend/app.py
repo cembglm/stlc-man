@@ -38,6 +38,7 @@ from routers.pipeline_router import router as pipeline_router
 from routers.operations_router import router as operations_router
 from routers.external_api_router import router as external_api_router
 from routers.monitoring_router import router as monitoring_router
+from routers.traceability_router import router as traceability_router
 from core.settings import get_settings
 # from routers.test_scenario_analytics_router import router as test_scenario_analytics_router
 
@@ -144,6 +145,7 @@ app.include_router(pipeline_router, prefix="/api/pipeline")  # Pipeline orchestr
 app.include_router(operations_router)
 app.include_router(external_api_router)
 app.include_router(monitoring_router)
+app.include_router(traceability_router)
 # app.include_router(test_scenario_analytics_router, prefix="/api")  # Test scenario analytics
 
 @app.get("/")

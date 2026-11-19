@@ -22,6 +22,7 @@ import GlobalAIConfig from './GlobalAIConfig';
 import { toast } from '../utils/notifications';
 import TestExecutionMethodSelector from './TestExecutionMethodSelector';
 import PipelineResultsPanel from './PipelineResultsPanel';
+import TraceabilityDashboard from './traceability/TraceabilityDashboard';
 
 export default function TabPanel({
   processes,
@@ -496,6 +497,7 @@ Important:
   const tabs = [
     { id: 'files', name: 'File Management' },
     { id: 'pipeline', name: 'Pipeline' },
+    { id: 'traceability', name: 'Traceability' },
     ...processes.map(process => ({
       id: process.id,
       name: process.name
@@ -938,12 +940,13 @@ Important:
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left Panel */}
-        <div className="w-1/2 flex flex-col min-h-0 border-r border-gray-200">
+        <div className={clsx("flex flex-col min-h-0 border-r border-gray-200", activeTab === 'traceability' ? 'w-full' : 'w-1/2')}>
           {/* Header */}
           <div className="flex-none h-16 px-6 flex items-center justify-between border-b border-gray-200 bg-white">
             <h2 className="text-xl font-bold text-gray-900">
               {activeTab === 'files' ? 'File Management' :
                activeTab === 'pipeline' ? 'Pipeline Configuration' : 
+               activeTab === 'traceability' ? 'Evidence Traceability' :
                processes.find(p => p.id === activeTab)?.name}
             </h2>
             <button
@@ -1056,6 +1059,8 @@ Important:
                   </div>
                 )}
               </div>
+            ) : activeTab === 'traceability' ? (
+              <TraceabilityDashboard />
             ) : (
               renderProcessContent(activeTab)
             )}
@@ -1063,7 +1068,7 @@ Important:
 
           {/* Footer */}
           <div className="flex-none h-16 px-6 flex items-center border-t border-gray-200 bg-white">
-            {activeTab !== 'files' && (
+            {activeTab !== 'files' && activeTab !== 'traceability' && (
               <button
                 onClick={() => {
                   if (activeTab !== 'pipeline') {
@@ -1297,7 +1302,7 @@ Important:
         </div>
 
         {/* Right Panel */}
-        <div className="w-1/2 flex flex-col min-h-0">
+        {activeTab !== 'traceability' && <div className="w-1/2 flex flex-col min-h-0">
           {/* Header */}
           <div className="flex-none h-16 px-6 flex items-center justify-between border-b border-gray-200 bg-white">
             <h2 className="text-xl font-medium text-gray-900">
@@ -1355,7 +1360,7 @@ Important:
               </button>
             )}
           </div>
-        </div>
+        </div>}
       </div>
       
       {/* API Settings Modal */}
