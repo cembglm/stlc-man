@@ -3,6 +3,7 @@
 import json
 import re
 import tarfile
+import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict
 
@@ -14,8 +15,8 @@ PACKAGE_PATTERN = re.compile(
     r"^(?P<submission>S-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4})__"
     r"(?P<run>R-[0-9]{8}-[0-9]{4})\.result\.tar$"
 )
-ALLOWED_MEMBERS = {"result.json", "verdict.json", "metrics.json", "junit.xml"}
-REQUIRED_MEMBERS = set(ALLOWED_MEMBERS)
+ALLOWED_MEMBERS = {"result.json", "verdict.json", "metrics.json", "junit.xml", "coverage.xml"}
+REQUIRED_MEMBERS = {"result.json", "verdict.json", "metrics.json", "junit.xml"}
 MAX_PACKAGE_BYTES = 50 * 1024 * 1024
 MAX_RESULT_BYTES = 10 * 1024 * 1024
 
@@ -65,13 +66,26 @@ def read_result_package(package_name: str) -> IFARLABResult:
         result_member = by_name["result.json"]
         if result_member.size > MAX_RESULT_BYTES:
             raise ResultPackageError("result.json exceeds the size limit")
-        stream = archive.extractfile(result_member)
-        if stream is None:
-            raise ResultPackageError("result.json could not be read")
-        try:
-            payload: Dict[str, Any] = json.loads(stream.read().decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ResultPackageError("result.json must be valid UTF-8 JSON") from exc
+        json_payloads = {}
+        for name in ("result.json", "verdict.json", "metrics.json"):
+            stream = archive.extractfile(by_name[name])
+            if stream is None:
+                raise ResultPackageError(f"{name} could not be read")
+            try:
+                json_payloads[name] = json.loads(stream.read().decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ResultPackageError(f"{name} must be valid UTF-8 JSON") from exc
+        for name in ("junit.xml", "coverage.xml"):
+            if name not in by_name:
+                continue
+            stream = archive.extractfile(by_name[name])
+            if stream is None:
+                raise ResultPackageError(f"{name} could not be read")
+            try:
+                ET.fromstring(stream.read())
+            except ET.ParseError as exc:
+                raise ResultPackageError(f"{name} must be well-formed XML") from exc
+        payload: Dict[str, Any] = json_payloads["result.json"]
 
     match = PACKAGE_PATTERN.fullmatch(package_name)
     if payload.get("submission_id") != match.group("submission") or payload.get("run_id") != match.group("run"):

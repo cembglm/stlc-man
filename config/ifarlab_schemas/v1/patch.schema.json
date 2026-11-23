@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "patch.schema.json",
+  "title": "ASRLab patch proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["patch_id", "defect_id", "sut_version", "change_summary", "diff_sha256", "approval", "applied_in_version"],
+  "properties": {
+    "patch_id": {"pattern": "^P-[0-9]{4}-[0-9]{4}$"},
+    "defect_id": {"pattern": "^D-[0-9]{4}-[0-9]{4}$"},
+    "sut_version": {"type": "string"},
+    "change_summary": {"type": "string", "minLength": 1},
+    "diff_sha256": {"$ref": "shared.schema.json#/$defs/sha256"},
+    "approval": {"anyOf": [{"$ref": "shared.schema.json#/$defs/approval"}, {"type": "null"}]},
+    "applied_in_version": {"type": ["string", "null"]}
+  }
+}

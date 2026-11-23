@@ -43,6 +43,15 @@ class TestReportingService:
         """Initialize database connection"""
         if self.db is None:
             self.db = await get_database()
+
+    async def get_kpi_3_4_section(self, **scope) -> Dict[str, Any]:
+        """Return the deterministic KPI section used by API and dashboard.
+
+        Numerical coverage is never delegated to an LLM report prompt.
+        """
+        from services.requirement_coverage_service import RequirementCoverageService
+        from services.traceability_service import traceability_service
+        return await RequirementCoverageService(traceability_service).calculate(**scope)
     
     async def get_test_reporting_prompt(self) -> Dict[str, str]:
         """

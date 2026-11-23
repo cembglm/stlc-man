@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "prefixes": {
+    "INSP": "visual/quality inspection",
+    "MOTION": "motion and reachability",
+    "SAFETY": "safety constraints",
+    "PERF": "performance and timing",
+    "INTEG": "integration behavior"
+  }
+}

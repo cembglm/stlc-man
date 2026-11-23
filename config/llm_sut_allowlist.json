@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "default": "deny",
+  "qcr_only_calls_restricted": false,
+  "approvals": [
+    {
+      "approval_id": "LLM-APPROVAL-LOCAL-001",
+      "provider": "lm_studio",
+      "model": "*",
+      "active": true,
+      "approved_by": "IFARLAB-pending-confirmation",
+      "approved_at": null,
+      "scope": "local-only; no SUT bytes leave ASRLab host"
+    }
+  ],
+  "change_control": "Replace the provisional local entry with IFARLAB-signed provider/model approvals before production use. Every change must retain approver and timestamp."
+}

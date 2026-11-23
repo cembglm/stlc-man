@@ -4,7 +4,9 @@ from utils.text_processor import TextProcessor
 from core.prompt_manager import get_base_prompt, get_requirement_analysis_system_suffix, save_session_data
 import logging
 import os
-from datetime import datetime
+import hashlib
+import re
+from datetime import datetime, timezone
 
 logger = logging.getLogger("RequirementAnalysisService")
 
@@ -17,6 +19,40 @@ class RequirementAnalysisService:
 
     def normalize_prompt(self, text):
         return ' '.join(text.strip().split()).lower()
+
+    @staticmethod
+    def _structured_requirements(text, source_artifact):
+        """Extract only explicitly identified FR/NFR/REQ records.
+
+        Type is derived from the identifier prefix, never from prose. Lines
+        without an explicit stable identifier remain outside the structured set
+        and require user classification.
+        """
+        from models.traceability import RequirementSet
+
+        source_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        records = []
+        pattern = re.compile(r"^\s*(FR|NFR|REQ)[-_ ]?(\d+|[A-Z][A-Z0-9_.-]*)\s*[.:)-]\s*(.+?)\s*$", re.IGNORECASE)
+        for line in text.splitlines():
+            match = pattern.match(line)
+            if not match:
+                continue
+            prefix, identifier, description = match.groups()
+            prefix = prefix.upper()
+            normalized_id = f"{prefix}-{int(identifier):03d}" if identifier.isdigit() else f"{prefix}-{identifier.upper()}"
+            requirement_type = "functional" if prefix == "FR" else "non_functional" if prefix == "NFR" else "unclassified"
+            records.append({
+                "id": normalized_id, "version": "1.0", "type": requirement_type,
+                "text": description, "source_artifact": source_artifact,
+                "source_artifact_sha256": source_hash, "acceptance": [],
+                "created_at": datetime.now(timezone.utc), "modified_at": datetime.now(timezone.utc),
+            })
+        if not records:
+            return None
+        return RequirementSet(
+            requirements_set_version=f"native-{source_hash[:12]}",
+            requirements=records,
+        )
 
     async def run_requirement_analysis(self, files, types=None, model_key=None, custom_prompt=None, session_id=None, api_key=None):
         try:
@@ -135,6 +171,18 @@ class RequirementAnalysisService:
 
             file_names = [os.path.basename(path) for path in file_paths]
             files_header = "Files analyzed:\n" + "\n".join(file_names)
+            structured_set = self._structured_requirements(requirement_doc_content, ", ".join(file_names))
+            structured_payload = structured_set.model_dump(mode="json") if structured_set else None
+            registration_error = None
+            if structured_set:
+                try:
+                    from services.traceability_service import traceability_service
+                    await traceability_service.save_requirement_set(structured_set)
+                except Exception as exc:
+                    # Preserve the existing analysis workflow if traceability
+                    # persistence is temporarily unavailable.
+                    registration_error = str(exc)
+                    self.logger.warning("Structured requirement registration failed: %s", exc)
 
             edited_prompt = False
             if custom_prompt and base_prompt:
@@ -146,7 +194,9 @@ class RequirementAnalysisService:
                 "session_id": session_id,
                 "output": {
                     "files": files_header,
-                    "analysis": final_result
+                    "analysis": final_result,
+                    "requirement_set": structured_payload,
+                    "requirement_registration_error": registration_error,
                 },
                 "edited_prompt": edited_prompt,
                 "used_prompt": used_prompt,
@@ -170,7 +220,9 @@ class RequirementAnalysisService:
                 "prompt_info": {
                     "source": prompt_source
                 },
-                "session_id": session_id or "unknown"
+                "session_id": session_id or "unknown",
+                "requirement_set": structured_payload,
+                "requirement_registration_error": registration_error,
             }
 
         except Exception as e:
@@ -234,4 +286,4 @@ class RequirementAnalysisService:
         for msg in technical_messages:
             result = result.replace(msg, '').strip()
         
-        return result 
+        return result

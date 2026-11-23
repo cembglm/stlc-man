@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from models.traceability import (
-    CodeQuality, GenerationProvenance, ManifestTest, RequirementSet,
+    CodeQuality, ExecutionEnvironment, GenerationProvenance, ManifestTest, RequirementSet,
     SubmissionManifest,
 )
 from services.traceability_contract import (
@@ -81,3 +81,17 @@ def test_missing_llm_metadata_is_not_fabricated():
 def test_incorrect_contract_hash_is_rejected():
     with pytest.raises(ValueError, match="contract_sha256"):
         validate_manifest_mapping(CODE, manifest(contract_sha256="0" * 64), ["FR-001"], ["TC_001"])
+
+
+def test_unclassified_requirement_is_explicit_not_inferred():
+    value = RequirementSet(requirements_set_version="v1", requirements=[{
+        "id": "REQ-UNKNOWN", "version": "1", "type": "unclassified", "text": "Needs classification"
+    }])
+    assert value.requirements[0].type.value == "unclassified"
+
+
+def test_digital_twin_environment_requires_provenance():
+    incomplete = ExecutionEnvironment(scope="digital_twin", environment_id="env", digital_twin_id="dt")
+    complete = ExecutionEnvironment(scope="digital_twin", environment_id="env", digital_twin_id="dt", registry_reference="registry://dt/1")
+    assert incomplete.qualifies_as_digital_twin is False
+    assert complete.qualifies_as_digital_twin is True

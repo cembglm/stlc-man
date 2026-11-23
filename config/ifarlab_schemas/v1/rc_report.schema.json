@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rc_report.schema.json",
+  "title": "ASRLab release candidate report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rc_id", "sut_version", "exit_criteria", "requirement_verdicts", "evidence_references", "closed_defects", "twin_fidelity_reference"],
+  "properties": {
+    "rc_id": {"pattern": "^RC-[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+$"},
+    "sut_version": {"type": "string"},
+    "exit_criteria": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["satisfied"],
+        "properties": {
+          "satisfied": {"const": true},
+          "value": {},
+          "evidence": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "requirement_verdicts": {"type": "object", "patternProperties": {"^QCR-[0-9]{3}$": {"enum": ["PASS", "FAIL", "NOT_VERIFIED", "NOT_COVERED", "STALE"]}}, "additionalProperties": false},
+    "evidence_references": {"type": "array", "items": {"type": "string"}},
+    "closed_defects": {"type": "array", "items": {"pattern": "^D-[0-9]{4}-[0-9]{4}$"}},
+    "twin_fidelity_reference": {"type": "string", "minLength": 1}
+  }
+}

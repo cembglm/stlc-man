@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "defect.schema.json",
+  "title": "ASRLab defect",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["defect_id", "sut_version", "requirement_id", "test_case_id", "run_id", "fail_cause", "severity", "symptom", "evidence", "proposed_patch", "status"],
+  "properties": {
+    "defect_id": {"pattern": "^D-[0-9]{4}-[0-9]{4}$"},
+    "sut_version": {"type": "string"},
+    "requirement_id": {"pattern": "^QCR-[0-9]{3}$"},
+    "test_case_id": {"pattern": "^[A-Z][A-Z0-9_]*_[0-9]{3}$"},
+    "run_id": {"pattern": "^R-[0-9]{8}-[0-9]{4}$"},
+    "scenario_id": {"pattern": "^SC-[0-9]{3}$"},
+    "fail_cause": {"const": "sut"},
+    "severity": {"enum": ["low", "medium", "high", "critical"]},
+    "symptom": {"type": "string", "minLength": 1},
+    "evidence": {"type": "array", "items": {"type": "object"}},
+    "proposed_patch": {"type": ["string", "null"]},
+    "status": {"type": "string"}
+  }
+}

@@ -142,6 +142,27 @@ class SshDockerExecutionClient(ExecutionAdapter):
         64: "IFARLAB rejected the runner invocation (exit code 64)",
     }
 
+    @staticmethod
+    def _submission_filename(request: ExecutionRequest, execution_id: str) -> str:
+        """Use the v1 contract name when traceability metadata is available.
+
+        The UUID name remains only as the documented migration fallback for
+        legacy callers that do not yet provide a submission identifier.
+        """
+        submission_id = request.metadata.get("submission_id")
+        test_case_id = request.test_case_id or request.metadata.get("test_case_id")
+        if not submission_id and not test_case_id:
+            return f"{execution_id}.py"
+        if not re.fullmatch(r"S-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}", str(submission_id or "")):
+            raise ValueError("submission_id is required and must follow S-YYYY-MM-DD-NNNN")
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*_[0-9]{3}", str(test_case_id or "")):
+            raise ValueError("test_case_id does not follow the IFARLAB contract")
+        short_name = str(request.metadata.get("short_name") or "generated_test").strip().lower()
+        short_name = re.sub(r"[^a-z0-9_]+", "_", short_name).strip("_")[:40]
+        if not short_name:
+            raise ValueError("short_name must contain at least one ASCII letter or digit")
+        return f"{submission_id}__{test_case_id}__{short_name}.py"
+
     def __init__(
         self,
         host: Optional[str] = None,
@@ -367,7 +388,7 @@ class SshDockerExecutionClient(ExecutionAdapter):
             )
 
         execution_id = f"exec-{uuid.uuid4().hex}"
-        filename = f"{execution_id}.py"
+        filename = self._submission_filename(request, execution_id)
         remote_file = self._remote_file(filename)
         started_at = datetime.now(timezone.utc).isoformat()
         checksum = hashlib.sha256(request.test_code.encode("utf-8")).hexdigest()

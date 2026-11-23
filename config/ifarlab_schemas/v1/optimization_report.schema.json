@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "optimization_report.schema.json",
+  "title": "ASRLab optimization report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sut", "test_count", "coverage", "mutation_score_ratio", "removed_tests", "added_tests"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "sut": {"$ref": "shared.schema.json#/$defs/sut"},
+    "test_count": {"type": "object", "required": ["before", "after"], "properties": {"before": {"type": "integer", "minimum": 0}, "after": {"type": "integer", "minimum": 0}}},
+    "coverage": {"type": "object", "required": ["requirements_before_ratio", "requirements_after_ratio", "acceptance_before_ratio", "acceptance_after_ratio", "branch_before_ratio", "branch_after_ratio"], "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+    "mutation_score_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+    "removed_tests": {"type": "array", "items": {"$ref": "shared.schema.json#/$defs/testChange"}},
+    "added_tests": {"type": "array", "items": {"$ref": "shared.schema.json#/$defs/testChange"}}
+  }
+}

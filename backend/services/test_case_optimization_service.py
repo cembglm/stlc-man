@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from core.database import get_db
 from utils.model_client import LLMClient
 from utils.retry_utils import retry_llm_call
@@ -29,6 +29,9 @@ class TestCase(BaseModel):
     Title: str
     Description: Optional[str] = None
     Objective: Optional[str] = None
+    RequirementIDs: List[str] = Field(default_factory=list)
+    RequirementsSetVersion: Optional[str] = None
+    model_config = {"extra": "allow"}
 
 class TestCaseList(BaseModel):
     test_cases: List[TestCase]
@@ -255,10 +258,14 @@ async def smart_select(test_case_list: TestCaseList, custom_prompt: str = None, 
 
             if comparison_result:
                 is_duplicate = True
+                unique_case.RequirementIDs = sorted(set(unique_case.RequirementIDs) | set(case.RequirementIDs))
+                merged_ids = list(getattr(unique_case, "MergedFromTestCaseIDs", []))
+                unique_case.MergedFromTestCaseIDs = list(dict.fromkeys([*merged_ids, case.TestCaseID]))
                 # Benzer test durumlarını kaydet
                 duplicates.append({
                     "DuplicateCase": case.model_dump(),
-                    "MatchedWith": unique_case.model_dump()
+                    "MatchedWith": unique_case.model_dump(),
+                    "CoverageEffect": {"preserved_requirement_ids": unique_case.RequirementIDs},
                 })
                 break
 
@@ -704,12 +711,22 @@ RULES:
                 
                 if 0 <= rep_idx < len(test_case_list.test_cases):
                     representative = test_case_list.test_cases[rep_idx]
+                    merged_requirement_ids = set(representative.RequirementIDs)
+                    merged_case_ids = list(getattr(representative, "MergedFromTestCaseIDs", []))
+                    for dup_idx in dup_indices:
+                        if 0 <= dup_idx < len(test_case_list.test_cases):
+                            duplicate_case = test_case_list.test_cases[dup_idx]
+                            merged_requirement_ids.update(duplicate_case.RequirementIDs)
+                            merged_case_ids.append(duplicate_case.TestCaseID)
+                    representative.RequirementIDs = sorted(merged_requirement_ids)
+                    representative.MergedFromTestCaseIDs = list(dict.fromkeys(merged_case_ids))
                     for dup_idx in dup_indices:
                         if 0 <= dup_idx < len(test_case_list.test_cases):
                             duplicate_case = test_case_list.test_cases[dup_idx]
                             duplicates.append({
                                 "DuplicateCase": duplicate_case.model_dump(),
-                                "MatchedWith": representative.model_dump()
+                                "MatchedWith": representative.model_dump(),
+                                "CoverageEffect": {"preserved_requirement_ids": representative.RequirementIDs},
                             })
             
             # Create comparison log for bulk processing
@@ -970,6 +987,8 @@ class TestCaseOptimizationService:
                                 "Title": title,
                                 "Description": description,
                                 "Objective": objective,
+                                "RequirementIDs": test_case.get("RequirementIDs") or test_case.get("requirements") or [],
+                                "RequirementsSetVersion": test_case.get("RequirementsSetVersion") or test_case.get("requirements_set_version"),
                                 "Category": category,
                                 "Comments": test_case.get("Comments", ""),
                                 "SelectedCategory": selected_category,
@@ -1265,6 +1284,19 @@ class TestCaseOptimizationService:
             
             # Extract unique test cases from result
             unique_test_cases = result_list
+            # Parallel optimizers return the same TestCaseList contract. Merge
+            # requirement identities from removed cases into their retained
+            # representative so coverage cannot be lost during deduplication.
+            retained_by_id = {case.TestCaseID: case for case in unique_test_cases.test_cases}
+            for duplicate in unique_test_cases.duplicates:
+                removed = duplicate.get("DuplicateCase", {})
+                matched = duplicate.get("MatchedWith", {})
+                representative = retained_by_id.get(matched.get("TestCaseID"))
+                if representative:
+                    representative.RequirementIDs = sorted(
+                        set(representative.RequirementIDs) | set(removed.get("RequirementIDs", []))
+                    )
+                    duplicate["CoverageEffect"] = {"preserved_requirement_ids": representative.RequirementIDs}
             
             # Check if process was stopped during execution
             if process_id in running_processes and running_processes[process_id]["status"] == "stopped":

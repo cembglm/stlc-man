@@ -482,6 +482,7 @@ Respond ONLY with a valid JSON object with this EXACT structure (no other text):
   "TestScenarios": [
     {{
       "ScenarioID": "TS_001",
+      "RequirementIDs": ["FR-001"],
       "Title": "Clear and descriptive test scenario title",
       "Description": "Detailed description of what this test scenario covers and why it's important",
       "Objective": "What this test aims to verify or validate",
@@ -519,6 +520,7 @@ Respond ONLY with a valid JSON object with this EXACT structure (no other text):
   "TestScenarios": [
     {{
       "ScenarioID": "TS_001",
+      "RequirementIDs": ["FR-001"],
       "Title": "Clear and descriptive test scenario title",
       "Description": "Detailed description of what this test scenario covers and why it's important",
       "Objective": "What this test aims to verify or validate",
@@ -701,6 +703,18 @@ Generate between 5-8 comprehensive test scenarios. Start your response immediate
             scenarios = test_scenarios["TestScenarios"]
             if not isinstance(scenarios, list):
                 raise ValueError("TestScenarios must be a list")
+
+            # Preserve explicit upstream identities. Never infer links from prose.
+            upstream_requirement_ids = input_data.get("requirement_ids") or []
+            upstream_requirement_version = input_data.get("requirements_set_version")
+            for scenario in scenarios:
+                explicit_ids = scenario.get("RequirementIDs") or scenario.get("requirement_ids") or []
+                scenario["RequirementIDs"] = [
+                    requirement_id for requirement_id in explicit_ids
+                    if not upstream_requirement_ids or requirement_id in upstream_requirement_ids
+                ]
+                if upstream_requirement_version:
+                    scenario.setdefault("RequirementsSetVersion", upstream_requirement_version)
             
             logger.info(f"[DEBUG] Validation passed - found {len(scenarios)} scenarios")
               # Add summary if not present

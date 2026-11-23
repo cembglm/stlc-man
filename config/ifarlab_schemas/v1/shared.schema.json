@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "shared.schema.json",
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "sut": {"type": "object", "additionalProperties": false, "required": ["sut_id", "version", "source_sha256"], "properties": {"sut_id": {"type": "string", "minLength": 1}, "version": {"type": "string"}, "source_sha256": {"$ref": "#/$defs/sha256"}}},
+    "approval": {"type": "object", "additionalProperties": false, "required": ["approved_by", "approved_at", "decision"], "properties": {"approved_by": {"type": "string", "minLength": 1}, "approved_at": {"type": "string", "format": "date-time"}, "decision": {"enum": ["approved", "rejected"]}}},
+    "testChange": {"type": "object", "additionalProperties": false, "required": ["test_case_id", "reason"], "properties": {"test_case_id": {"pattern": "^[A-Z][A-Z0-9_]*_[0-9]{3}$"}, "reason": {"type": "string", "minLength": 1}}}
+  }
+}

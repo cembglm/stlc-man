@@ -65,3 +65,13 @@ def test_rejects_missing_contract_member(tmp_path, monkeypatch):
     write_tar(tmp_path / PACKAGE, {"result.json": json.dumps(result_payload())})
     with pytest.raises(packages.ResultPackageError, match="missing required"):
         packages.read_result_package(PACKAGE)
+
+
+def test_rejects_invalid_verdict_json(tmp_path, monkeypatch):
+    configure(monkeypatch, tmp_path)
+    write_tar(tmp_path / PACKAGE, {
+        "result.json": json.dumps(result_payload()), "verdict.json": "not-json",
+        "metrics.json": "{}", "junit.xml": "<testsuite />", "coverage.xml": "<coverage />",
+    })
+    with pytest.raises(packages.ResultPackageError, match="verdict.json"):
+        packages.read_result_package(PACKAGE)

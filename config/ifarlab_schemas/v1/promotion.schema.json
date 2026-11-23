@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "promotion.schema.json",
+  "title": "ASRLab promotion record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["promotion_id", "rc_id", "rc_report_sha256", "approval", "target_cell"],
+  "properties": {
+    "promotion_id": {"pattern": "^PRM-[0-9]{4}-[0-9]{4}$"},
+    "rc_id": {"pattern": "^RC-[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+$"},
+    "rc_report_sha256": {"$ref": "shared.schema.json#/$defs/sha256"},
+    "approval": {"allOf": [{"$ref": "shared.schema.json#/$defs/approval"}, {"properties": {"decision": {"const": "approved"}}}]},
+    "target_cell": {"type": "string", "minLength": 1}
+  }
+}

@@ -51,7 +51,7 @@ def evaluate_test(
     code_quality_verdict: Optional[str] = None,
 ) -> Dict[str, Any]:
     issues = []
-    for key in ("infrastructure_failed", "reset_failed", "timed_out", "environment_invalid", "trustworthy"):
+    for key in ("infrastructure_failed", "reset_failed", "timed_out", "environment_invalid", "skipped", "blocked", "not_executed", "trustworthy"):
         value = validity.get(key)
         if value is True and key != "trustworthy": issues.append(key)
         if key == "trustworthy" and value is False: issues.append("execution_not_trustworthy")

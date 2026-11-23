@@ -7,7 +7,7 @@ import OutputPanel from './OutputPanel';
 import TestScenarioGenerationForm from './processes/TestScenarioGenerationForm';
 import TestCaseGenerationForm from './processes/TestCaseGenerationForm';
 import TestCaseOptimization from './processes/TestCaseOptimization';
-import TestCodeGeneration from './processes/TestCodeGeneration';
+import TestCodeGenerationWorkspace from './processes/TestCodeGenerationWorkspace';
 import TestExecutionForm from './processes/TestExecutionForm';
 import RobotTestExecutionPanel from './processes/RobotTestExecutionPanel';
 import TestReportingForm from './processes/TestReportingForm';
@@ -510,7 +510,7 @@ Important:
     'test-scenario-generation': TestScenarioGenerationForm,
     'test-case-generation': TestCaseGenerationForm,
     'test-case-optimization': TestCaseOptimization,
-    'test-code-generation': TestCodeGeneration,
+    'test-code-generation': TestCodeGenerationWorkspace,
     'test-execution': TestExecutionForm,
     'test-reporting': TestReportingForm,
     'test-closure': TestClosureForm,

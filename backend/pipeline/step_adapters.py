@@ -370,6 +370,18 @@ async def run_test_scenario_generation(
 
         # 2. Run the scenario generation step — pass empty files list since
         # content is already embedded in final_prompt
+        requirement_output = previous_results.get("requirement-analysis")
+        requirement_set = (
+            (requirement_output.output or {}).get("requirement_set")
+            if requirement_output and requirement_output.status == PipelineStepStatus.COMPLETED else None
+        ) or {}
+        requirement_ids = [item["id"] for item in requirement_set.get("requirements", [])]
+        if requirement_ids:
+            final_prompt += (
+                "\n\n## Authoritative requirement identifiers\n"
+                + ", ".join(requirement_ids)
+                + "\nEvery scenario must include a RequirementIDs array containing only the identifiers it directly addresses. Do not map all requirements by default."
+            )
         run_data = {
             "files": [],  # content is pre-embedded in final_prompt
             "model": model,
@@ -380,6 +392,8 @@ async def run_test_scenario_generation(
             "process_title": process_title,
             "api_key": api_key,
             "project_structure": project_structure,
+            "requirement_ids": requirement_ids,
+            "requirements_set_version": requirement_set.get("requirements_set_version"),
         }
         result = await run_step(run_data)
         if result.get("status") == "error":
@@ -443,6 +457,8 @@ async def run_test_case_generation(
                 "expected_behavior": item.get("expected_behavior") or item.get("ExpectedBehavior", "pass"),
                 "execution_status": item.get("execution_status") or item.get("ExecutionStatus", ""),
                 "unsupported_reason": item.get("unsupported_reason") or item.get("UnsupportedReason", ""),
+                "requirement_ids": item.get("requirement_ids") or item.get("RequirementIDs") or [],
+                "requirements_set_version": item.get("requirements_set_version") or item.get("RequirementsSetVersion"),
             }
             for item in scenarios
         ]

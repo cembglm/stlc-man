@@ -38,7 +38,7 @@ class FakeCollection:
 class FakeDB:
     def __init__(self):
         self.requirement_sets = FakeCollection([{"requirements_set_version": "v1", "is_current": True, "requirements": [{"id": "NFR-001", "version": "1", "type": "non_functional", "text": "Fast", "acceptance": [{"metric": "trajectory_duration_s", "operator": "<=", "threshold": 20, "unit": "s"}]}]}])
-        manifest = {"submission_id": "S-2026-11-18-0001", "revision": 1, "code_sha256": "a" * 64, "contract_sha256": contract_sha256(), "requirements_set_version": "v1", "generation": {"model": "m"}, "code_quality": {"verdict": "pass"}, "tests": [{"function": "test_tc_001_motion", "test_case_id": "TC_001", "requirements": ["NFR-001"], "oracle": {}}]}
+        manifest = {"submission_id": "S-2026-11-18-0001", "revision": 1, "code_sha256": "a" * 64, "contract_sha256": contract_sha256(), "requirements_set_version": "v1", "generation": {"model": "m"}, "code_quality": {"validator": "pass", "syntax": "pass", "verdict": "pass"}, "tests": [{"function": "test_tc_001_motion", "test_case_id": "TC_001", "scenario_id": "TS-001", "requirements": ["NFR-001"], "oracle": {}}]}
         self.traceability_submissions = FakeCollection([{"submission_id": "S-2026-11-18-0001", "revision": 1, "manifest": manifest, "code": "def test_tc_001_motion(): pass"}])
         self.ifarlab_result_deliveries = FakeCollection()
         self.verification_verdicts = FakeCollection()
@@ -49,6 +49,7 @@ def payload(**changes):
     value = dict(
         schema_version="1.0", submission_id="S-2026-11-18-0001", run_id="R-20261118-0001", requirements_set_version="v1",
         code_sha256="a" * 64, contract_sha256=contract_sha256(), executed_at=datetime.now(timezone.utc),
+        environment={"scope": "digital_twin", "environment_id": "DT-ENV-1", "digital_twin_id": "DT-1", "provenance_sha256": "d" * 64},
         test_results=[{"test_case_id": "TC_001", "status": "completed", "assertion_result": "PASS", "robot_verdict": "PASS", "external_verdict": "PASS", "metrics": {
             "trajectory_duration_s": {"value": 19, "unit": "s"}, "collision_count": {"value": 0, "unit": "count"},
             "joint_limit_violation_count": {"value": 0, "unit": "count"}, "velocity_limit_violation_count": {"value": 0, "unit": "count"},
@@ -116,3 +117,28 @@ def test_external_authentication_rejects_invalid_key(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         run(auth.require_api_key(header_key="wrong", bearer=None))
     assert exc.value.status_code == 401
+
+
+def test_end_to_end_ingestion_to_kpi_report():
+    from services.requirement_coverage_service import RequirementCoverageService
+    db = FakeDB()
+    service = service_with(db)
+    run(service.ingest_result(payload()))
+    report = run(RequirementCoverageService(service).calculate(requirements_set_version="v1"))
+    assert report["kpi"]["non_functional"]["percentage"] == 100.0
+    assert report["verified"]["non_functional"]["percentage"] == 100.0
+    assert report["requirements"][0]["traceability_chains"][0]["executions"][0]["dt_eligible"] is True
+
+
+def test_non_sut_failure_is_preserved_as_not_verified():
+    db = FakeDB()
+    service = service_with(db)
+    failed = payload(test_results=[{
+        **payload().test_results[0].model_dump(mode="json"),
+        "assertion_result": "FAIL", "robot_verdict": "FAIL", "external_verdict": "FAIL",
+        "fail_cause": "test_artifact",
+    }])
+    run(service.ingest_result(failed))
+    dashboard = run(service.dashboard())
+    assert dashboard["requirements"][0]["verification_state"] == "NOT_VERIFIED"
+    assert db.verification_verdicts.rows[0]["fail_cause"] == "test_artifact"

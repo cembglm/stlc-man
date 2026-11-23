@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -11,6 +11,22 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class RequirementType(str, Enum):
     FUNCTIONAL = "functional"
     NON_FUNCTIONAL = "non_functional"
+    UNCLASSIFIED = "unclassified"
+
+
+class RequirementStatus(str, Enum):
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    RETIRED = "retired"
+
+
+class ExecutionScope(str, Enum):
+    DIGITAL_TWIN = "digital_twin"
+    PHYSICAL_TWIN = "physical_twin"
+    LOCAL = "local"
+    SIMULATION = "simulation"
+    MOCK = "mock"
+    UNKNOWN = "unknown"
 
 
 class Operator(str, Enum):
@@ -30,6 +46,7 @@ class AcceptanceCriterion(BaseModel):
     operator: Operator
     threshold: Union[Decimal, str, List[Union[Decimal, str]]]
     unit: Optional[str] = None
+    clock: Optional[str] = None
     severity: str = "mandatory"
 
     @field_validator("unit")
@@ -38,14 +55,26 @@ class AcceptanceCriterion(BaseModel):
 
 
 class Requirement(BaseModel):
-    id: str = Field(..., min_length=1, pattern=r"^(?:FR|NFR)-[0-9]{3}$")
+    id: str = Field(..., min_length=1, pattern=r"^(?:(?:FR|NFR|REQ)-[A-Z0-9][A-Z0-9_.-]*|[A-Z][A-Z0-9_]*-[0-9]{3})$")
     version: str = Field(..., min_length=1)
     type: RequirementType
     text: str = Field(..., min_length=1)
     acceptance: List[AcceptanceCriterion] = Field(default_factory=list)
+    priority: Optional[str] = None
+    expected_outcome: Optional[str] = Field(None, pattern=r"^(reach|reject|accept)$")
+    expected_reason: Optional[str] = None
+    oracle: Dict[str, Any] = Field(default_factory=dict)
     acceptance_review_required: bool = False
     source_references: List[str] = Field(default_factory=list)
     related_artifacts: List[str] = Field(default_factory=list)
+    source_artifact: Optional[str] = None
+    source_artifact_sha256: Optional[str] = Field(None, pattern=r"^[a-f0-9]{64}$")
+    digital_twin_ids: List[str] = Field(default_factory=list)
+    status: RequirementStatus = RequirementStatus.ACTIVE
+    applicable: bool = True
+    created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
+    supersedes_version: Optional[str] = None
 
     @model_validator(mode="after")
     def flag_unmeasurable(self):
@@ -77,6 +106,7 @@ class GenerationProvenance(BaseModel):
     temperature: Optional[Decimal] = None
     prompt_sha256: Optional[str] = Field(None, pattern=r"^[a-f0-9]{64}$")
     generated_at: datetime
+    attempts: int = Field(1, ge=1)
 
 
 class CodeQuality(BaseModel):
@@ -92,10 +122,19 @@ class CodeQuality(BaseModel):
 class ManifestTest(BaseModel):
     function: str = Field(..., min_length=1)
     test_case_id: str = Field(..., min_length=1, pattern=r"^[A-Z][A-Z0-9_]*_[0-9]{3}$")
+    test_case_version: str = "1.0"
+    scenario_id: Optional[str] = None
     requirements: List[str] = Field(default_factory=list)
+    requirement_versions: Dict[str, str] = Field(default_factory=dict)
     expected_outcome: Optional[str] = None
     expected_reason: Optional[str] = None
     oracle: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ManifestSUT(BaseModel):
+    sut_id: str = Field(..., min_length=1)
+    version: str = Field(..., min_length=1)
+    source_sha256: str = Field(..., pattern=r"^[a-f0-9]{64}$")
 
 
 class SubmissionManifest(BaseModel):
@@ -108,6 +147,29 @@ class SubmissionManifest(BaseModel):
     generation: GenerationProvenance
     code_quality: CodeQuality
     tests: List[ManifestTest]
+    sut: Optional[ManifestSUT] = None
+    project_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+
+class ExecutionEnvironment(BaseModel):
+    scope: ExecutionScope = ExecutionScope.UNKNOWN
+    environment_id: Optional[str] = None
+    digital_twin_id: Optional[str] = None
+    registry_reference: Optional[str] = None
+    provenance_sha256: Optional[str] = Field(None, pattern=r"^[a-f0-9]{64}$")
+    simulator: Optional[str] = None
+    image: Optional[str] = None
+    model_config = {"extra": "allow"}
+
+    @property
+    def qualifies_as_digital_twin(self) -> bool:
+        return bool(
+            self.scope == ExecutionScope.DIGITAL_TWIN
+            and self.environment_id
+            and self.digital_twin_id
+            and (self.registry_reference or self.provenance_sha256)
+        )
 
 
 class MetricValue(BaseModel):
@@ -139,6 +201,7 @@ class ExternalTestResult(BaseModel):
     assertion_result: Optional[str] = None
     robot_verdict: Optional[str] = None
     external_verdict: Optional[str] = None
+    fail_cause: Optional[Literal["sut", "test_artifact", "infrastructure"]] = None
     admission: Optional[str] = None
     validity_status: Optional[str] = None
     code_quality_verdict: Optional[str] = None
@@ -157,7 +220,7 @@ class IFARLABResult(BaseModel):
     contract_sha256: str = Field(..., pattern=r"^[a-f0-9]{64}$")
     executed_at: datetime
     external_system: str = "IFARLAB"
-    environment: Dict[str, Any] = Field(default_factory=dict)
+    environment: ExecutionEnvironment = Field(default_factory=ExecutionEnvironment)
     submission_status: Optional[str] = None
     code_quality: Optional[CodeQuality] = None
     test_results: List[ExternalTestResult]

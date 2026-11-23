@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "purpose": "Demonstrates KPI 3.4 coverage states only; not a MATISSE achievement result.",
+  "requirements_set_version": "demo-v1",
+  "states": [
+    {"requirement_id": "FR-001", "evidence": "valid Digital Twin execution", "verdict": "PASS"},
+    {"requirement_id": "FR-002", "evidence": "local execution", "verdict": "PASS", "kpi_eligible": false},
+    {"requirement_id": "NFR-001", "evidence": "valid Digital Twin execution", "verdict": "FAIL"},
+    {"requirement_id": "NFR-002", "evidence": "generated but unexecuted"},
+    {"requirement_id": "REQ-UNKNOWN", "type": "unclassified"},
+    {"requirement_id": "FR-OLD", "evidence": "stale", "status": "superseded", "kpi_eligible": false}
+  ]
+}

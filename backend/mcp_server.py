@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 from dotenv import load_dotenv
+from services.llm_security_service import LLMDataUse, assert_llm_data_use_allowed
 
 # Load environment variables
 load_dotenv()
@@ -174,6 +175,13 @@ Test Code to Execute:
             # Convert model name from Ollama format to LM Studio format
             ollama_model = params.model_name or "llama3.2:3b"
             lm_studio_model = convert_model_name_to_lm_studio(ollama_model)
+            assert_llm_data_use_allowed(
+                provider="lm_studio", model=lm_studio_model,
+                data_use=LLMDataUse(
+                    contains_sut_source=bool(params.source_code),
+                    purpose="ai_test_execution",
+                ),
+            )
             
             logger.info(f"[LM Studio] Model conversion: {ollama_model} -> {lm_studio_model}")
             logger.info(f"[LM Studio] Source code context: {bool(params.source_code)}")
@@ -250,6 +258,13 @@ Test Code to Execute:
             
             # Use provided model or default
             model_name = params.model_name or "gemini-1.5-flash"
+            assert_llm_data_use_allowed(
+                provider="gemini", model=model_name,
+                data_use=LLMDataUse(
+                    contains_sut_source=bool(params.source_code),
+                    purpose="ai_test_execution",
+                ),
+            )
             model = genai.GenerativeModel(model_name)
             
             logger.info(f"[Gemini] Source code context: {bool(params.source_code)}")

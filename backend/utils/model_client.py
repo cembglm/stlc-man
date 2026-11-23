@@ -27,6 +27,7 @@ from services.model_provider_service import (
     normalize_provider,
     provider_slot,
 )
+from services.llm_security_service import LLMDataUse, assert_llm_data_use_allowed
 
 # Logger ayarları (hataları ve bilgileri takip etmek için)
 logger = logging.getLogger(__name__)
@@ -659,7 +660,10 @@ class LLMClient:
         # For now, forward to the existing logic
         return await self._generate_response_internal(prompt, temperature, max_tokens)
 
-    async def generate_response(self, prompt, temperature=0.7, max_tokens=8192, response_format=None, skip_chunking=False):
+    async def generate_response(
+        self, prompt, temperature=0.7, max_tokens=8192, response_format=None,
+        skip_chunking=False, contains_sut_source=False, data_purpose=None,
+    ):
         """
         LLM API çağrısı yapan temel metod - rate limiting ve chunking ile.
         
@@ -670,6 +674,21 @@ class LLMClient:
                            gibi bağlam bütünlüğü kritik olan akışlarda kullanılır).
         """
         
+        # Enforce source-code disclosure policy before rate limiting, chunking,
+        # sanitization, or any network I/O. Callers carrying SUT bytes must set
+        # contains_sut_source=True; sensitive legacy use-cases fail safe too.
+        sensitive_use_cases = {"code_review", "test_code_generation", "patch_generation"}
+        source_present = bool(contains_sut_source or self.use_case in sensitive_use_cases)
+        policy_provider = "gemini" if self.is_gemini else self.provider
+        assert_llm_data_use_allowed(
+            provider=policy_provider,
+            model=self.model_name,
+            data_use=LLMDataUse(
+                contains_sut_source=source_present,
+                purpose=data_purpose or self.use_case or "unspecified",
+            ),
+        )
+
         # API tabanlı modeller için rate limiting kontrolü
         if self.is_api_based:
             await self._check_and_apply_rate_limit()

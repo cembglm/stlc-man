@@ -52,6 +52,15 @@ class TraceabilityService:
         db = await self._db()
         payload = requirement_set.model_dump(mode="json")
         digest = sha256_bytes(canonical_json_bytes(payload))
+        same_version = await db.requirement_sets.find_one({
+            "requirements_set_version": requirement_set.requirements_set_version
+        })
+        if same_version:
+            if same_version.get("content_sha256") != digest:
+                raise ValueError(
+                    "requirements_set_version already exists with different content"
+                )
+            raise ValueError("requirements_set_version already exists")
         existing = await db.requirement_sets.find_one({"content_sha256": digest})
         if existing:
             return public(existing)
@@ -81,9 +90,10 @@ class TraceabilityService:
             "submission_id": manifest.submission_id, "revision": manifest.revision
         })
         if existing:
-            if existing["manifest"] != manifest_payload or existing["code"] != code:
-                raise ValueError("submission revision already exists with different content")
-            return public(existing)
+            suffix = " with different content" if (
+                existing["manifest"] != manifest_payload or existing["code"] != code
+            ) else ""
+            raise ValueError("submission revision already exists" + suffix)
         now = utc_now()
         record = {
             "submission_id": manifest.submission_id, "revision": manifest.revision,
@@ -172,6 +182,9 @@ class TraceabilityService:
             reported_code_quality = test_result.get("code_quality_verdict") or (payload.get("code_quality") or {}).get("verdict")
             quality_mismatch = bool(reported_code_quality and reported_code_quality.lower() != code_quality.lower())
             validity = dict(test_result.get("validity", {}))
+            execution_status = str(test_result.get("status", "")).lower()
+            if execution_status not in {"completed", "passed", "failed"}:
+                validity[execution_status if execution_status in {"skipped", "blocked"} else "not_executed"] = True
             if (test_result.get("validity_status") or "").upper() == "INCONCLUSIVE":
                 validity["trustworthy"] = False
             evaluated = evaluate_test(
@@ -186,12 +199,17 @@ class TraceabilityService:
                 "run_id": result.run_id, "test_case_id": test_result["test_case_id"],
                 "requirement_ids": mapping.get("requirements", []), "evaluated_at": utc_now(),
                 "external_executed_at": result.executed_at,
+                "requirements_set_version": result.requirements_set_version,
+                "code_sha256": result.code_sha256,
+                "environment": payload.get("environment", {}),
+                "execution_status": execution_status,
                 "evidence": test_result.get("evidence", []), **evaluated,
                 "admission": admission, "stlc_verdict": evaluated["final_verdict"],
                 "authoritative_verdict": authoritative,
                 "reported_code_quality": reported_code_quality,
                 "code_quality_mismatch": quality_mismatch,
                 "external_robot_verdict": test_result.get("robot_verdict"),
+                "fail_cause": test_result.get("fail_cause"),
                 "verdict_disagreement": bool(authoritative and evaluated["final_verdict"] != authoritative.upper()),
             })
 
@@ -255,8 +273,16 @@ class TraceabilityService:
                 s for s in submissions
                 if any(req["id"] in t.get("requirements", []) for t in s["manifest"].get("tests", []))
             ]
+            requirement_inputs = []
+            for item in associated:
+                item = item or {}
+                item_verdict = item.get("authoritative_verdict") or item.get("final_verdict", "INCONCLUSIVE")
+                if str(item_verdict).upper() == "FAIL" and item.get("fail_cause") != "sut":
+                    # Unknown and non-SUT causes must never accuse the product.
+                    item_verdict = "INCONCLUSIVE"
+                requirement_inputs.append(item_verdict)
             states[req["id"]] = aggregate_requirement(
-                [(item or {}).get("authoritative_verdict") or (item or {}).get("final_verdict", "INCONCLUSIVE") for item in associated], bool(associated),
+                requirement_inputs, bool(associated),
                 stale=bool(linked_submissions) and not any(s["manifest"]["requirements_set_version"] == current_version for s in linked_submissions),
             )
             if not any(req["id"] in row["requirement_ids"] for row in rows):

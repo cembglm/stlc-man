@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from core.database import get_database
 import json
+import hashlib
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,30 @@ async def save_execution_result(
         
         # Save to database
         await collection.insert_one(execution_record)
+        # Native MCP execution is registered for auditability, but is not
+        # silently promoted to Digital Twin evidence. A later deterministic
+        # result delivery must link it to a manifest and qualified environment.
+        try:
+            code_hash = hashlib.sha256(test_code.encode("utf-8")).hexdigest()
+            linked_submission = await db["traceability_submissions"].find_one({"manifest.code_sha256": code_hash})
+            await db["traceability_events"].insert_one({
+                "event_id": f"EVT-NATIVE-{session_id}",
+                "event_type": "native_execution.recorded",
+                "occurred_at": datetime.now().isoformat(),
+                "session_id": session_id,
+                "process_name": process_name,
+                "code_sha256": code_hash,
+                "submission_id": (linked_submission or {}).get("submission_id"),
+                "test_case_ids": [
+                    item.get("test_case_id")
+                    for item in (linked_submission or {}).get("manifest", {}).get("tests", [])
+                ],
+                "execution_scope": execution_result.get("environment", {}).get("scope", "local"),
+                "eligible_for_kpi_3_4": False,
+                "reason": "native execution has not been linked to a qualified DT evidence delivery",
+            })
+        except Exception as trace_error:
+            logger.warning("Native execution trace event could not be recorded: %s", trace_error)
         
         logger.info(f"✅ Saved test execution result to session_history: {session_id}")
         return session_id

@@ -286,6 +286,7 @@ Generate comprehensive test scenarios based on the above prompt and file content
   "TestScenarios": [
     {{
       "ScenarioID": "TS_001",
+      "RequirementIDs": ["FR-001"],
       "Title": "Clear and descriptive test scenario title",
       "Description": "Detailed description of what this test scenario covers",
       "Objective": "What this test aims to verify or validate",
@@ -659,6 +660,8 @@ async def get_test_scenarios_from_output(session_id: str):
             for i, scenario in enumerate(raw_scenarios):
                 processed_scenario = {
                     "scenario_id": scenario.get("ScenarioID", f"scenario_{i}"),
+                    "requirement_ids": scenario.get("RequirementIDs") or scenario.get("requirements") or scenario.get("requirement_ids") or [],
+                    "requirements_set_version": scenario.get("RequirementsSetVersion") or scenario.get("requirements_set_version"),
                     "scenario": scenario.get("Title", f"Scenario {i+1}"),
                     "description": scenario.get("Description", ""),
                     "objective": scenario.get("Objective", ""),
@@ -840,6 +843,8 @@ async def _generate_test_cases_for_scenarios_impl(request: Request):
     {
       "ScenarioID": "<Dynamic Source Scenario ID>",
       "TestCaseID": "<Dynamic Test Case ID>",
+      "RequirementIDs": ["<Requirement IDs inherited from source scenario>"],
+      "RequirementsSetVersion": "<Source requirement-set version>",
       "Title": "<Clear and descriptive test case title>",
       "Description": "<Detailed test case description explaining what is being tested and why it's important>",
       "Objective": "<Specific objective of this test case>",
@@ -1069,6 +1074,8 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                         enhanced_tc = {
                             "ScenarioID": tc.get("ScenarioID", scenario_id),
                             "TestCaseID": tc.get("TestCaseID", f"{scenario_id}_TC_{idx+1:03d}"),
+                            "RequirementIDs": tc.get("RequirementIDs") or tc.get("requirements") or scenario.get("requirement_ids") or [],
+                            "RequirementsSetVersion": tc.get("RequirementsSetVersion") or scenario.get("requirements_set_version"),
                             "Title": tc.get("Title", f"Test Case {idx+1} for {scenario_title}"),
                             "Description": tc.get("Description", f"Test case for validating {scenario_title}"),
                             "Objective": tc.get("Objective", f"Verify functionality of {scenario_title}"),
@@ -1155,6 +1162,8 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                         test_case = {
                             "ScenarioID": scenario_id,
                             "TestCaseID": f"{scenario_id}_TC_{idx+1:03d}",
+                            "RequirementIDs": scenario.get("requirement_ids") or [],
+                            "RequirementsSetVersion": scenario.get("requirements_set_version"),
                             "Title": title,
                             "Description": f"Comprehensive test case for validating {scenario_title}. This test case was auto-generated from the scenario requirements.",
                             "Objective": f"Verify the functionality and behavior of {scenario_title}",
@@ -1195,6 +1204,8 @@ Generate between 7-8 detailed test cases that thoroughly validate this specific 
                     fallback_test_case = {
                         "ScenarioID": scenario_id,
                         "TestCaseID": f"{scenario_id}_TC_001",
+                        "RequirementIDs": scenario.get("requirement_ids") or [],
+                        "RequirementsSetVersion": scenario.get("requirements_set_version"),
                         "Title": f"General test case for {scenario_title}",
                         "Description": f"Basic test case generated for {scenario_title}",
                         "Objective": f"Verify basic functionality of {scenario_title}",
