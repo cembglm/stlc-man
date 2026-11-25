@@ -7,10 +7,11 @@
       "approval_id": "LLM-APPROVAL-LOCAL-001",
       "provider": "lm_studio",
       "model": "*",
-      "active": true,
+      "active": false,
       "approved_by": "IFARLAB-pending-confirmation",
       "approved_at": null,
-      "scope": "local-only; no SUT bytes leave ASRLab host"
+      "scope": "local-only; no SUT bytes leave ASRLab host",
+      "status": "pending_external_approval"
     }
   ],
   "change_control": "Replace the provisional local entry with IFARLAB-signed provider/model approvals before production use. Every change must retain approver and timestamp."

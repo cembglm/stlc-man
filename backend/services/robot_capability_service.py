@@ -65,8 +65,8 @@ def parse_robot_capability_json(raw: bytes, filename: str = "robot_capabilities.
 def capability_descriptor(contract: Dict[str, Any], raw: Optional[bytes] = None) -> Dict[str, Any]:
     meta = contract.get("meta", {})
     image = meta.get("pinned_sources", {}).get("image", {})
-    # Hash the semantic JSON rather than its whitespace/line-ending representation so
-    # generation and dispatch calculate the same version identifier on every platform.
+    # Keep both identities explicit: the integration contract pins exact bytes,
+    # while semantic_sha256 remains useful for whitespace-insensitive diagnostics.
     encoded = json.dumps(
         contract,
         ensure_ascii=False,
@@ -82,6 +82,9 @@ def capability_descriptor(contract: Dict[str, Any], raw: Optional[bytes] = None)
         "image_tag": image.get("tag"),
         "image_id": image.get("id"),
         "sha256": hashlib.sha256(encoded).hexdigest(),
+        "raw_sha256": hashlib.sha256(raw).hexdigest() if raw is not None else None,
+        "hash_mode": "canonical_json",
+        "semantic_sha256": hashlib.sha256(encoded).hexdigest(),
     }
 
 

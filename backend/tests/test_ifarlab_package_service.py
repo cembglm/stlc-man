@@ -48,6 +48,8 @@ def test_reads_complete_safe_result_package(tmp_path, monkeypatch):
     result = packages.read_result_package(PACKAGE)
     assert result.submission_id == "S-2026-11-18-0042"
     assert result.run_id == "R-20261118-0197"
+    assert result.package_manifest["members"]["result.json"]
+    assert result.package_verdict == {}
 
 
 def test_rejects_archive_traversal(tmp_path, monkeypatch):
@@ -74,4 +76,26 @@ def test_rejects_invalid_verdict_json(tmp_path, monkeypatch):
         "metrics.json": "{}", "junit.xml": "<testsuite />", "coverage.xml": "<coverage />",
     })
     with pytest.raises(packages.ResultPackageError, match="verdict.json"):
+        packages.read_result_package(PACKAGE)
+
+
+def test_rejects_cross_document_identifier_mismatch(tmp_path, monkeypatch):
+    configure(monkeypatch, tmp_path)
+    write_tar(tmp_path / PACKAGE, {
+        "result.json": json.dumps(result_payload()),
+        "verdict.json": json.dumps({"run_id": "R-20261118-9999"}),
+        "metrics.json": "{}", "junit.xml": "<testsuite />",
+    })
+    with pytest.raises(packages.ResultPackageError, match="does not match"):
+        packages.read_result_package(PACKAGE)
+
+
+def test_rejects_declared_member_hash_mismatch(tmp_path, monkeypatch):
+    configure(monkeypatch, tmp_path)
+    write_tar(tmp_path / PACKAGE, {
+        "result.json": json.dumps(result_payload()),
+        "verdict.json": json.dumps({"inputs": {"metrics.json": "0" * 64}}),
+        "metrics.json": "{}", "junit.xml": "<testsuite />",
+    })
+    with pytest.raises(packages.ResultPackageError, match="hash mismatch"):
         packages.read_result_package(PACKAGE)

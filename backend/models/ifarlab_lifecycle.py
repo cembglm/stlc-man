@@ -13,12 +13,12 @@ SHA256 = r"^[a-f0-9]{64}$"
 class SUTReference(BaseModel):
     sut_id: str = Field(..., min_length=1)
     version: str = Field(..., pattern=r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+    commit: str = Field(..., min_length=1)
     source_sha256: str = Field(..., pattern=SHA256)
 
 
 class SUTRelease(SUTReference):
     schema_version: Literal["1.0"] = "1.0"
-    commit: str = Field(..., min_length=1)
     requirements_set_version: str = Field(..., min_length=1)
     build: Dict[str, Any] = Field(default_factory=dict)
     previous_version: Optional[str] = None
@@ -51,7 +51,7 @@ class DefectRecord(BaseModel):
     run_id: str = Field(..., pattern=r"^R-[0-9]{8}-[0-9]{4}$")
     scenario_id: Optional[str] = Field(None, pattern=r"^SC-[0-9]{3}$")
     fail_cause: Literal["sut"] = "sut"
-    severity: Literal["low", "medium", "high", "critical"]
+    severity: Literal["untriaged", "low", "medium", "high", "critical"]
     symptom: str = Field(..., min_length=1)
     evidence: List[Dict[str, Any]] = Field(default_factory=list)
     proposed_patch: Optional[str] = None
@@ -81,14 +81,28 @@ class RCReport(BaseModel):
     requirement_verdicts: Dict[str, str]
     evidence_references: List[str] = Field(default_factory=list)
     closed_defects: List[str] = Field(default_factory=list)
-    twin_fidelity_reference: str
+    twin_fidelity_reference: Optional[str] = None
+    source: Literal["database_snapshot", "external_import"] = "external_import"
+    eligible: bool = False
 
     @model_validator(mode="after")
-    def all_criteria_must_pass(self):
-        failed = sorted(name for name, result in self.exit_criteria.items() if not result.satisfied)
-        if failed:
-            raise ValueError("RC report cannot be created; unsatisfied criteria: " + ", ".join(failed))
+    def calculate_eligibility(self):
+        # A report must exist even when the simulation-stage candidate is blocked.
+        # Physical-cell fidelity is explicitly out of scope and therefore cannot pass.
+        self.eligible = bool(
+            self.exit_criteria
+            and all(result.satisfied for result in self.exit_criteria.values())
+            and self.twin_fidelity_reference
+        )
         return self
+
+
+class RCBuildRequest(BaseModel):
+    rc_id: str = Field(..., pattern=r"^RC-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
+    sut_version: str = Field(..., min_length=1)
+    requirements_set_version: str = Field(..., min_length=1)
+    mutation_score_threshold: float = Field(80.0, ge=0, le=100)
+    twin_fidelity_reference: Optional[str] = None
 
 
 class PromotionRecord(BaseModel):
@@ -105,10 +119,58 @@ class PromotionRecord(BaseModel):
         return self
 
 
+class ReviewDecision(BaseModel):
+    review_id: str = Field(..., pattern=r"^REV-[A-Za-z0-9-]+$")
+    decision_id: str = Field(..., pattern=r"^RVD-[A-Za-z0-9-]+$")
+    reviewer: str = Field(..., min_length=1)
+    decided_at: datetime
+    decision: Literal["accept_ifarlab", "accept_asrlab", "inconclusive"]
+    authoritative_verdict: Literal["PASS", "FAIL", "INCONCLUSIVE"]
+    rationale: str = Field(..., min_length=1)
+    supersedes_verdict_id: str = Field(..., min_length=1)
+
+
+class MutantRequest(BaseModel):
+    schema_version: Literal["1.0"] = "1.0"
+    mutant_id: str = Field(..., pattern=r"^M-[0-9]{4}-[0-9]{4}$")
+    base_version: str = Field(..., min_length=1)
+    mutation_type: str = Field(..., min_length=1)
+    diff_text: str = Field(..., min_length=1)
+    diff_sha256: str = Field(..., pattern=SHA256)
+    test_case_ids: List[str] = Field(..., min_length=1)
+    selection: Dict[str, Any]
+
+    @model_validator(mode="after")
+    def validate_test_case_ids(self):
+        import re
+        invalid = [item for item in self.test_case_ids if not re.fullmatch(r"^[A-Z][A-Z0-9_]*_[0-9]{3}$", item)]
+        if invalid:
+            raise ValueError("invalid test case identifiers: " + ", ".join(invalid))
+        if not self.selection.get("method") or "seed" not in self.selection:
+            raise ValueError("selection requires method and seed")
+        return self
+
+
+class MutantResult(BaseModel):
+    schema_version: Literal["1.0"] = "1.0"
+    mutant_id: str = Field(..., pattern=r"^M-[0-9]{4}-[0-9]{4}$")
+    outcome: Literal["killed", "survived", "inconclusive"]
+    killed_by: List[str] = Field(default_factory=list)
+    run_ids: List[str] = Field(default_factory=list)
+    runs: List[Dict[str, Any]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_outcome_evidence(self):
+        if self.outcome == "killed" and not self.killed_by:
+            raise ValueError("killed mutant results require killed_by")
+        return self
+
+
 TEST_CASE_PREFIXES = {
     "INSP": "visual/quality inspection",
     "MOTION": "motion and reachability",
     "SAFETY": "safety constraints",
     "PERF": "performance and timing",
     "INTEG": "integration behavior",
+    "REF": "reference and golden-run behavior",
 }

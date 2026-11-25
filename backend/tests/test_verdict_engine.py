@@ -58,11 +58,27 @@ def test_incorrect_rejection_reason_fails():
     assert evaluate([rule], {"rejection_reason": {"value": "timeout"}})["final_verdict"] == "FAIL"
 
 
-@pytest.mark.parametrize("validity,issue", [({"timed_out": True}, "timed_out"), ({"reset_failed": True}, "reset_failed")])
+@pytest.mark.parametrize("validity,issue", [({"timed_out": True}, "timed_out")])
 def test_invalid_execution_is_inconclusive(validity, issue):
     result = evaluate([], {}, validity=validity)
     assert result["final_verdict"] == "INCONCLUSIVE"
     assert issue in result["issues"]
+
+
+def test_reset_failure_is_binding_sut_failure():
+    result = evaluate([], {}, validity={"reset_failed": True})
+    assert result["final_verdict"] == "FAIL"
+    assert result["fail_cause"] == "sut"
+
+
+@pytest.mark.parametrize("status", ["stack_down", "timeout"])
+def test_reset_infrastructure_failure_is_binding_failure(status):
+    result = evaluate(
+        [{"rule_id": "RESET", "metric": "reset_status", "operator": "==", "threshold": "success", "unit": None}],
+        {"reset_status": {"value": status}},
+    )
+    assert result["final_verdict"] == "FAIL"
+    assert result["fail_cause"] == "infrastructure"
 
 
 def test_assertion_robot_disagreement_is_recorded_and_fails():

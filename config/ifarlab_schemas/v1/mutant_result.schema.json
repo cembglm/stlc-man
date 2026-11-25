@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mutant_result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mutant_id", "outcome", "killed_by", "run_ids", "runs"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "mutant_id": {"type": "string", "pattern": "^M-[0-9]{4}-[0-9]{4}$"},
+    "outcome": {"enum": ["killed", "survived", "inconclusive"]},
+    "killed_by": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*_[0-9]{3}$"}},
+    "run_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^R-[0-9]{8}-[0-9]{4}$"}},
+    "runs": {"type": "array", "items": {"type": "object"}}
+  },
+  "allOf": [{"if": {"properties": {"outcome": {"const": "killed"}}}, "then": {"properties": {"killed_by": {"minItems": 1}}}}]
+}

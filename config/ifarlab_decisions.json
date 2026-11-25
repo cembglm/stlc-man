@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "decisions": [
+    {
+      "id": "test_case_prefixes",
+      "status": "proposed_by_asrlab",
+      "proposal": ["INSP", "MOTION", "SAFETY", "PERF", "INTEG", "REF"],
+      "required_from": "IFARLAB",
+      "note": "Confirm the shared prefix registry."
+    },
+    {
+      "id": "mutant_request_result_schemas",
+      "status": "proposed_by_asrlab",
+      "proposal": "config/ifarlab_schemas/v1/mutant_request.schema.json and mutant_result.schema.json",
+      "required_from": "IFARLAB",
+      "note": "Approve or return a redline of the shared mutant exchange schemas."
+    },
+    {
+      "id": "llm_provider_model",
+      "status": "pending_ifarlab_approval",
+      "proposal": "lm_studio/* local-only",
+      "required_from": "IFARLAB",
+      "note": "SUT source use remains disabled until provider/model approval is signed and dated."
+    },
+    {
+      "id": "rtf_and_golden_tolerance",
+      "status": "pending_ifarlab_approval",
+      "proposal": {"rtf_minimum": 0.7, "golden_ptp_percent": 1.0},
+      "required_from": "IFARLAB",
+      "note": "Confirm binding thresholds."
+    },
+    {
+      "id": "daily_golden_run_schedule",
+      "status": "pending_joint_decision",
+      "proposal": null,
+      "required_from": "IFARLAB+ASRLab",
+      "note": "Agree daily time and twin count."
+    },
+    {
+      "id": "robot_capability_q1_q5",
+      "status": "pending_joint_measurement_and_approval",
+      "proposal": "config/robot_capabilities.json",
+      "required_from": "IFARLAB+ASRLab",
+      "note": "Run Q1-Q4 probes, decide Q5, then record human approvals."
+    }
+  ]
+}

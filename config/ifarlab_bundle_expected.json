@@ -1,0 +1,10 @@
+{
+  "package_name": "ifarlab-stlc-contracts-1.2.0.tar",
+  "package_version": "1.2.0",
+  "sha256": "8fbcb81e2d6f10ba272eba8205b6e5dc457b3c0783b2b34510e0a27bbf534322",
+  "verdict_engine_version": "2.6.0",
+  "rule_set_version": "1.0",
+  "expected_vector_count": 53,
+  "expected_schema_count": 20,
+  "source": "IFARLAB_24112026_Rapor"
+}

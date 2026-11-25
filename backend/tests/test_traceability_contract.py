@@ -43,6 +43,13 @@ def test_requirement_ids_are_unique():
         RequirementSet(requirements_set_version="v1", requirements=[item, item])
 
 
+def test_qcr_priority_is_required_without_default():
+    with pytest.raises(ValueError, match="priority is required"):
+        RequirementSet(requirements_set_version="QCR-2026-11-24", requirements=[{
+            "id": "QCR-001", "version": "1.0", "type": "functional", "text": "Move"
+        }])
+
+
 def test_canonical_hash_is_order_independent():
     assert canonical_json_bytes({"b": 2, "a": 1}) == canonical_json_bytes({"a": 1, "b": 2})
 
@@ -95,3 +102,13 @@ def test_digital_twin_environment_requires_provenance():
     complete = ExecutionEnvironment(scope="digital_twin", environment_id="env", digital_twin_id="dt", registry_reference="registry://dt/1")
     assert incomplete.qualifies_as_digital_twin is False
     assert complete.qualifies_as_digital_twin is True
+
+
+def test_traceability_unique_indexes_cover_immutable_identities():
+    from core.database import TRACEABILITY_UNIQUE_INDEXES
+
+    assert set(TRACEABILITY_UNIQUE_INDEXES) >= {
+        "requirement_sets", "traceability_submissions", "ifarlab_result_deliveries",
+        "verification_verdicts", "defects", "patches", "rc_reports", "promotions",
+    }
+    assert TRACEABILITY_UNIQUE_INDEXES["ifarlab_result_deliveries"] == [("payload.run_id", 1)]

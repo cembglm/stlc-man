@@ -193,6 +193,13 @@ secrets.json
 *.p12
 *.pfx
 
+# IFARLAB runtime deliveries and externally supplied canonical bundles.
+/ifarlab_inbox/*
+!/ifarlab_inbox/.gitkeep
+/config/ifarlab_contracts/*
+!/config/ifarlab_contracts/.gitkeep
+!/config/ifarlab_contracts/validation_result.json
+
 # External HIL/executor checkout; deployed and versioned independently.
 /ESOGU-HILTest-DualRobot-2/
 

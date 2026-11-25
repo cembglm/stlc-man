@@ -38,6 +38,71 @@ class TraceabilityService:
     async def _db(self):
         return await get_database()
 
+    @staticmethod
+    def _routing_events(result: IFARLABResult, evaluations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        events = []
+        for evaluation in evaluations:
+            base = f"{result.run_id}:{evaluation.get('test_case_id')}"
+            cause = evaluation.get("fail_cause")
+            binding_verdict = evaluation.get("authoritative_verdict") or evaluation.get("final_verdict")
+            if str(binding_verdict).upper() == "FAIL" and cause:
+                kind = {"sut": "defect", "test_artifact": "regeneration", "infrastructure": "infrastructure_notification"}[cause]
+                requirement_ids = evaluation.get("requirement_ids") or [None]
+                for requirement_id in requirement_ids if kind == "defect" else [None]:
+                    key = f"{base}:{kind}:{requirement_id or '-'}"
+                    events.append({
+                        "routing_key": key, "kind": kind, "run_id": result.run_id,
+                        "submission_id": result.submission_id,
+                        "test_case_id": evaluation.get("test_case_id"),
+                        "requirement_id": requirement_id,
+                        "sut_version": ((evaluation.get("environment") or {}).get("sut_version")),
+                        "evidence": evaluation.get("evidence", []),
+                    })
+            if evaluation.get("contradiction") or evaluation.get("verdict_disagreement"):
+                key = f"{base}:human_review"
+                events.append({
+                    "routing_key": key, "kind": "human_review", "run_id": result.run_id,
+                    "submission_id": result.submission_id,
+                    "test_case_id": evaluation.get("test_case_id"),
+                    "contradiction": evaluation.get("contradiction", False),
+                    "verdict_disagreement": evaluation.get("verdict_disagreement", False),
+                    "authoritative_verdict": evaluation.get("authoritative_verdict"),
+                    "stlc_verdict": evaluation.get("stlc_verdict"),
+                })
+        return events
+
+    async def _materialize_routing(self, db, events: List[Dict[str, Any]]) -> None:
+        """Materialize the delivery-embedded outbox idempotently.
+
+        The authoritative IFARLAB verdict is never modified. Human review only
+        records the disagreement and its later resolution.
+        """
+        for event in events:
+            kind, key = event["kind"], event["routing_key"]
+            if kind == "defect":
+                collection = db.defects
+                identity = {"routing_key": key}
+                digest = int(sha256_bytes(key.encode("utf-8"))[:8], 16) % 10000
+                record = {
+                    **event, "defect_id": f"D-{datetime.now().year}-{digest:04d}",
+                    "status": "open", "severity": "untriaged",
+                    "symptom": "Authoritative IFARLAB verdict reported a SUT failure.",
+                }
+            elif kind == "regeneration":
+                collection, identity = db.test_regeneration_queue, {"routing_key": key}
+                record = {**event, "status": "pending", "version_increment_required": True}
+            elif kind == "infrastructure_notification":
+                collection, identity = db.infrastructure_notifications, {"routing_key": key}
+                record = {**event, "status": "pending_ifarlab_notification"}
+            else:
+                collection, identity = db.review_queue, {"routing_key": key}
+                record = {
+                    **event, "review_id": f"REV-{sha256_bytes(key.encode('utf-8'))[:12]}",
+                    "status": "pending", "binding_source": "IFARLAB",
+                }
+            if not await collection.find_one(identity):
+                await collection.insert_one(record)
+
     async def next_submission_id(self) -> str:
         db = await self._db()
         day = datetime.now().date().isoformat()
@@ -47,6 +112,50 @@ class TraceabilityService:
         )
         from services.traceability_contract import format_submission_id
         return format_submission_id(day, counter["sequence"])
+
+    async def _record_regression_comparison(
+        self, db, submission: Optional[Dict[str, Any]], result: IFARLABResult,
+        evaluations: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Compare a queued regression run with its immutable source submission."""
+        if not submission or not submission.get("regression_source_submission_id"):
+            return None
+        baseline_id = submission["regression_source_submission_id"]
+        candidate_by_case = {item.get("test_case_id"): item for item in evaluations}
+        baseline_rows = [
+            item async for item in db.verification_verdicts.find({"submission_id": baseline_id})
+        ]
+        latest_baseline: Dict[str, Dict[str, Any]] = {}
+        for item in baseline_rows:
+            latest_baseline[item.get("test_case_id")] = item
+        rows = []
+        for test_case_id, candidate in candidate_by_case.items():
+            baseline = latest_baseline.get(test_case_id)
+            baseline_verdict = (baseline or {}).get("authoritative_verdict") or (baseline or {}).get("final_verdict")
+            candidate_verdict = candidate.get("authoritative_verdict") or candidate.get("final_verdict")
+            classification = (
+                "regression" if baseline_verdict == "PASS" and candidate_verdict == "FAIL" else
+                "fixed" if baseline_verdict == "FAIL" and candidate_verdict == "PASS" else
+                "unchanged" if baseline_verdict == candidate_verdict else "not_comparable"
+            )
+            rows.append({
+                "test_case_id": test_case_id, "baseline_verdict": baseline_verdict,
+                "candidate_verdict": candidate_verdict, "classification": classification,
+            })
+        comparison = {
+            "comparison_id": f"REGCMP-{result.run_id}",
+            "campaign_id": submission.get("regression_campaign_id"),
+            "sut_version": ((submission.get("manifest") or {}).get("sut") or {}).get("version"),
+            "baseline_submission_id": baseline_id,
+            "candidate_submission_id": result.submission_id,
+            "candidate_run_id": result.run_id,
+            "created_at": utc_now(), "rows": rows,
+            "regression_count": sum(item["classification"] == "regression" for item in rows),
+            "fixed_count": sum(item["classification"] == "fixed" for item in rows),
+        }
+        if not await db.regression_comparisons.find_one({"comparison_id": comparison["comparison_id"]}):
+            await db.regression_comparisons.insert_one(comparison)
+        return comparison
 
     async def save_requirement_set(self, requirement_set: RequirementSet) -> Dict[str, Any]:
         db = await self._db()
@@ -86,14 +195,12 @@ class TraceabilityService:
     async def save_submission(self, manifest: SubmissionManifest, code: str) -> Dict[str, Any]:
         db = await self._db()
         manifest_payload = manifest.model_dump(mode="json")
-        existing = await db.traceability_submissions.find_one({
-            "submission_id": manifest.submission_id, "revision": manifest.revision
-        })
+        existing = await db.traceability_submissions.find_one({"submission_id": manifest.submission_id})
         if existing:
             suffix = " with different content" if (
                 existing["manifest"] != manifest_payload or existing["code"] != code
             ) else ""
-            raise ValueError("submission revision already exists" + suffix)
+            raise ValueError("submission_id already exists" + suffix)
         now = utc_now()
         record = {
             "submission_id": manifest.submission_id, "revision": manifest.revision,
@@ -138,9 +245,18 @@ class TraceabilityService:
         db = await self._db()
         payload = result.model_dump(mode="json")
         delivery_sha = sha256_bytes(canonical_json_bytes(payload))
+        same_run = await db.ifarlab_result_deliveries.find_one({"payload.run_id": result.run_id})
+        if same_run:
+            if same_run.get("delivery_sha256") != delivery_sha:
+                raise ValueError("run_id already exists with different result content")
+            response = public(same_run)
+            await self._materialize_routing(db, same_run.get("routing_events", []))
+            response["idempotent_replay"] = True
+            return response
         duplicate = await db.ifarlab_result_deliveries.find_one({"delivery_sha256": delivery_sha})
         if duplicate:
             response = public(duplicate)
+            await self._materialize_routing(db, duplicate.get("routing_events", []))
             response["idempotent_replay"] = True
             return response
 
@@ -209,19 +325,28 @@ class TraceabilityService:
                 "reported_code_quality": reported_code_quality,
                 "code_quality_mismatch": quality_mismatch,
                 "external_robot_verdict": test_result.get("robot_verdict"),
-                "fail_cause": test_result.get("fail_cause"),
+                "fail_cause": test_result.get("fail_cause") or evaluated.get("fail_cause"),
+                "verification_level": result.verification_level,
                 "verdict_disagreement": bool(authoritative and evaluated["final_verdict"] != authoritative.upper()),
             })
 
         now = utc_now()
+        routing_events = self._routing_events(result, evaluations)
+        regression_comparison = None
+        if hasattr(db, "regression_comparisons"):
+            regression_comparison = await self._record_regression_comparison(
+                db, submission, result, evaluations
+            )
         record = {
             "delivery_id": f"DEL-{uuid.uuid4().hex}", "delivery_sha256": delivery_sha,
             "received_at": now, "link_status": link_status, "rejection_reasons": rejection_reasons,
-            "payload": payload, "evaluations": evaluations,
+            "payload": payload, "evaluations": evaluations, "routing_events": routing_events,
+            "regression_comparison": regression_comparison,
         }
         await db.ifarlab_result_deliveries.insert_one(record)
         if evaluations:
             await db.verification_verdicts.insert_many(evaluations)
+        await self._materialize_routing(db, routing_events)
         await db.traceability_events.insert_one({
             "event_id": f"EVT-{uuid.uuid4().hex}", "event_type": "external_result.received",
             "occurred_at": now, "submission_id": result.submission_id, "run_id": result.run_id,
@@ -313,6 +438,68 @@ class TraceabilityService:
             "metrics": {"total_requirements": total, "covered_requirements": covered, "uncovered_requirements": total-covered, "verified_requirements": passed, "coverage_percentage": (covered/total*100 if total else 0), "verification_percentage": (passed/total*100 if total else 0), "requirement_states": {state: list(states.values()).count(state) for state in ["PASS", "FAIL", "NOT_VERIFIED", "NOT_COVERED", "STALE"]}, "total_generated_test_cases": sum(len(s["manifest"].get("tests", [])) for s in submissions), "external_submissions": len({s["submission_id"] for s in submissions}), "robot_metrics_received": robot_metrics_received, "traceability_gaps": traceability_gaps, "code_quality_distribution": dict(quality_distribution), "tests_by_llm": dict(llm_distribution), "execution_results": dict(execution_distribution)},
             "requirements": [{**req, "verification_state": states.get(req["id"], "NOT_COVERED")} for req in requirements],
             "rows": rows,
+        }
+
+    async def reverse_queries(self) -> Dict[str, Any]:
+        """Return explicit reverse links without hiding broken chains."""
+        db = await self._db()
+        submissions = [public(item) async for item in db.traceability_submissions.find({})]
+        verdicts = [public(item) async for item in db.verification_verdicts.find({})]
+        defects = [public(item) async for item in db.defects.find({})]
+        patches = [public(item) async for item in db.patches.find({})]
+        rc_reports = [public(item) async for item in db.rc_reports.find({})]
+        promotions = [public(item) async for item in db.promotions.find({})]
+        verdict_by_submission_case = {
+            (item.get("submission_id"), item.get("test_case_id")): item for item in verdicts
+        }
+        matrix, broken = [], []
+        for submission in submissions:
+            manifest = submission.get("manifest", {})
+            sut_version = (manifest.get("sut") or {}).get("version")
+            for test in manifest.get("tests", []):
+                verdict = verdict_by_submission_case.get((manifest.get("submission_id"), test.get("test_case_id")))
+                for requirement_id in test.get("requirements", []):
+                    row = {
+                        "requirement_id": requirement_id,
+                        "test_case_id": test.get("test_case_id"),
+                        "sut_version": sut_version,
+                        "submission_id": manifest.get("submission_id"),
+                        "run_id": (verdict or {}).get("run_id"),
+                        "verdict": (verdict or {}).get("authoritative_verdict") or (verdict or {}).get("final_verdict") or "NOT_VERIFIED",
+                        "verification_level": (verdict or {}).get("verification_level"),
+                        "evidence": (verdict or {}).get("evidence", []),
+                    }
+                    matrix.append(row)
+                    missing = [name for name in ("sut_version", "run_id") if not row.get(name)]
+                    if missing:
+                        broken.append({**row, "missing_links": missing})
+        patch_by_defect = defaultdict(list)
+        for patch in patches:
+            patch_by_defect[patch.get("defect_id")].append(patch)
+        defect_chains = [{
+            **defect,
+            "patches": patch_by_defect.get(defect.get("defect_id"), []),
+            "resolved_in_versions": sorted({p.get("applied_in_version") for p in patch_by_defect.get(defect.get("defect_id"), []) if p.get("applied_in_version")}),
+        } for defect in defects]
+        rc_by_id = {item.get("rc_id"): item for item in rc_reports}
+        promotion_chains = [{
+            **promotion,
+            "rc_report": rc_by_id.get(promotion.get("rc_id")),
+            "chain_complete": bool(rc_by_id.get(promotion.get("rc_id"))),
+        } for promotion in promotions]
+        return {
+            "matrix": matrix,
+            "requirement_tests": {
+                requirement_id: sorted({row["test_case_id"] for row in matrix if row["requirement_id"] == requirement_id})
+                for requirement_id in sorted({row["requirement_id"] for row in matrix})
+            },
+            "failed_by_sut_version": {
+                version: sorted({row["requirement_id"] for row in matrix if row["sut_version"] == version and row["verdict"] == "FAIL"})
+                for version in sorted({row["sut_version"] for row in matrix if row["sut_version"]})
+            },
+            "defect_patch_version_chains": defect_chains,
+            "promotion_requirement_chains": promotion_chains,
+            "broken_links": broken,
         }
 
 

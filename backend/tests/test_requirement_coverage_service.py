@@ -114,14 +114,25 @@ def test_contradictory_valid_verdicts_execute_but_do_not_verify():
     assert result["requirements"][0]["verification_state"] == "FAIL"
 
 
-def test_missing_scenario_and_stale_version_break_the_valid_chain():
+def test_scenario_is_deferred_but_stale_version_breaks_its_chain():
     missing = submission("S-1", [mapping("TC_001", ["FR-001"], scenario=None)])
     stale = submission("S-2", [mapping("TC_002", ["FR-001"], versions={"FR-001": "0"})])
     result = calculate_requirement_coverage(requirement_set([requirement_set()["requirements"][0]]), [missing, stale], [], [])
     row = result["requirements"][0]
-    assert row["mapped"] is False
+    assert row["mapped"] is True
     assert row["executed_dt"] is False
     assert any(chain["stale"] for chain in row["traceability_chains"])
+
+
+def test_mandatory_generation_and_release_gates_are_explicit():
+    requirements = [
+        {"id": "QCR-001", "version": "1", "type": "functional", "text": "Move", "priority": "mandatory", "status": "active", "applicable": True},
+        {"id": "QCR-002", "version": "1", "type": "non_functional", "text": "Fast", "priority": "desired", "status": "active", "applicable": True},
+    ]
+    result = calculate_requirement_coverage(requirement_set(requirements), [], [], [])
+    assert result["generation_gate"] == {"complete": False, "mandatory_without_test": ["QCR-001"]}
+    assert result["release_candidate_gate"]["eligible"] is False
+    assert result["release_candidate_gate"]["fidelity"] == "out_of_scope_not_passed"
 
 
 def test_empty_or_unclassified_only_sets_are_not_assessable():

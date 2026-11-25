@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mutant_request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mutant_id", "base_version", "mutation_type", "diff_text", "diff_sha256", "test_case_ids", "selection"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "mutant_id": {"type": "string", "pattern": "^M-[0-9]{4}-[0-9]{4}$"},
+    "base_version": {"type": "string", "minLength": 1},
+    "mutation_type": {"type": "string", "minLength": 1},
+    "diff_text": {"type": "string", "minLength": 1},
+    "diff_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "test_case_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*_[0-9]{3}$"}},
+    "selection": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["method", "seed"],
+      "properties": {"method": {"type": "string", "minLength": 1}, "seed": {"type": "integer"}}
+    }
+  }
+}

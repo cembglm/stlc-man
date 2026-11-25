@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "result_package_manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["package_sha256", "members"],
+  "properties": {
+    "package_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "members": {
+      "type": "object",
+      "required": ["result.json", "verdict.json", "metrics.json", "junit.xml"],
+      "additionalProperties": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+    }
+  }
+}

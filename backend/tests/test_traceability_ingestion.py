@@ -25,7 +25,12 @@ class FakeCursor:
 class FakeCollection:
     def __init__(self, rows=None): self.rows = list(rows or [])
     async def find_one(self, query, **kwargs):
-        matches = [row for row in self.rows if all(row.get(k) == v for k, v in query.items())]
+        def nested(row, key):
+            value = row
+            for part in key.split("."):
+                value = value.get(part) if isinstance(value, dict) else None
+            return value
+        matches = [row for row in self.rows if all(nested(row, k) == v for k, v in query.items())]
         return matches[-1] if matches else None
     async def insert_one(self, value): self.rows.append(dict(value)); return InsertResult()
     async def insert_many(self, values): self.rows.extend(dict(value) for value in values); return InsertResult()
@@ -43,6 +48,10 @@ class FakeDB:
         self.ifarlab_result_deliveries = FakeCollection()
         self.verification_verdicts = FakeCollection()
         self.traceability_events = FakeCollection()
+        self.defects = FakeCollection()
+        self.test_regeneration_queue = FakeCollection()
+        self.infrastructure_notifications = FakeCollection()
+        self.review_queue = FakeCollection()
 
 
 def payload(**changes):
@@ -112,6 +121,19 @@ def test_corrected_delivery_does_not_overwrite_original():
     assert {row["payload"]["run_id"] for row in db.ifarlab_result_deliveries.rows} == {"R-20261118-0001", "R-20261118-0002"}
 
 
+def test_same_run_id_with_different_content_is_rejected():
+    db, service = FakeDB(), None
+    service = service_with(db)
+    run(service.ingest_result(payload()))
+    changed = payload(test_results=[{
+        **payload().test_results[0].model_dump(mode="json"),
+        "metrics": {**payload().test_results[0].model_dump(mode="json")["metrics"], "trajectory_duration_s": {"value": 18, "unit": "s"}},
+    }])
+    with pytest.raises(ValueError, match="run_id already exists"):
+        run(service.ingest_result(changed))
+    assert len(db.ifarlab_result_deliveries.rows) == 1
+
+
 def test_external_authentication_rejects_invalid_key(monkeypatch):
     monkeypatch.setattr(auth, "get_settings", lambda: SimpleNamespace(api_auth_enabled=True, app_api_key="secret"))
     with pytest.raises(HTTPException) as exc:
@@ -142,3 +164,51 @@ def test_non_sut_failure_is_preserved_as_not_verified():
     dashboard = run(service.dashboard())
     assert dashboard["requirements"][0]["verification_state"] == "NOT_VERIFIED"
     assert db.verification_verdicts.rows[0]["fail_cause"] == "test_artifact"
+    assert len(db.defects.rows) == 0
+    assert len(db.test_regeneration_queue.rows) == 1
+
+
+def test_sut_failure_opens_one_defect_and_disagreement_opens_review():
+    db = FakeDB()
+    failed = payload(test_results=[{
+        **payload().test_results[0].model_dump(mode="json"),
+        "assertion_result": "PASS", "robot_verdict": "PASS",
+        "external_verdict": "FAIL", "fail_cause": "sut",
+    }])
+    service = service_with(db)
+    run(service.ingest_result(failed))
+    replay = run(service.ingest_result(failed))
+    assert replay["idempotent_replay"] is True
+    assert len(db.defects.rows) == 1
+    assert len(db.review_queue.rows) == 1
+    assert db.review_queue.rows[0]["binding_source"] == "IFARLAB"
+
+
+def test_regression_run_records_pass_to_fail_comparison():
+    db = FakeDB()
+    source = db.traceability_submissions.rows[0]
+    candidate_manifest = {
+        **source["manifest"], "submission_id": "S-2026-11-18-0002",
+    }
+    db.traceability_submissions.rows.append({
+        "submission_id": "S-2026-11-18-0002", "revision": 1,
+        "manifest": candidate_manifest, "code": source["code"],
+        "regression_source_submission_id": "S-2026-11-18-0001",
+        "regression_campaign_id": "REG-1",
+    })
+    db.verification_verdicts.rows.append({
+        "verdict_id": "V-baseline", "submission_id": "S-2026-11-18-0001",
+        "test_case_id": "TC_001", "final_verdict": "PASS", "authoritative_verdict": "PASS",
+    })
+    db.regression_comparisons = FakeCollection()
+    failed = payload(
+        submission_id="S-2026-11-18-0002", run_id="R-20261118-0002",
+        test_results=[{
+            **payload().test_results[0].model_dump(mode="json"),
+            "assertion_result": "FAIL", "robot_verdict": "FAIL",
+            "external_verdict": "FAIL", "fail_cause": "sut",
+        }],
+    )
+    result = run(service_with(db).ingest_result(failed))
+    assert result["regression_comparison"]["regression_count"] == 1
+    assert db.regression_comparisons.rows[0]["rows"][0]["classification"] == "regression"

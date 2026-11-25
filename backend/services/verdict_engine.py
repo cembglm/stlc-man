@@ -51,7 +51,9 @@ def evaluate_test(
     code_quality_verdict: Optional[str] = None,
 ) -> Dict[str, Any]:
     issues = []
-    for key in ("infrastructure_failed", "reset_failed", "timed_out", "environment_invalid", "skipped", "blocked", "not_executed", "trustworthy"):
+    # A reset failure is a binding FAIL (Decision 14), not invalid evidence.
+    # A twin crash during the test remains INCONCLUSIVE.
+    for key in ("infrastructure_failed", "timed_out", "environment_invalid", "skipped", "blocked", "not_executed", "trustworthy"):
         value = validity.get(key)
         if value is True and key != "trustworthy": issues.append(key)
         if key == "trustworthy" and value is False: issues.append("execution_not_trustworthy")
@@ -88,9 +90,11 @@ def evaluate_test(
     assertion = (assertion_result or "").upper()
     robot = (robot_verdict or "").upper()
     contradiction = assertion in {"PASS", "FAIL"} and robot in {"PASS", "FAIL"} and assertion != robot
+    reset_status = (metrics.get("reset_status") or {}).get("value")
+    reset_failed = validity.get("reset_failed") is True or reset_status in {"failed", "stack_down", "timeout"}
     if issues or any(item["passed"] is None for item in outcomes):
         final = "INCONCLUSIVE"
-    elif (code_quality_verdict or "").lower() == "fail" or any(item["passed"] is False for item in outcomes) or assertion == "FAIL" or robot == "FAIL":
+    elif reset_failed or (code_quality_verdict or "").lower() == "fail" or any(item["passed"] is False for item in outcomes) or assertion == "FAIL" or robot == "FAIL":
         final = "FAIL"
     elif outcomes and all(item["passed"] is True for item in outcomes) and assertion == "PASS" and robot == "PASS":
         final = "PASS"
@@ -103,6 +107,14 @@ def evaluate_test(
         "Execution is inconclusive: " + ", ".join(sorted(set(issues))) if final == "INCONCLUSIVE" else
         "All applicable deterministic rules, generated assertions, and independent robot checks passed."
     )
+    fail_cause = None
+    if final == "FAIL":
+        if (code_quality_verdict or "").lower() == "fail":
+            fail_cause = "test_artifact"
+        elif reset_status in {"stack_down", "timeout"}:
+            fail_cause = "infrastructure"
+        else:
+            fail_cause = "sut"
     return {
         "verdict_engine_version": ENGINE_VERSION,
         "rule_set_version": RULE_SET_VERSION,
@@ -113,6 +125,7 @@ def evaluate_test(
         "contradiction": contradiction,
         "applied_rules": outcomes,
         "final_verdict": final,
+        "fail_cause": fail_cause,
         "issues": sorted(set(issues)),
         "explanation": explanation,
     }

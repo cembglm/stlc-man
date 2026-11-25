@@ -11,13 +11,21 @@ from pydantic import BaseModel, Field
 
 from core.auth import require_api_key
 from core.database import get_database
-from models.ifarlab_lifecycle import DefectRecord, PatchRecord, PromotionRecord, RCReport
+from core.settings import get_settings
+from models.ifarlab_lifecycle import (
+    DefectRecord, MutantRequest, MutantResult, PatchRecord, PromotionRecord, RCBuildRequest, RCReport,
+    ReviewDecision,
+)
 from models.traceability import CodeQuality, GenerationProvenance, IFARLABResult, ManifestSUT, ManifestTest, RequirementSet, SubmissionManifest
 from services.traceability_contract import contract_document, contract_sha256, sha256_bytes, validate_manifest_mapping
 from services.traceability_service import traceability_service
 from services.ifarlab_package_service import ResultPackageError, read_result_package
+from services.ifarlab_readiness_service import readiness_report
 from services.requirement_coverage_service import RequirementCoverageService
-from services.lifecycle_service import insert_immutable, save_patch, save_promotion, save_rc_report
+from services.lifecycle_service import (
+    build_rc_report, insert_immutable, resolve_review, save_mutant_request, save_mutant_result, save_patch,
+    save_promotion, save_rc_report,
+)
 from services.sut_package_service import SUTPackageError, persist_sut_package
 
 
@@ -47,6 +55,12 @@ class SUTPackageImport(BaseModel):
 @router.get("/contract")
 async def get_contract():
     return {**contract_document(), "contract_sha256": contract_sha256()}
+
+
+@router.get("/readiness")
+async def get_readiness():
+    """Report local readiness separately from IFARLAB/human blockers."""
+    return readiness_report()
 
 
 @router.post("/requirements", status_code=status.HTTP_201_CREATED)
@@ -100,11 +114,45 @@ async def create_release_candidate(payload: RCReport):
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.post("/release-candidates/build", status_code=status.HTTP_201_CREATED)
+async def build_release_candidate(payload: RCBuildRequest):
+    try:
+        return await build_rc_report(await get_database(), payload)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post("/promotions", status_code=status.HTTP_201_CREATED)
 async def create_promotion(payload: PromotionRecord):
     db = await get_database()
     try:
         return await save_promotion(db, payload)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/mutants/requests", status_code=status.HTTP_201_CREATED)
+async def create_mutant_request(payload: MutantRequest):
+    try:
+        return await save_mutant_request(await get_database(), payload)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/mutants/results", status_code=status.HTTP_201_CREATED)
+async def create_mutant_result(payload: MutantResult):
+    try:
+        return await save_mutant_result(await get_database(), payload)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/reviews/{review_id}/decisions", status_code=status.HTTP_201_CREATED)
+async def decide_review(review_id: str, payload: ReviewDecision):
+    if review_id != payload.review_id:
+        raise HTTPException(422, "path review_id does not match payload")
+    try:
+        return await resolve_review(await get_database(), payload)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -197,7 +245,15 @@ async def export_test_code(submission_id: str):
 
 @router.post("/results", status_code=status.HTTP_202_ACCEPTED)
 async def ingest_result(payload: IFARLABResult):
-    return await traceability_service.ingest_result(payload)
+    if not get_settings().allow_http_result_ingest:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "HTTP result ingestion is disabled; deliver a signed package to the SSH inbox",
+        )
+    try:
+        return await traceability_service.ingest_result(payload)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/inbox/{package_name}/import", status_code=status.HTTP_202_ACCEPTED)
@@ -224,16 +280,24 @@ async def traceability_report():
     return await traceability_service.dashboard()
 
 
+@router.get("/reverse-queries")
+async def reverse_traceability_queries():
+    return await traceability_service.reverse_queries()
+
+
 @router.get("/coverage/report")
 async def kpi_3_4_report(
     requirements_set_version: Optional[str] = None, project_id: Optional[str] = None,
     session_id: Optional[str] = None, environment_id: Optional[str] = None,
     digital_twin_id: Optional[str] = None,
+    sut_version: Optional[str] = None,
+    verification_level: Optional[str] = Query(None, pattern="^(twin|hil|physical)$"),
 ):
     """Machine-readable KPI 3.4 report from the dashboard's calculation service."""
     return await coverage_service.calculate(
         requirements_set_version=requirements_set_version, project_id=project_id,
         session_id=session_id, environment_id=environment_id, digital_twin_id=digital_twin_id,
+        sut_version=sut_version, verification_level=verification_level,
     )
 
 
@@ -244,6 +308,8 @@ async def requirement_coverage(
     session_id: Optional[str] = None,
     environment_id: Optional[str] = None,
     digital_twin_id: Optional[str] = None,
+    sut_version: Optional[str] = None,
+    verification_level: Optional[str] = Query(None, pattern="^(twin|hil|physical)$"),
     requirement_type: Optional[str] = Query(None, pattern="^(functional|non_functional|unclassified)$"),
     coverage_stage: Optional[str] = Query(None, pattern="^(unmapped|mapped|generated|executable|executed_dt|verified_dt)$"),
     verification_state: Optional[str] = Query(None, pattern="^(PASS|FAIL|NOT_VERIFIED|NOT_COVERED|STALE)$"),
@@ -251,6 +317,7 @@ async def requirement_coverage(
     result = await coverage_service.calculate(
         requirements_set_version=requirements_set_version, project_id=project_id,
         session_id=session_id, environment_id=environment_id, digital_twin_id=digital_twin_id,
+        sut_version=sut_version, verification_level=verification_level,
     )
     if requirement_type or coverage_stage or verification_state:
         result["requirements"] = [

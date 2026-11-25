@@ -1,6 +1,7 @@
 """Safe importer for IFARLAB result packages delivered into the SSH inbox."""
 
 import json
+import hashlib
 import re
 import tarfile
 import xml.etree.ElementTree as ET
@@ -67,12 +68,15 @@ def read_result_package(package_name: str) -> IFARLABResult:
         if result_member.size > MAX_RESULT_BYTES:
             raise ResultPackageError("result.json exceeds the size limit")
         json_payloads = {}
+        member_hashes: Dict[str, str] = {}
         for name in ("result.json", "verdict.json", "metrics.json"):
             stream = archive.extractfile(by_name[name])
             if stream is None:
                 raise ResultPackageError(f"{name} could not be read")
             try:
-                json_payloads[name] = json.loads(stream.read().decode("utf-8"))
+                raw_member = stream.read()
+                member_hashes[name] = hashlib.sha256(raw_member).hexdigest()
+                json_payloads[name] = json.loads(raw_member.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ResultPackageError(f"{name} must be valid UTF-8 JSON") from exc
         for name in ("junit.xml", "coverage.xml"):
@@ -82,7 +86,9 @@ def read_result_package(package_name: str) -> IFARLABResult:
             if stream is None:
                 raise ResultPackageError(f"{name} could not be read")
             try:
-                ET.fromstring(stream.read())
+                raw_member = stream.read()
+                member_hashes[name] = hashlib.sha256(raw_member).hexdigest()
+                ET.fromstring(raw_member)
             except ET.ParseError as exc:
                 raise ResultPackageError(f"{name} must be well-formed XML") from exc
         payload: Dict[str, Any] = json_payloads["result.json"]
@@ -90,4 +96,26 @@ def read_result_package(package_name: str) -> IFARLABResult:
     match = PACKAGE_PATTERN.fullmatch(package_name)
     if payload.get("submission_id") != match.group("submission") or payload.get("run_id") != match.group("run"):
         raise ResultPackageError("package name identifiers do not match result.json")
+    for document_name in ("verdict.json", "metrics.json"):
+        document = json_payloads[document_name]
+        if not isinstance(document, dict):
+            raise ResultPackageError(f"{document_name} root must be a JSON object")
+        for field in ("submission_id", "run_id", "requirements_set_version", "code_sha256", "contract_sha256"):
+            if field in document and document[field] != payload.get(field):
+                raise ResultPackageError(f"{document_name}.{field} does not match result.json")
+    inputs = json_payloads["verdict.json"].get("inputs", {})
+    if inputs is not None and not isinstance(inputs, dict):
+        raise ResultPackageError("verdict.json.inputs must be an object")
+    for member_name, declared in (inputs or {}).items():
+        if member_name not in member_hashes:
+            continue
+        declared_hash = declared.get("sha256") if isinstance(declared, dict) else declared
+        if declared_hash != member_hashes[member_name]:
+            raise ResultPackageError(f"verdict.json.inputs hash mismatch for {member_name}")
+    payload["package_manifest"] = {
+        "package_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "members": member_hashes,
+    }
+    payload["package_verdict"] = json_payloads["verdict.json"]
+    payload["package_metrics"] = json_payloads["metrics.json"]
     return IFARLABResult(**payload)

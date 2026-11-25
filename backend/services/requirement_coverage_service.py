@@ -80,6 +80,8 @@ def calculate_requirement_coverage(
     session_id: Optional[str] = None,
     environment_id: Optional[str] = None,
     digital_twin_id: Optional[str] = None,
+    sut_version: Optional[str] = None,
+    verification_level: Optional[str] = None,
 ) -> Dict[str, Any]:
     evaluated_at = datetime.now(timezone.utc).isoformat()
     if not requirement_set:
@@ -113,6 +115,7 @@ def calculate_requirement_coverage(
             manifest.get("requirements_set_version") == set_version
             and (not project_id or manifest.get("project_id") == project_id)
             and (not session_id or manifest.get("session_id") == session_id or item.get("source_session_id") == session_id)
+            and (not sut_version or (manifest.get("sut") or {}).get("version") == sut_version)
         )
 
     scoped_submissions = [item for item in submissions if submission_in_scope(item)]
@@ -122,6 +125,8 @@ def calculate_requirement_coverage(
     for delivery in deliveries:
         payload = delivery.get("payload", {})
         if delivery.get("link_status") != "linked" or payload.get("requirements_set_version") != set_version:
+            continue
+        if verification_level and payload.get("verification_level", "twin") != verification_level:
             continue
         environment = payload.get("environment", {})
         if environment_id and environment.get("environment_id") != environment_id:
@@ -161,9 +166,11 @@ def calculate_requirement_coverage(
                     "submission_id": manifest.get("submission_id"),
                     "submission_revision": manifest.get("revision", 1),
                     "code_sha256": manifest.get("code_sha256"),
-                    "mapped": bool(scenario_id and test.get("test_case_id") and version_valid),
-                    "generated": bool(scenario_id and version_valid and generated),
-                    "executable": bool(scenario_id and version_valid and executable),
+                    "sut_version": (manifest.get("sut") or {}).get("version"),
+                    # Inspection scenarios are deferred; motion QCRs do not require scenario_id.
+                    "mapped": bool(test.get("test_case_id") and version_valid),
+                    "generated": bool(version_valid and generated),
+                    "executable": bool(version_valid and executable),
                     "executions": [],
                     "stale": not version_valid,
                 }
@@ -174,6 +181,11 @@ def calculate_requirement_coverage(
                     environment = (delivery or {}).get("payload", {}).get("environment", {})
                     dt_eligible, exclusions = _environment_qualifies(environment)
                     final_verdict = str(verdict.get("final_verdict", "INCONCLUSIVE")).upper()
+                    requirement_verdict = (
+                        "NOT_VERIFIED"
+                        if final_verdict == "FAIL" and verdict.get("fail_cause") not in {None, "sut"}
+                        else final_verdict
+                    )
                     evidence = verdict.get("evidence", [])
                     if not chain["executable"]:
                         exclusions.append("test_code_not_executable_ready")
@@ -196,6 +208,7 @@ def calculate_requirement_coverage(
                     chain["executions"].append({
                         "verdict_id": verdict.get("verdict_id"), "run_id": run_id,
                         "final_verdict": final_verdict, "execution_validity": verdict.get("execution_validity"),
+                        "requirement_verdict": requirement_verdict,
                         "environment": environment, "evidence": evidence,
                         "dt_eligible": execution_valid,
                         "exclusions": list(dict.fromkeys(exclusions)),
@@ -207,7 +220,7 @@ def calculate_requirement_coverage(
     for requirement in requirements:
         req_chains = chains.get(requirement["id"], [])
         valid_executions = [execution for chain in req_chains for execution in chain["executions"] if execution["dt_eligible"]]
-        executed_verdicts = [execution["final_verdict"] for execution in valid_executions]
+        executed_verdicts = [execution["requirement_verdict"] for execution in valid_executions]
         mapped = any(chain["mapped"] for chain in req_chains)
         generated = any(chain["generated"] for chain in req_chains)
         executable = any(chain["executable"] for chain in req_chains)
@@ -242,6 +255,21 @@ def calculate_requirement_coverage(
         "functional": _metric(sum(row["verified_dt"] for row in typed["functional"]), len(typed["functional"]), FR_TARGET),
         "non_functional": _metric(sum(row["verified_dt"] for row in typed["non_functional"]), len(typed["non_functional"]), NFR_TARGET),
     }
+    total = {
+        "coverage": _metric(sum(row["executed_dt"] for row in rows), len(rows), 100.0),
+        "verification": _metric(sum(row["verified_dt"] for row in rows), len(rows), 100.0),
+        "acceptance_criteria": _metric(
+            sum(len(row.get("acceptance", [])) for row in rows if row["executed_dt"]),
+            sum(len(row.get("acceptance", [])) for row in rows),
+            100.0,
+        ),
+    }
+    mandatory_uncovered = [row["id"] for row in rows if row.get("priority") == "mandatory" and not row["mapped"]]
+    mandatory_not_pass = [row["id"] for row in rows if row.get("priority") == "mandatory" and row["verification_state"] != "PASS"]
+    targets_met = all(
+        metric["assessment"] == "achieved"
+        for metric in (kpi["functional"], kpi["non_functional"])
+    )
     return {
         "engine_version": COVERAGE_ENGINE_VERSION,
         "evaluation_timestamp": evaluated_at,
@@ -251,9 +279,19 @@ def calculate_requirement_coverage(
             "requirement_set_sha256": requirement_set.get("content_sha256"),
             "project_id": project_id, "session_id": session_id,
             "environment_id": environment_id, "digital_twin_id": digital_twin_id,
+            "sut_version": sut_version, "verification_level": verification_level,
             "contract_sha256": contract_sha256(),
         },
-        "kpi": kpi, "verified": verified,
+        "kpi": kpi, "verified": verified, "total": total,
+        "all_requirements_met": targets_met,
+        "generation_gate": {"complete": not mandatory_uncovered, "mandatory_without_test": mandatory_uncovered},
+        "release_candidate_gate": {
+            "coverage_100_percent": total["coverage"]["percentage"] == 100.0,
+            "all_mandatory_pass": not mandatory_not_pass,
+            "mandatory_not_pass": mandatory_not_pass,
+            "fidelity": "out_of_scope_not_passed",
+            "eligible": False,
+        },
         "stages": {name: dict(values) for name, values in stage_counts.items()},
         "summary": {
             "total_applicable": len(rows),

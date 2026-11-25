@@ -50,6 +50,12 @@ def assert_llm_data_use_allowed(
     for entry in policy.get("approvals", []):
         if not entry.get("active", False):
             continue
+        if entry.get("status") != "approved":
+            continue
+        if not entry.get("approved_by") or not entry.get("approved_at"):
+            continue
+        if "pending" in str(entry.get("approved_by", "")).lower():
+            continue
         if entry.get("provider", "").strip().lower() != normalized_provider:
             continue
         approved_model = entry.get("model")

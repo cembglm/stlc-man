@@ -250,6 +250,8 @@ async def startup_event():
         initialize_application()
     else:
         logger.info("Prompt initialization skipped by configuration")
+    from core.database import ensure_traceability_indexes
+    await ensure_traceability_indexes()
 
 
 @app.on_event("shutdown")

@@ -5,6 +5,7 @@
     "MOTION": "motion and reachability",
     "SAFETY": "safety constraints",
     "PERF": "performance and timing",
-    "INTEG": "integration behavior"
+    "INTEG": "integration behavior",
+    "REF": "reference and golden-run behavior"
   }
 }

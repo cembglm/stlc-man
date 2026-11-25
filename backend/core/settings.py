@@ -80,6 +80,8 @@ class Settings:
     monitoring_enabled: bool
     monitoring_event_retention_days: int
     ifarlab_inbox_dir: Path
+    ifarlab_contract_bundle_path: Path
+    allow_http_result_ingest: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -178,7 +180,14 @@ class Settings:
             ),
             monitoring_enabled=_as_bool("MONITORING_ENABLED", True),
             monitoring_event_retention_days=_as_int("MONITORING_EVENT_RETENTION_DAYS", 30),
-            ifarlab_inbox_dir=Path(os.getenv("IFARLAB_INBOX_DIR", "ifarlab_inbox")),
+            ifarlab_inbox_dir=Path(os.getenv(
+                "IFARLAB_INBOX_DIR", str(Path(__file__).resolve().parents[2] / "ifarlab_inbox")
+            )),
+            ifarlab_contract_bundle_path=Path(os.getenv(
+                "IFARLAB_CONTRACT_BUNDLE_PATH",
+                str(Path(__file__).resolve().parents[2] / "config" / "ifarlab_contracts" / "ifarlab-stlc-contracts-1.2.0.tar"),
+            )),
+            allow_http_result_ingest=_as_bool("ALLOW_HTTP_RESULT_INGEST", False),
         )
 
 

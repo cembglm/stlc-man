@@ -55,12 +55,12 @@ class AcceptanceCriterion(BaseModel):
 
 
 class Requirement(BaseModel):
-    id: str = Field(..., min_length=1, pattern=r"^(?:(?:FR|NFR|REQ)-[A-Z0-9][A-Z0-9_.-]*|[A-Z][A-Z0-9_]*-[0-9]{3})$")
+    id: str = Field(..., min_length=1, pattern=r"^(?:(?:FR|NFR|REQ)-[A-Z0-9][A-Z0-9_.-]*|QCR-[0-9]{3})$")
     version: str = Field(..., min_length=1)
     type: RequirementType
     text: str = Field(..., min_length=1)
     acceptance: List[AcceptanceCriterion] = Field(default_factory=list)
-    priority: Optional[str] = None
+    priority: Optional[Literal["mandatory", "desired"]] = None
     expected_outcome: Optional[str] = Field(None, pattern=r"^(reach|reject|accept)$")
     expected_reason: Optional[str] = None
     oracle: Dict[str, Any] = Field(default_factory=dict)
@@ -78,6 +78,8 @@ class Requirement(BaseModel):
 
     @model_validator(mode="after")
     def flag_unmeasurable(self):
+        if self.id.startswith("QCR-") and self.priority is None:
+            raise ValueError("QCR priority is required and must be mandatory or desired")
         self.acceptance_review_required = bool(self.acceptance_review_required or not self.acceptance)
         return self
 
@@ -98,6 +100,16 @@ class RequirementSet(BaseModel):
             raise ValueError("requirement identifiers must be unique")
         return value
 
+    @model_validator(mode="after")
+    def qcr_set_contract(self):
+        if self.requirements_set_version.startswith("QCR-"):
+            if not __import__("re").fullmatch(r"QCR-[0-9]{4}-[0-9]{2}-[0-9]{2}", self.requirements_set_version):
+                raise ValueError("QCR requirements_set_version must use QCR-YYYY-MM-DD")
+            invalid = [item.id for item in self.requirements if not item.id.startswith("QCR-")]
+            if invalid:
+                raise ValueError("QCR sets may contain only QCR-NNN identifiers")
+        return self
+
 
 class GenerationProvenance(BaseModel):
     provider: Optional[str] = None
@@ -106,7 +118,6 @@ class GenerationProvenance(BaseModel):
     temperature: Optional[Decimal] = None
     prompt_sha256: Optional[str] = Field(None, pattern=r"^[a-f0-9]{64}$")
     generated_at: datetime
-    attempts: int = Field(1, ge=1)
 
 
 class CodeQuality(BaseModel):
@@ -134,6 +145,7 @@ class ManifestTest(BaseModel):
 class ManifestSUT(BaseModel):
     sut_id: str = Field(..., min_length=1)
     version: str = Field(..., min_length=1)
+    commit: str = Field(..., min_length=1)
     source_sha256: str = Field(..., pattern=r"^[a-f0-9]{64}$")
 
 
@@ -220,10 +232,14 @@ class IFARLABResult(BaseModel):
     contract_sha256: str = Field(..., pattern=r"^[a-f0-9]{64}$")
     executed_at: datetime
     external_system: str = "IFARLAB"
+    verification_level: Literal["twin", "hil", "physical"] = "twin"
     environment: ExecutionEnvironment = Field(default_factory=ExecutionEnvironment)
     submission_status: Optional[str] = None
     code_quality: Optional[CodeQuality] = None
     test_results: List[ExternalTestResult]
+    package_manifest: Optional[Dict[str, Any]] = None
+    package_verdict: Optional[Dict[str, Any]] = None
+    package_metrics: Optional[Dict[str, Any]] = None
     model_config = {"json_schema_extra": {"examples": [{
         "schema_version": "1.0", "submission_id": "S-2026-11-18-0042", "run_id": "R-20261118-0197",
         "requirements_set_version": "2026-11-18", "code_sha256": "a" * 64, "contract_sha256": "b" * 64,
